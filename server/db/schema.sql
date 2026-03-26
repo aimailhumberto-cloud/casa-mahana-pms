@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS planes_tarifa (
   extras_disponibles TEXT,                -- JSON array: ["Spa $25", "Tour $15"]
   tipos_aplicables TEXT,                  -- JSON array of room types: ["Familiar","Doble"] or ["Bohío","Salón"]
   imagen TEXT,                            -- URL or path to product image
+  visible_web INTEGER DEFAULT 0,          -- 1 = visible in public booking widget
   activo INTEGER DEFAULT 1,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))

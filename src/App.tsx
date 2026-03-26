@@ -12,6 +12,7 @@ import AdminHabitaciones from './pages/AdminHabitaciones';
 import Calendario from './pages/Calendario';
 import Saldos from './pages/Saldos';
 import Productos from './pages/Productos';
+import BookingWidget from './pages/BookingWidget';
 
 function App() {
   const [user, setUser] = useState<any>(null);
@@ -34,6 +35,9 @@ function App() {
   };
 
   const handleLogout = () => { clearToken(); setUser(null); navigate('/login'); };
+
+  // Public route: /reservar (no auth needed)
+  if (location.pathname === '/reservar') return <BookingWidget />;
 
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-gray-50"><div className="animate-pulse text-xl text-gray-400">Cargando...</div></div>;
   if (!user) return <Login onLogin={handleLogin} />;

@@ -77,40 +77,40 @@ function getDb() {
     const planCount = db.prepare('SELECT COUNT(*) as c FROM planes_tarifa').get();
     if (planCount.c === 0) {
       const insertPlan = db.prepare(`INSERT INTO planes_tarifa 
-        (codigo, nombre, descripcion, categoria, precio_adulto_noche, precio_menor_noche, precio_mascota_noche, incluye, horario, extras_disponibles, tipos_aplicables) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+        (codigo, nombre, descripcion, categoria, precio_adulto_noche, precio_menor_noche, precio_mascota_noche, incluye, horario, extras_disponibles, tipos_aplicables, visible_web) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
       // Estadía
       insertPlan.run('oferta_simple', 'Oferta Simple', 'Solo habitación, sin comidas', 'Estadía', 50, 25, 15,
         JSON.stringify(['Habitación', 'Estacionamiento', 'WiFi']),
         'Check-in 3:00 PM / Check-out 11:00 AM',
         JSON.stringify(['Desayuno $12', 'Almuerzo $15', 'Cena $18', 'Spa $25']),
-        JSON.stringify(['Familiar', 'Doble', 'Estándar', 'Camping']));
+        JSON.stringify(['Familiar', 'Doble', 'Estándar', 'Camping']), 0);
       insertPlan.run('mahana_exp', 'Mahana Experience', 'Habitación + Desayuno buffet', 'Estadía', 70, 35, 15,
         JSON.stringify(['Habitación', 'Desayuno Buffet', 'Piscina', 'WiFi', 'Estacionamiento']),
         'Check-in 3:00 PM / Check-out 11:00 AM / Desayuno 7-10 AM',
         JSON.stringify(['Almuerzo $15', 'Cena $18', 'Spa $25', 'Tour $20']),
-        JSON.stringify(['Familiar', 'Doble', 'Estándar']));
+        JSON.stringify(['Familiar', 'Doble', 'Estándar']), 1);
       insertPlan.run('todo_incluido', 'Todo Incluido', 'Habitación + 3 comidas completas', 'Estadía', 90, 45, 15,
         JSON.stringify(['Habitación', 'Desayuno Buffet', 'Almuerzo', 'Cena', 'Piscina', 'WiFi', 'Estacionamiento', 'Snacks']),
         'Check-in 3:00 PM / Check-out 11:00 AM / Desayuno 7-10 AM / Almuerzo 12-3 PM / Cena 6-9 PM',
         JSON.stringify(['Spa $25', 'Tour $20', 'Masaje $30']),
-        JSON.stringify(['Familiar', 'Doble', 'Estándar']));
+        JSON.stringify(['Familiar', 'Doble', 'Estándar']), 1);
       insertPlan.run('open_bar', 'Open Bar Premium', 'Habitación + comidas + open bar ilimitado', 'Estadía', 120, 60, 15,
         JSON.stringify(['Habitación', 'Desayuno Buffet', 'Almuerzo', 'Cena', 'Open Bar', 'Piscina', 'WiFi', 'Estacionamiento', 'Snacks', 'Room Service']),
         'Check-in 3:00 PM / Check-out 11:00 AM / Bar 10 AM - 12 AM',
         JSON.stringify(['Spa $25', 'Tour $20']),
-        JSON.stringify(['Familiar', 'Doble']));
+        JSON.stringify(['Familiar', 'Doble']), 0);
       // Pasadía
       insertPlan.run('pasadia_entrada', 'Pasadía Entrada', 'Solo acceso al área de piscina y playa', 'Pasadía', 5.50, 3, 0,
         JSON.stringify(['Acceso Piscina', 'Acceso Playa', 'Estacionamiento']),
         '9:00 AM - 5:00 PM',
         JSON.stringify(['Almuerzo $12', 'Cerveza $3', 'Cóctel $5', 'Bohío $15']),
-        JSON.stringify(['Bohío', 'Salón', 'Restaurante']));
+        JSON.stringify(['Bohío', 'Salón', 'Restaurante']), 0);
       insertPlan.run('pasadia_comidas', 'Pasadía Comidas + Semi Open Bar', 'Acceso + comida + bebidas incluidas', 'Pasadía', 35, 20, 0,
         JSON.stringify(['Acceso Piscina', 'Acceso Playa', 'Almuerzo', 'Semi Open Bar (cerveza, ron, vodka)', 'Estacionamiento']),
         '9:00 AM - 5:00 PM / Almuerzo 12-2 PM / Bar 10 AM - 4 PM',
         JSON.stringify(['Cóctel Premium $5', 'Bohío $10', 'Masaje $25']),
-        JSON.stringify(['Bohío', 'Salón', 'Restaurante']));
+        JSON.stringify(['Bohío', 'Salón', 'Restaurante']), 0);
       console.log('✅ Seeded planes (Estadía + Pasadía) con campos ricos');
     } else {
       // Migration: add new product columns if missing
@@ -135,6 +135,11 @@ function getDb() {
         updatePlan.run(JSON.stringify(['Piscina', 'Playa', 'Almuerzo', 'Semi Open Bar']), '9AM - 5PM', JSON.stringify(['Cóctel Premium $5']), JSON.stringify(['Bohío','Salón','Restaurante']), 'pasadia_comidas');
         console.log('✅ Migrated planes: campos ricos (incluye, horario, extras, tipos)');
       }
+      if (!planCols.includes('visible_web')) {
+        db.exec("ALTER TABLE planes_tarifa ADD COLUMN visible_web INTEGER DEFAULT 0");
+        db.exec("UPDATE planes_tarifa SET visible_web = 1 WHERE codigo IN ('mahana_exp', 'todo_incluido')");
+        console.log('✅ Migrated: visible_web (mahana_exp + todo_incluido enabled)');
+      }
       // Seed Pasadía plans if missing
       const hasPasadia = db.prepare("SELECT COUNT(*) as c FROM planes_tarifa WHERE codigo LIKE 'pasadia%'").get().c;
       if (hasPasadia === 0) {
@@ -152,6 +157,9 @@ function getDb() {
       insertConfig.run('deposito_sugerido_pct', '50', 'Depósito sugerido (%)');
       insertConfig.run('moneda', 'USD', 'Moneda');
       insertConfig.run('nombre_propiedad', 'Casa Mahana', 'Nombre del hotel');
+      insertConfig.run('paypal_client_id', '', 'PayPal Client ID');
+      insertConfig.run('paypal_secret', '', 'PayPal Secret');
+      insertConfig.run('paypal_mode', 'sandbox', 'PayPal mode: sandbox o live');
       console.log('✅ Seeded config');
     }
 
