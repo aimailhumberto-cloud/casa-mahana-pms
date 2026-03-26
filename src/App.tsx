@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, Link, useNavigate, useLocation } from 'react-router-dom';
 import { api, setToken, clearToken, isLoggedIn } from './api/client';
-import { Hotel, CalendarDays, BedDouble, DollarSign, LogOut, Menu, X, LayoutGrid, Settings, Package } from 'lucide-react';
+import { Hotel, CalendarDays, BedDouble, DollarSign, LogOut, Menu, X, LayoutGrid, Settings, Package, ExternalLink } from 'lucide-react';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Reservas from './pages/Reservas';
@@ -85,6 +85,14 @@ function App() {
                 {n.label}
               </Link>
             ))}
+            {/* Vista Cliente separator + link */}
+            <div className="border-t border-gray-100 mt-3 pt-3">
+              <a href="/reservar" target="_blank" rel="noopener"
+                className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 transition border border-amber-200">
+                <ExternalLink size={18} />
+                Vista Cliente
+              </a>
+            </div>
           </nav>
         </aside>
 

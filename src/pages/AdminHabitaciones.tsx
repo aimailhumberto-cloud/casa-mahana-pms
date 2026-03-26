@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api } from '../api/client';
-import { Plus, Edit2, Trash2, X, Save, BedDouble, Users } from 'lucide-react';
+import { Plus, Edit2, Trash2, X, Save, BedDouble, Users, Camera, Upload, ExternalLink } from 'lucide-react';
 
 const emptyRoom = {
   nombre: '', tipo: '', capacidad_min: 1, capacidad_max: 2,
@@ -17,6 +17,8 @@ export default function AdminHabitaciones() {
   const [customTipo, setCustomTipo] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [tipoFotos, setTipoFotos] = useState<Record<string, string>>({});
+  const [uploadingTipo, setUploadingTipo] = useState('');
 
   const load = () => {
     setLoading(true);
@@ -27,6 +29,8 @@ export default function AdminHabitaciones() {
       setRooms(r.data);
       setTipos(t.data);
     }).finally(() => setLoading(false));
+    // Load room type photos
+    api.get('/habitaciones/tipo-fotos').then(r => setTipoFotos(r.data)).catch(() => {});
   };
 
   useEffect(() => { load(); }, []);
@@ -128,8 +132,39 @@ export default function AdminHabitaciones() {
       {grouped.map(([tipo, typeRooms]) => (
         <div key={tipo} className="mb-8">
           <div className="flex items-center gap-3 mb-3">
-            <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">{tipo}</h2>
-            <span className="text-xs text-gray-300">({typeRooms.length})</span>
+            {/* Room type photo */}
+            <div className="relative group">
+              {tipoFotos[tipo] ? (
+                <div className="w-16 h-16 rounded-xl overflow-hidden">
+                  <img src={tipoFotos[tipo]} alt={tipo} className="w-full h-full object-cover" />
+                </div>
+              ) : (
+                <div className="w-16 h-16 rounded-xl bg-gray-100 flex items-center justify-center">
+                  <Camera size={20} className="text-gray-300" />
+                </div>
+              )}
+              <label className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-xl opacity-0 group-hover:opacity-100 cursor-pointer transition">
+                <Upload size={16} className="text-white" />
+                <input type="file" accept="image/*" className="hidden" disabled={uploadingTipo === tipo}
+                  onChange={async (e) => {
+                    if (!e.target.files?.[0]) return;
+                    setUploadingTipo(tipo);
+                    try {
+                      const fd = new FormData();
+                      fd.append('foto', e.target.files[0]);
+                      const resp = await api.post(`/habitaciones/tipo/${tipo}/foto`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+                      setTipoFotos(prev => ({ ...prev, [tipo]: resp.data.imagen }));
+                      setSuccess(`Foto de ${tipo} actualizada ✓`);
+                      setTimeout(() => setSuccess(''), 3000);
+                    } catch { setError('Error subiendo foto'); setTimeout(() => setError(''), 5000); }
+                    setUploadingTipo('');
+                  }} />
+              </label>
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">{tipo}</h2>
+              <span className="text-xs text-gray-300">{typeRooms.length} habitacion{typeRooms.length > 1 ? 'es' : ''}</span>
+            </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
             {typeRooms.map((room: any) => (

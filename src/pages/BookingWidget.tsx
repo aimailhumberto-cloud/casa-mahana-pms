@@ -76,9 +76,11 @@ export default function BookingWidget() {
   const [guest, setGuest] = useState({ nombre: '', apellido: '', email: '', whatsapp: '', nacionalidad: '' })
   const [paypalConfig, setPaypalConfig] = useState<{ paypal_enabled: boolean; paypal_client_id: string | null; paypal_mode: string }>({ paypal_enabled: false, paypal_client_id: null, paypal_mode: 'sandbox' })
   const [result, setResult] = useState<{ reserva_id?: number; mensaje?: string } | null>(null)
+  const [tipoFotos, setTipoFotos] = useState<Record<string, string>>({})
 
   useEffect(() => {
     fetch(`${API}/paypal-config`).then(r => r.json()).then(d => { if (d.success) setPaypalConfig(d.data) })
+    fetch(`${API}/tipo-fotos`).then(r => r.json()).then(d => { if (d.success) setTipoFotos(d.data) })
   }, [])
 
   const today = new Date().toISOString().split('T')[0]
@@ -136,7 +138,7 @@ export default function BookingWidget() {
 
   const isGuestValid = guest.nombre && guest.email && guest.apellido
   const montoPagar = cotizacion ? (pagoTipo === 'total' ? cotizacion.monto_total : cotizacion.deposito_minimo) : 0
-  const planImage = selectedPlan?.imagen || defaultRoomImages[selectedType] || defaultRoomImages['Familiar']
+  const planImage = selectedPlan?.imagen || tipoFotos[selectedType] || defaultRoomImages[selectedType] || defaultRoomImages['Familiar']
 
   const stepLabels = ['Fechas', 'Habitación', 'Tarifa', 'Resumen', 'Pago', 'Confirmado']
 
@@ -240,7 +242,7 @@ export default function BookingWidget() {
             <div className="space-y-4">
               {roomTypes.map(rt => {
                 const Icon = roomIcons[rt.tipo] || Bed
-                const img = defaultRoomImages[rt.tipo] || defaultRoomImages['Familiar']
+                const img = tipoFotos[rt.tipo] || defaultRoomImages[rt.tipo] || defaultRoomImages['Familiar']
                 return (
                   <button key={rt.tipo} onClick={() => selectRoomType(rt.tipo)}
                     className="w-full rounded-2xl border border-gray-100 hover:border-amber-300 hover:shadow-lg transition-all duration-200 text-left overflow-hidden group">

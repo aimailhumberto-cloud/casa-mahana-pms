@@ -329,6 +329,44 @@ app.patch('/api/v1/habitaciones/masiva', requireAuth, (req, res) => {
   } catch (e) { err(res, 'SERVER_ERROR', 'Error en acción masiva', 500); }
 });
 
+// ── Room Type Photos ──
+// Upload photo for a room type (stored in config_hotel)
+app.post('/api/v1/habitaciones/tipo/:tipo/foto', requireAuth, requireRole('admin'), upload.single('foto'), (req, res) => {
+  try {
+    if (!req.file) return err(res, 'VALIDATION_ERROR', 'Archivo de imagen requerido');
+    const tipo = req.params.tipo;
+    const imageUrl = `/uploads/${req.file.filename}`;
+    const db = getDb();
+    const key = `foto_tipo_${tipo}`;
+    const existing = db.prepare("SELECT id FROM config_hotel WHERE clave = ?").get(key);
+    if (existing) { db.prepare("UPDATE config_hotel SET valor = ? WHERE clave = ?").run(imageUrl, key); }
+    else { db.prepare("INSERT INTO config_hotel (clave, valor, descripcion) VALUES (?, ?, ?)").run(key, imageUrl, `Foto tipo ${tipo}`); }
+    ok(res, { tipo, imagen: imageUrl });
+  } catch (e) { console.error(e); err(res, 'SERVER_ERROR', 'Error subiendo foto', 500); }
+});
+
+// Get all room type photos
+app.get('/api/v1/habitaciones/tipo-fotos', requireAuth, (req, res) => {
+  try {
+    const db = getDb();
+    const rows = db.prepare("SELECT clave, valor FROM config_hotel WHERE clave LIKE 'foto_tipo_%'").all();
+    const fotos = {};
+    for (const r of rows) { fotos[r.clave.replace('foto_tipo_', '')] = r.valor; }
+    ok(res, fotos);
+  } catch (e) { err(res, 'SERVER_ERROR', 'Error obteniendo fotos', 500); }
+});
+
+// Public room type photos (for booking widget)
+app.get('/api/v1/public/tipo-fotos', (req, res) => {
+  try {
+    const db = getDb();
+    const rows = db.prepare("SELECT clave, valor FROM config_hotel WHERE clave LIKE 'foto_tipo_%'").all();
+    const fotos = {};
+    for (const r of rows) { fotos[r.clave.replace('foto_tipo_', '')] = r.valor; }
+    ok(res, fotos);
+  } catch (e) { err(res, 'SERVER_ERROR', 'Error obteniendo fotos', 500); }
+});
+
 // ══════════════════════════════════════
 // PLANES DE TARIFA
 // ══════════════════════════════════════
