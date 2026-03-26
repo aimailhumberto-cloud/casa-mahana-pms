@@ -169,6 +169,32 @@ CREATE TABLE IF NOT EXISTS documentos_reserva (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+-- ═══ API KEYS (para agentes AI) ═══
+CREATE TABLE IF NOT EXISTS api_keys (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  key_hash TEXT NOT NULL UNIQUE,       -- bcrypt hash del API key
+  key_preview TEXT NOT NULL,           -- últimos 8 chars para identificar: "...abc12345"
+  nombre TEXT NOT NULL,                -- "BEE Smart Agent", "WhatsApp Bot"
+  permisos TEXT DEFAULT 'read',        -- "read", "write", "admin"
+  rate_limit INTEGER DEFAULT 100,      -- requests por minuto
+  activo INTEGER DEFAULT 1,
+  last_used TEXT,
+  request_count INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- ═══ WEBHOOKS ═══
+CREATE TABLE IF NOT EXISTS webhooks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  url TEXT NOT NULL,                    -- "https://example.com/webhook"
+  eventos TEXT NOT NULL,                -- JSON array: ["reserva.creada", "pago.registrado"]
+  secret TEXT,                         -- HMAC signing secret
+  activo INTEGER DEFAULT 1,
+  last_triggered TEXT,
+  fail_count INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
 -- ═══ ÍNDICES ═══
 CREATE INDEX IF NOT EXISTS idx_reservas_checkin ON reservas_hotel(check_in);
 CREATE INDEX IF NOT EXISTS idx_reservas_checkout ON reservas_hotel(check_out);
@@ -177,3 +203,5 @@ CREATE INDEX IF NOT EXISTS idx_reservas_habitacion ON reservas_hotel(habitacion_
 CREATE INDEX IF NOT EXISTS idx_documentos_reserva ON documentos_reserva(reserva_id);
 CREATE INDEX IF NOT EXISTS idx_folio_reserva ON folio_hotel(reserva_id);
 CREATE INDEX IF NOT EXISTS idx_usuarios_email ON usuarios(email);
+CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
+

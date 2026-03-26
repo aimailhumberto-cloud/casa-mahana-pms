@@ -4,7 +4,8 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { getDb, findAll, findById, create, update, remove } = require('./db/database');
-const { verifyPassword, hashPassword, generateToken, requireAuth, requireRole } = require('./auth');
+const { verifyPassword, hashPassword, generateToken, requireAuth, requireRole, requireWrite, generateApiKey, hashApiKey } = require('./auth');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3201;
@@ -1111,6 +1112,287 @@ app.get('/api/v1/hotel/config', requireAuth, (req, res) => {
     for (const c of config) obj[c.clave] = c.valor;
     ok(res, obj);
   } catch (e) { err(res, 'SERVER_ERROR', 'Error obteniendo config', 500); }
+});
+
+// ══════════════════════════════════════
+// API KEYS (Fase 5)
+// ══════════════════════════════════════
+
+// Create API key (admin only)
+app.post('/api/v1/api-keys', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const { nombre, permisos = 'read', rate_limit = 100 } = req.body;
+    if (!nombre) return err(res, 'VALIDATION_ERROR', 'nombre requerido');
+    if (!['read', 'write', 'admin'].includes(permisos)) return err(res, 'VALIDATION_ERROR', 'permisos debe ser: read, write, admin');
+    
+    const rawKey = generateApiKey();
+    const keyHash = hashApiKey(rawKey);
+    const keyPreview = '...' + rawKey.slice(-8);
+    
+    const db = getDb();
+    db.prepare('INSERT INTO api_keys (key_hash, key_preview, nombre, permisos, rate_limit) VALUES (?, ?, ?, ?, ?)')
+      .run(keyHash, keyPreview, nombre, permisos, rate_limit);
+    
+    const created = db.prepare('SELECT id, key_preview, nombre, permisos, rate_limit, activo, created_at FROM api_keys WHERE key_hash = ?').get(keyHash);
+    
+    ok(res, {
+      ...created,
+      api_key: rawKey,  // Only returned once at creation!
+      warning: '⚠️ Guarda esta API key. No se puede recuperar después.'
+    }, null, 201);
+  } catch (e) { console.error(e); err(res, 'SERVER_ERROR', 'Error creando API key', 500); }
+});
+
+// List API keys (admin)
+app.get('/api/v1/api-keys', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const db = getDb();
+    const keys = db.prepare('SELECT id, key_preview, nombre, permisos, rate_limit, activo, last_used, request_count, created_at FROM api_keys ORDER BY created_at DESC').all();
+    ok(res, keys);
+  } catch (e) { err(res, 'SERVER_ERROR', 'Error listando API keys', 500); }
+});
+
+// Revoke API key (admin)
+app.delete('/api/v1/api-keys/:id', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const db = getDb();
+    db.prepare('UPDATE api_keys SET activo = 0 WHERE id = ?').run(req.params.id);
+    ok(res, { message: 'API key revocada' });
+  } catch (e) { err(res, 'SERVER_ERROR', 'Error revocando API key', 500); }
+});
+
+// ══════════════════════════════════════
+// WEBHOOKS (Fase 5)
+// ══════════════════════════════════════
+
+const WEBHOOK_EVENTS = ['reserva.creada', 'reserva.estado', 'reserva.actualizada', 'pago.registrado', 'habitacion.limpieza', 'plan.actualizado'];
+
+// Fire webhook helper
+function fireWebhooks(evento, payload) {
+  try {
+    const db = getDb();
+    const hooks = db.prepare("SELECT * FROM webhooks WHERE activo = 1").all();
+    for (const hook of hooks) {
+      const eventos = JSON.parse(hook.eventos || '[]');
+      if (!eventos.includes(evento) && !eventos.includes('*')) continue;
+      
+      const body = JSON.stringify({ evento, timestamp: new Date().toISOString(), data: payload });
+      const signature = hook.secret ? crypto.createHmac('sha256', hook.secret).update(body).digest('hex') : null;
+      
+      // Fire and forget
+      const url = new URL(hook.url);
+      const options = {
+        hostname: url.hostname, port: url.port || (url.protocol === 'https:' ? 443 : 80),
+        path: url.pathname + url.search, method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Webhook-Event': evento, ...(signature ? { 'X-Webhook-Signature': `sha256=${signature}` } : {}) }
+      };
+      const lib = url.protocol === 'https:' ? require('https') : require('http');
+      const req = lib.request(options, (r) => {
+        db.prepare('UPDATE webhooks SET last_triggered = datetime("now"), fail_count = CASE WHEN ? < 300 THEN 0 ELSE fail_count + 1 END WHERE id = ?').run(r.statusCode, hook.id);
+      });
+      req.on('error', () => {
+        db.prepare('UPDATE webhooks SET fail_count = fail_count + 1 WHERE id = ?').run(hook.id);
+      });
+      req.write(body);
+      req.end();
+    }
+  } catch (e) { console.error('Webhook error:', e.message); }
+}
+
+// CRUD webhooks (admin)
+app.post('/api/v1/webhooks', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const { url, eventos } = req.body;
+    if (!url || !eventos) return err(res, 'VALIDATION_ERROR', 'url y eventos requeridos');
+    if (!Array.isArray(eventos)) return err(res, 'VALIDATION_ERROR', 'eventos debe ser un array');
+    const invalid = eventos.filter(e => e !== '*' && !WEBHOOK_EVENTS.includes(e));
+    if (invalid.length) return err(res, 'VALIDATION_ERROR', `Eventos inválidos: ${invalid.join(', ')}. Válidos: ${WEBHOOK_EVENTS.join(', ')}, *`);
+    
+    const secret = crypto.randomBytes(16).toString('hex');
+    const db = getDb();
+    const result = db.prepare('INSERT INTO webhooks (url, eventos, secret) VALUES (?, ?, ?)').run(url, JSON.stringify(eventos), secret);
+    const hook = db.prepare('SELECT * FROM webhooks WHERE id = ?').get(result.lastInsertRowid);
+    ok(res, { ...hook, eventos: JSON.parse(hook.eventos), signing_secret: secret, warning: '⚠️ Guarda el signing_secret. No se puede recuperar.' }, null, 201);
+  } catch (e) { console.error(e); err(res, 'SERVER_ERROR', 'Error creando webhook', 500); }
+});
+
+app.get('/api/v1/webhooks', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const db = getDb();
+    const hooks = db.prepare('SELECT id, url, eventos, activo, last_triggered, fail_count, created_at FROM webhooks ORDER BY created_at DESC').all();
+    ok(res, hooks.map(h => ({ ...h, eventos: JSON.parse(h.eventos || '[]') })));
+  } catch (e) { err(res, 'SERVER_ERROR', 'Error listando webhooks', 500); }
+});
+
+app.delete('/api/v1/webhooks/:id', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const db = getDb();
+    db.prepare('DELETE FROM webhooks WHERE id = ?').run(req.params.id);
+    ok(res, { message: 'Webhook eliminado' });
+  } catch (e) { err(res, 'SERVER_ERROR', 'Error eliminando webhook', 500); }
+});
+
+// Test webhook
+app.post('/api/v1/webhooks/:id/test', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const db = getDb();
+    const hook = db.prepare('SELECT * FROM webhooks WHERE id = ?').get(req.params.id);
+    if (!hook) return err(res, 'NOT_FOUND', 'Webhook no encontrado', 404);
+    
+    const testPayload = { test: true, message: 'Test webhook from Casa Mahana PMS', timestamp: new Date().toISOString() };
+    const body = JSON.stringify({ evento: 'test', timestamp: new Date().toISOString(), data: testPayload });
+    const signature = hook.secret ? crypto.createHmac('sha256', hook.secret).update(body).digest('hex') : null;
+    
+    const url = new URL(hook.url);
+    const options = {
+      hostname: url.hostname, port: url.port || (url.protocol === 'https:' ? 443 : 80),
+      path: url.pathname + url.search, method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Webhook-Event': 'test', ...(signature ? { 'X-Webhook-Signature': `sha256=${signature}` } : {}) }
+    };
+    const lib = url.protocol === 'https:' ? require('https') : require('http');
+    const req2 = lib.request(options, (r) => {
+      let d = ''; r.on('data', c => d += c);
+      r.on('end', () => ok(res, { status: r.statusCode, response: d.substring(0, 200) }));
+    });
+    req2.on('error', (e) => ok(res, { status: 'error', message: e.message }));
+    req2.write(body);
+    req2.end();
+  } catch (e) { err(res, 'SERVER_ERROR', 'Error testing webhook', 500); }
+});
+
+// ══════════════════════════════════════
+// OPENAPI / SCHEMA DISCOVERY (Fase 5)
+// ══════════════════════════════════════
+
+// Schema discovery endpoint — for AI agents
+app.get('/api/v1/schema', (req, res) => {
+  ok(res, {
+    name: 'Casa Mahana PMS API',
+    version: '1.0.0',
+    base_url: '/api/v1',
+    auth: {
+      methods: ['Bearer JWT (from POST /auth/login)', 'X-API-Key header'],
+      note: 'All endpoints require auth except /api/docs, /api/openapi.json, /api/v1/schema'
+    },
+    entities: {
+      habitaciones: {
+        description: 'Hotel rooms and pasadía units',
+        endpoints: [
+          { method: 'GET', path: '/hotel/habitaciones', description: 'List all rooms', auth: 'read' },
+          { method: 'GET', path: '/hotel/habitaciones/:id', description: 'Get room by ID', auth: 'read' },
+          { method: 'PATCH', path: '/hotel/habitaciones/:id', description: 'Update room (limpieza, etc)', auth: 'write' },
+          { method: 'PATCH', path: '/habitaciones/masiva', description: 'Bulk update limpieza', auth: 'admin', body: { ids: '[1,2,3]', estado_limpieza: 'Limpia|Sucia|Inspeccionada' } }
+        ],
+        fields: { id: 'int', nombre: 'string', tipo: 'string (Familiar|Doble|Estándar|Camping|Bohío|Salón)', categoria: 'string (Estadía|Pasadía)', estado_limpieza: 'string (Sucia|Limpia|Inspeccionada)', estado_habitacion: 'string (Vacía|Ocupada)' }
+      },
+      planes: {
+        description: 'Rate plans / products',
+        endpoints: [
+          { method: 'GET', path: '/hotel/planes', description: 'List plans', auth: 'read' },
+          { method: 'POST', path: '/hotel/planes', description: 'Create plan', auth: 'admin' },
+          { method: 'PUT', path: '/hotel/planes/:id', description: 'Update plan', auth: 'admin' },
+          { method: 'GET', path: '/hotel/planes/:id/reglas', description: 'Get day-based rate rules', auth: 'read' },
+          { method: 'PUT', path: '/hotel/planes/:id/reglas', description: 'Update rate rules', auth: 'admin' }
+        ],
+        fields: { id: 'int', codigo: 'string (unique)', nombre: 'string', categoria: 'string (Estadía|Pasadía)', precio_adulto_noche: 'float', precio_menor_noche: 'float', precio_mascota_noche: 'float' }
+      },
+      reservas: {
+        description: 'Hotel reservations',
+        endpoints: [
+          { method: 'GET', path: '/hotel/reservas', description: 'List reservations (filterable)', auth: 'read', query: 'estado, cliente, check_in_desde, check_in_hasta, page, limit' },
+          { method: 'GET', path: '/hotel/reservas/:id', description: 'Get reservation detail with folio', auth: 'read' },
+          { method: 'POST', path: '/hotel/reservas', description: 'Create reservation', auth: 'write', required: 'cliente, check_in, check_out, habitacion_id, plan_codigo' },
+          { method: 'PUT', path: '/hotel/reservas/:id', description: 'Update reservation', auth: 'write' },
+          { method: 'PATCH', path: '/hotel/reservas/:id/estado', description: 'Change status', auth: 'write', body: { estado: 'Confirmada|Check-In|Check-Out|Cancelada|No-Show|Por Aprobar' } }
+        ],
+        fields: { id: 'int', cliente: 'string', apellido: 'string', check_in: 'date', check_out: 'date', habitacion_id: 'int', plan_codigo: 'string', adultos: 'int', menores: 'int', estado: 'string', monto_total: 'float', saldo_pendiente: 'float' }
+      },
+      folio: {
+        description: 'Payment/charge records per reservation',
+        endpoints: [
+          { method: 'POST', path: '/hotel/reservas/:id/folio', description: 'Add payment or charge', auth: 'write', body: { monto: 'float', concepto: 'string', tipo: 'credito|debito', metodo_pago: 'efectivo|transferencia|yappy|tarjeta|paypal' } }
+        ]
+      },
+      cotizar: {
+        description: 'Price quotation engine (day-aware)',
+        endpoints: [
+          { method: 'GET', path: '/hotel/cotizar', description: 'Get price quote', auth: 'read', query: 'plan (codigo), adultos, menores, mascotas, check_in, check_out', returns: 'subtotal, impuesto, monto_total, desglose per night' }
+        ]
+      },
+      disponibilidad: {
+        description: 'Room availability check',
+        endpoints: [
+          { method: 'GET', path: '/hotel/disponibilidad', description: 'Check available rooms', auth: 'read', query: 'check_in, check_out' }
+        ]
+      },
+      dashboard: {
+        description: 'Dashboard analytics',
+        endpoints: [
+          { method: 'GET', path: '/hotel/dashboard', description: 'Get occupancy, revenue, stats', auth: 'read' }
+        ]
+      },
+      api_keys: {
+        description: 'API key management',
+        endpoints: [
+          { method: 'POST', path: '/api-keys', description: 'Create API key', auth: 'admin' },
+          { method: 'GET', path: '/api-keys', description: 'List API keys', auth: 'admin' },
+          { method: 'DELETE', path: '/api-keys/:id', description: 'Revoke API key', auth: 'admin' }
+        ]
+      },
+      webhooks: {
+        description: 'Webhook subscriptions',
+        endpoints: [
+          { method: 'POST', path: '/webhooks', description: 'Create webhook', auth: 'admin' },
+          { method: 'GET', path: '/webhooks', description: 'List webhooks', auth: 'admin' },
+          { method: 'DELETE', path: '/webhooks/:id', description: 'Delete webhook', auth: 'admin' },
+          { method: 'POST', path: '/webhooks/:id/test', description: 'Test webhook', auth: 'admin' }
+        ],
+        available_events: WEBHOOK_EVENTS
+      }
+    },
+    rate_limiting: { default: '100 req/min per API key', headers: ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'] },
+    day_types: { entre_semana: 'Sunday-Thursday', fin_de_semana: 'Friday-Saturday', festivo: 'Configured holidays' }
+  });
+});
+
+// OpenAPI JSON spec
+app.get('/api/openapi.json', (req, res) => {
+  res.json({
+    openapi: '3.0.3',
+    info: { title: 'Casa Mahana PMS API', version: '1.0.0', description: 'Hotel Management System API with day-based pricing, AI agent support, and webhook events.' },
+    servers: [{ url: '/api/v1' }],
+    security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }],
+    components: {
+      securitySchemes: {
+        BearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+        ApiKeyAuth: { type: 'apiKey', in: 'header', name: 'X-API-Key' }
+      }
+    },
+    paths: {
+      '/auth/login': { post: { summary: 'Login', tags: ['Auth'], requestBody: { content: { 'application/json': { schema: { properties: { email: { type: 'string' }, password: { type: 'string' } } } } } } } },
+      '/hotel/habitaciones': { get: { summary: 'List rooms', tags: ['Rooms'], security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }] } },
+      '/hotel/planes': { get: { summary: 'List plans', tags: ['Plans'] }, post: { summary: 'Create plan', tags: ['Plans'] } },
+      '/hotel/reservas': { get: { summary: 'List reservations', tags: ['Reservations'] }, post: { summary: 'Create reservation', tags: ['Reservations'] } },
+      '/hotel/reservas/{id}': { get: { summary: 'Get reservation', tags: ['Reservations'] }, put: { summary: 'Update reservation', tags: ['Reservations'] } },
+      '/hotel/cotizar': { get: { summary: 'Price quotation', tags: ['Pricing'] } },
+      '/hotel/disponibilidad': { get: { summary: 'Check availability', tags: ['Availability'] } },
+      '/hotel/dashboard': { get: { summary: 'Dashboard stats', tags: ['Dashboard'] } },
+      '/api-keys': { get: { summary: 'List API keys', tags: ['API Keys'] }, post: { summary: 'Create API key', tags: ['API Keys'] } },
+      '/webhooks': { get: { summary: 'List webhooks', tags: ['Webhooks'] }, post: { summary: 'Create webhook', tags: ['Webhooks'] } }
+    }
+  });
+});
+
+// Swagger UI
+app.get('/api/docs', (req, res) => {
+  res.send(`<!DOCTYPE html>
+<html><head><title>Casa Mahana PMS API</title>
+<link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+</head><body>
+<div id="swagger-ui"></div>
+<script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+<script>SwaggerUIBundle({ url: '/api/openapi.json', dom_id: '#swagger-ui', deepLinking: true });</script>
+</body></html>`);
 });
 
 // ══════════════════════════════════════
