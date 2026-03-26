@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api/client';
-import { Plus, Edit2, Trash2, X, Check, Clock, Tag, Star, Package, Calendar, DollarSign, Camera, Eye, Upload } from 'lucide-react';
+import { Plus, Edit2, Trash2, X, Check, Clock, Tag, Star, Package, Calendar, DollarSign, Camera, Eye, Upload, ExternalLink } from 'lucide-react';
 
 const catColors: Record<string, { bg: string; text: string; border: string; badge: string }> = {
   'Estadía': { bg: 'bg-ocean-50', text: 'text-ocean-700', border: 'border-ocean-400', badge: 'bg-ocean-100 text-ocean-700' },
@@ -201,6 +201,9 @@ export default function Productos() {
           <p className="text-sm text-gray-400">{planes.length} productos • {festivos.length} días festivos</p>
         </div>
         <div className="flex items-center gap-2">
+          <a href="/reservar" target="_blank" rel="noopener" className="flex items-center gap-1 px-3 py-2 bg-amber-50 text-amber-700 rounded-xl hover:bg-amber-100 transition text-sm font-medium border border-amber-200">
+            <ExternalLink size={14} /> Vista Cliente
+          </a>
           <button onClick={() => setShowFestivos(!showFestivos)} className="flex items-center gap-1 px-3 py-2 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition text-sm font-medium">
             <Calendar size={14} /> Festivos ({festivos.length})
           </button>
