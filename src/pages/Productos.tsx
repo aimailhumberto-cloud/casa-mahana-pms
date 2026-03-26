@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api/client';
-import { Plus, Edit2, Trash2, X, Check, Clock, Tag, Star, Package, Calendar, DollarSign } from 'lucide-react';
+import { Plus, Edit2, Trash2, X, Check, Clock, Tag, Star, Package, Calendar, DollarSign, Camera, Eye, Upload } from 'lucide-react';
 
 const catColors: Record<string, { bg: string; text: string; border: string; badge: string }> = {
   'Estadía': { bg: 'bg-ocean-50', text: 'text-ocean-700', border: 'border-ocean-400', badge: 'bg-ocean-100 text-ocean-700' },
@@ -20,7 +20,7 @@ const emptyForm = {
   codigo: '', nombre: '', descripcion: '', categoria: 'Estadía',
   precio_adulto_noche: 0, precio_menor_noche: 0, precio_mascota_noche: 0,
   incluye: [] as string[], horario: '', extras_disponibles: [] as string[],
-  tipos_aplicables: [] as string[], imagen: '', activo: 1
+  tipos_aplicables: [] as string[], imagen: '', activo: 1, visible_web: 0
 };
 
 const emptyReglas = [
@@ -44,6 +44,7 @@ export default function Productos() {
   const [newExtra, setNewExtra] = useState('');
   const [showInactive, setShowInactive] = useState(false);
   const [tab, setTab] = useState<'info' | 'tarifas'>('info');
+  const [photoUploading, setPhotoUploading] = useState(false);
 
   // Holidays
   const [festivos, setFestivos] = useState<any[]>([]);
@@ -91,7 +92,7 @@ export default function Productos() {
       incluye: plan.incluye || [], horario: plan.horario || '',
       extras_disponibles: plan.extras_disponibles || [],
       tipos_aplicables: plan.tipos_aplicables || [],
-      imagen: plan.imagen || '', activo: plan.activo
+      imagen: plan.imagen || '', activo: plan.activo, visible_web: plan.visible_web || 0
     });
     // Load existing rate rules
     const existingReglas = reglasMap[plan.id] || [];
@@ -147,6 +148,18 @@ export default function Productos() {
   const removeExtra = (i: number) => setForm(f => ({ ...f, extras_disponibles: f.extras_disponibles.filter((_, idx) => idx !== i) }));
   const toggleTipo = (tipo: string) => setForm(f => ({ ...f, tipos_aplicables: f.tipos_aplicables.includes(tipo) ? f.tipos_aplicables.filter(t => t !== tipo) : [...f.tipos_aplicables, tipo] }));
   const set = (field: string, value: any) => setForm(f => ({ ...f, [field]: value }));
+
+  const uploadPhoto = async (planId: number, file: File) => {
+    setPhotoUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('foto', file);
+      const resp = await api.post(`/hotel/planes/${planId}/foto`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      set('imagen', resp.data.imagen);
+      load();
+    } catch (e: any) { setError(e.response?.data?.error?.message || 'Error subiendo foto'); }
+    setPhotoUploading(false);
+  };
 
   const updateRegla = (index: number, field: string, value: any) => {
     setReglas(prev => prev.map((r, i) => i === index ? { ...r, [field]: value } : r));
@@ -235,7 +248,18 @@ export default function Productos() {
           const colors = catColors[plan.categoria] || catColors['Otro'];
           const planReglas = reglasMap[plan.id] || [];
           return (
-            <div key={plan.id} className={`bg-white rounded-xl shadow-sm border-t-4 ${colors.border} hover:shadow-md transition ${!plan.activo ? 'opacity-60' : ''}`}>
+            <div key={plan.id} className={`bg-white rounded-xl shadow-sm border-t-4 ${colors.border} hover:shadow-md transition ${!plan.activo ? 'opacity-60' : ''} overflow-hidden`}>
+              {/* Product Photo */}
+              {plan.imagen ? (
+                <div className="h-36 overflow-hidden relative">
+                  <img src={plan.imagen} alt={plan.nombre} className="w-full h-full object-cover" />
+                  {plan.visible_web ? <span className="absolute top-2 right-2 px-2 py-0.5 bg-emerald-500 text-white text-[10px] font-bold rounded-full flex items-center gap-1"><Eye size={10} /> Web</span> : null}
+                </div>
+              ) : (
+                <div className={`h-12 ${colors.bg} flex items-center justify-end px-3`}>
+                  {plan.visible_web ? <span className="px-2 py-0.5 bg-emerald-500 text-white text-[10px] font-bold rounded-full flex items-center gap-1"><Eye size={10} /> Web</span> : null}
+                </div>
+              )}
               <div className="p-5">
                 <div className="flex items-start justify-between mb-3">
                   <div>
@@ -388,6 +412,43 @@ export default function Productos() {
                   <div>
                     <label className="block text-sm font-medium text-gray-500 mb-1">Descripción</label>
                     <textarea value={form.descripcion} onChange={e => set('descripcion', e.target.value)} className="input min-h-[60px]" placeholder="Descripción del producto..." />
+                  </div>
+
+                  {/* Photo Upload + Visible Web */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600 mb-2 flex items-center gap-1"><Camera size={14} /> Foto del producto</label>
+                      {form.imagen ? (
+                        <div className="relative rounded-xl overflow-hidden h-32">
+                          <img src={form.imagen} alt="Product" className="w-full h-full object-cover" />
+                          <button onClick={() => set('imagen', '')} className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"><X size={12} /></button>
+                        </div>
+                      ) : (
+                        <label className="flex flex-col items-center justify-center h-32 rounded-xl border-2 border-dashed border-gray-300 hover:border-amber-400 cursor-pointer transition bg-gray-50 hover:bg-amber-50">
+                          {photoUploading ? (
+                            <span className="text-sm text-gray-400">Subiendo...</span>
+                          ) : (
+                            <>
+                              <Upload size={24} className="text-gray-300 mb-1" />
+                              <span className="text-xs text-gray-400">Click para subir foto</span>
+                            </>
+                          )}
+                          <input type="file" accept="image/*" className="hidden" disabled={!editingId || photoUploading}
+                            onChange={e => { if (e.target.files?.[0] && editingId) uploadPhoto(editingId, e.target.files[0]); }} />
+                        </label>
+                      )}
+                      {!editingId && <p className="text-[10px] text-gray-400 mt-1">Guarda primero para subir foto</p>}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600 mb-2 flex items-center gap-1"><Eye size={14} /> Visible en Web</label>
+                      <button type="button" onClick={() => set('visible_web', form.visible_web ? 0 : 1)}
+                        className={`w-full py-3 px-4 rounded-xl text-sm font-medium border-2 transition flex items-center justify-center gap-2 ${
+                          form.visible_web ? 'border-emerald-400 bg-emerald-50 text-emerald-700' : 'border-gray-200 text-gray-400 hover:border-gray-300'
+                        }`}>
+                        <Eye size={16} /> {form.visible_web ? 'Visible en widget de reservas' : 'Oculto en widget de reservas'}
+                      </button>
+                      <p className="text-[10px] text-gray-400 mt-1">Los productos visibles aparecen en el widget público de reservas del website</p>
+                    </div>
                   </div>
 
                   {/* Prices (base) */}

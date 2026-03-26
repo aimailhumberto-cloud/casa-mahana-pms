@@ -386,7 +386,7 @@ app.put('/api/v1/hotel/planes/:id', requireAuth, requireRole('admin'), (req, res
     const existing = findById('planes_tarifa', req.params.id);
     if (!existing) return err(res, 'NOT_FOUND', 'Producto no encontrado', 404);
     const data = {};
-    const allowed = ['nombre', 'descripcion', 'categoria', 'precio_adulto_noche', 'precio_menor_noche', 'precio_mascota_noche', 'horario', 'imagen', 'activo'];
+    const allowed = ['nombre', 'descripcion', 'categoria', 'precio_adulto_noche', 'precio_menor_noche', 'precio_mascota_noche', 'horario', 'imagen', 'activo', 'visible_web'];
     for (const f of allowed) { if (req.body[f] !== undefined) data[f] = req.body[f]; }
     // JSON array fields
     if (req.body.incluye !== undefined) data.incluye = JSON.stringify(req.body.incluye);
@@ -422,6 +422,18 @@ app.delete('/api/v1/hotel/planes/:id', requireAuth, requireRole('admin'), (req, 
     update('planes_tarifa', req.params.id, { activo: 0, updated_at: new Date().toISOString() });
     ok(res, { message: 'Producto desactivado' });
   } catch (e) { err(res, 'SERVER_ERROR', 'Error eliminando producto', 500); }
+});
+
+// Upload product photo
+app.post('/api/v1/hotel/planes/:id/foto', requireAuth, requireRole('admin'), upload.single('foto'), (req, res) => {
+  try {
+    if (!req.file) return err(res, 'VALIDATION_ERROR', 'Archivo de imagen requerido');
+    const existing = findById('planes_tarifa', req.params.id);
+    if (!existing) return err(res, 'NOT_FOUND', 'Producto no encontrado', 404);
+    const imageUrl = `/uploads/${req.file.filename}`;
+    update('planes_tarifa', req.params.id, { imagen: imageUrl, updated_at: new Date().toISOString() });
+    ok(res, { imagen: imageUrl, filename: req.file.filename });
+  } catch (e) { console.error(e); err(res, 'SERVER_ERROR', 'Error subiendo foto', 500); }
 });
 
 // Cotizar — preview pricing with day-based rates
