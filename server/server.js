@@ -1405,6 +1405,113 @@ app.get('/api/v1/schema', (req, res) => {
   });
 });
 
+// ══════════════════════════════════════
+// FINANCIAL REPORTS
+// ══════════════════════════════════════
+
+app.get('/api/v1/reportes/financiero', requireAuth, (req, res) => {
+  try {
+    const db = getDb();
+    const { desde, hasta } = req.query;
+    const d = desde || new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+    const h = hasta || new Date().toISOString().split('T')[0];
+
+    // 1. Reservations summary for period
+    const reservas = db.prepare(`
+      SELECT COUNT(*) as total,
+        SUM(CASE WHEN estado NOT IN ('Cancelada','No-Show') THEN 1 ELSE 0 END) as activas,
+        SUM(CASE WHEN estado = 'Cancelada' THEN 1 ELSE 0 END) as canceladas,
+        SUM(CASE WHEN estado = 'Por Aprobar' THEN 1 ELSE 0 END) as por_aprobar,
+        SUM(CASE WHEN estado IN ('Confirmada','Check-In','Check-Out') THEN monto_total ELSE 0 END) as revenue_total,
+        SUM(CASE WHEN estado IN ('Confirmada','Check-In','Check-Out') THEN monto_pagado ELSE 0 END) as cobrado,
+        SUM(CASE WHEN estado IN ('Confirmada','Check-In','Check-Out') THEN saldo_pendiente ELSE 0 END) as pendiente,
+        AVG(CASE WHEN estado IN ('Confirmada','Check-In','Check-Out') THEN noches ELSE NULL END) as promedio_noches,
+        AVG(CASE WHEN estado IN ('Confirmada','Check-In','Check-Out') THEN monto_total ELSE NULL END) as ticket_promedio
+      FROM reservas_hotel WHERE created_at >= ? AND created_at <= ? || ' 23:59:59'
+    `).get(d, h);
+
+    // 2. Revenue by plan
+    const byPlan = db.prepare(`
+      SELECT plan_nombre as plan, COUNT(*) as reservas, SUM(monto_total) as revenue, SUM(monto_pagado) as cobrado
+      FROM reservas_hotel
+      WHERE estado NOT IN ('Cancelada','No-Show') AND created_at >= ? AND created_at <= ? || ' 23:59:59'
+      GROUP BY plan_nombre ORDER BY revenue DESC
+    `).all(d, h);
+
+    // 3. Revenue by source (fuente)
+    const byFuente = db.prepare(`
+      SELECT fuente, COUNT(*) as reservas, SUM(monto_total) as revenue
+      FROM reservas_hotel
+      WHERE estado NOT IN ('Cancelada','No-Show') AND created_at >= ? AND created_at <= ? || ' 23:59:59'
+      GROUP BY fuente ORDER BY revenue DESC
+    `).all(d, h);
+
+    // 4. Revenue by room type
+    const byTipo = db.prepare(`
+      SELECT tipo_habitacion as tipo, COUNT(*) as reservas, SUM(monto_total) as revenue
+      FROM reservas_hotel
+      WHERE estado NOT IN ('Cancelada','No-Show') AND created_at >= ? AND created_at <= ? || ' 23:59:59'
+      GROUP BY tipo_habitacion ORDER BY revenue DESC
+    `).all(d, h);
+
+    // 5. Payments by method (from folio)
+    const byMetodo = db.prepare(`
+      SELECT COALESCE(f.metodo_pago, 'otro') as metodo, COUNT(*) as pagos, SUM(f.monto) as total
+      FROM folio_hotel f
+      JOIN reservas_hotel r ON f.reserva_id = r.id
+      WHERE f.tipo = 'credito' AND f.fecha >= ? AND f.fecha <= ?
+      GROUP BY f.metodo_pago ORDER BY total DESC
+    `).all(d, h);
+
+    // 6. Daily revenue (for chart)
+    const daily = db.prepare(`
+      SELECT date(created_at) as fecha, COUNT(*) as reservas, SUM(monto_total) as revenue
+      FROM reservas_hotel
+      WHERE estado NOT IN ('Cancelada','No-Show') AND created_at >= ? AND created_at <= ? || ' 23:59:59'
+      GROUP BY date(created_at) ORDER BY fecha
+    `).all(d, h);
+
+    // 7. Occupancy rate
+    const totalRooms = db.prepare("SELECT COUNT(*) as c FROM habitaciones WHERE activa = 1 AND categoria = 'Estadía'").get().c;
+    const daysInRange = Math.max(1, Math.ceil((new Date(h).getTime() - new Date(d).getTime()) / 86400000) + 1);
+    const totalSlots = totalRooms * daysInRange;
+    const occupiedNights = db.prepare(`
+      SELECT COALESCE(SUM(noches), 0) as n FROM reservas_hotel
+      WHERE estado NOT IN ('Cancelada','No-Show','Por Aprobar') AND check_in <= ? AND check_out >= ?
+    `).get(h, d).n;
+    const occupancy = totalSlots > 0 ? Math.round((occupiedNights / totalSlots) * 100) : 0;
+
+    // 8. Recent payments
+    const recentPayments = db.prepare(`
+      SELECT f.id, f.concepto, f.monto, f.metodo_pago, f.fecha, f.registrado_por,
+             r.cliente, r.apellido, r.id as reserva_id
+      FROM folio_hotel f JOIN reservas_hotel r ON f.reserva_id = r.id
+      WHERE f.tipo = 'credito' AND f.fecha >= ? AND f.fecha <= ?
+      ORDER BY f.created_at DESC LIMIT 20
+    `).all(d, h);
+
+    // 9. Top pending balances
+    const pendientes = db.prepare(`
+      SELECT id, cliente, apellido, plan_nombre, monto_total, monto_pagado, saldo_pendiente, check_in, check_out
+      FROM reservas_hotel
+      WHERE saldo_pendiente > 0 AND estado NOT IN ('Cancelada','No-Show','Check-Out')
+      ORDER BY saldo_pendiente DESC LIMIT 10
+    `).all();
+
+    ok(res, {
+      periodo: { desde: d, hasta: h },
+      resumen: { ...reservas, occupancy, total_rooms: totalRooms },
+      por_plan: byPlan,
+      por_fuente: byFuente,
+      por_tipo_habitacion: byTipo,
+      por_metodo_pago: byMetodo,
+      diario: daily,
+      pagos_recientes: recentPayments,
+      saldos_pendientes: pendientes
+    });
+  } catch (e) { console.error('Report error:', e); err(res, 'SERVER_ERROR', 'Error generando reporte', 500); }
+});
+
 // OpenAPI JSON spec
 app.get('/api/openapi.json', (req, res) => {
   res.json({

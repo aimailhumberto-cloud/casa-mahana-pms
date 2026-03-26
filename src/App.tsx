@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, Link, useNavigate, useLocation } from 'react-router-dom';
 import { api, setToken, clearToken, isLoggedIn } from './api/client';
-import { Hotel, CalendarDays, BedDouble, DollarSign, LogOut, Menu, X, LayoutGrid, Settings, Package, ExternalLink } from 'lucide-react';
+import { Hotel, CalendarDays, BedDouble, DollarSign, LogOut, Menu, X, LayoutGrid, Settings, Package, ExternalLink, BarChart3 } from 'lucide-react';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Reservas from './pages/Reservas';
@@ -12,6 +12,7 @@ import AdminHabitaciones from './pages/AdminHabitaciones';
 import Calendario from './pages/Calendario';
 import Saldos from './pages/Saldos';
 import Productos from './pages/Productos';
+import Reportes from './pages/Reportes';
 import BookingWidget from './pages/BookingWidget';
 
 function App() {
@@ -50,6 +51,7 @@ function App() {
     { path: '/productos', label: 'Productos', icon: Package },
     { path: '/admin/habitaciones', label: 'Config Rooms', icon: Settings },
     { path: '/saldos', label: 'CxC', icon: DollarSign },
+    { path: '/reportes', label: 'Reportes', icon: BarChart3 },
   ];
 
   const isActive = (path: string) => location.pathname === path || (path !== '/' && location.pathname.startsWith(path));
@@ -111,6 +113,7 @@ function App() {
             <Route path="/admin/habitaciones" element={<AdminHabitaciones />} />
             <Route path="/productos" element={<Productos />} />
             <Route path="/saldos" element={<Saldos />} />
+            <Route path="/reportes" element={<Reportes />} />
             <Route path="/login" element={<Navigate to="/" />} />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
