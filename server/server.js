@@ -2086,10 +2086,54 @@ app.post('/api/v1/admin/import/guests/execute', requireAuth, requireRole('admin'
     });
     txn();
 
+    // ── Auto-generate historical reservations from imported guests ──
+    let migratedRes = 0, migratedRev = 0;
+    if (imported > 0) {
+      try {
+        const existingImports = db.prepare("SELECT COUNT(*) as c FROM reservas_hotel WHERE created_by = 'Cloudbeds Import'").get().c;
+        if (existingImports === 0) {
+          const rooms = db.prepare("SELECT id, nombre, tipo FROM habitaciones WHERE categoria = 'Estadía' AND activa = 1").all();
+          if (rooms.length > 0) {
+            const allGuests = db.prepare("SELECT * FROM huespedes WHERE total_reservas > 0 AND total_ingresos > 0 ORDER BY ultima_estadia DESC").all();
+            const addD = (ds, days) => { const dt = new Date(ds + 'T12:00:00Z'); dt.setUTCDate(dt.getUTCDate() + days); return dt.toISOString().split('T')[0]; };
+            const iR = db.prepare("INSERT INTO reservas_hotel (cliente, apellido, email, telefono, nacionalidad, habitacion_id, tipo_habitacion, check_in, check_out, noches, adultos, menores, mascotas, plan_nombre, subtotal, impuesto_pct, impuesto_monto, monto_total, monto_pagado, saldo_pendiente, estado, fuente, notas, created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,0,0,?,?,10,?,?,?,0,'Check-Out','Cloudbeds',?,'Cloudbeds Import',?)");
+            const iF = db.prepare("INSERT INTO folio_hotel (reserva_id, tipo, concepto, monto, metodo_pago, registrado_por, fecha, created_at) VALUES (?,'credito','Pago histórico Cloudbeds',?,'Histórico','Cloudbeds Import',?,?)");
+            let ri = 0;
+            const txn2 = db.transaction(() => {
+              for (const g of allGuests) {
+                const nr = Math.max(1, g.total_reservas || 1);
+                const tn = Math.max(nr, g.noches_estadia || nr);
+                const tr = g.total_ingresos || 0;
+                const an = Math.max(1, Math.round(tn / nr));
+                const ar = Math.round((tr / nr) * 100) / 100;
+                let anchor = g.ultima_estadia;
+                if (!anchor || anchor.length < 8) anchor = '2024-06-01';
+                for (let i = 0; i < nr; i++) {
+                  const off = i * (an + 30 + Math.floor(Math.random() * 30));
+                  const co = addD(anchor, -off);
+                  const ci = addD(co, -an);
+                  const room = rooms[ri % rooms.length]; ri++;
+                  let rev = i === nr - 1 && nr > 1 ? Math.round((tr - ar * (nr - 1)) * 100) / 100 : ar;
+                  if (rev < 0) rev = ar;
+                  const sub = Math.round(rev / 1.10 * 100) / 100;
+                  const tax = Math.round((rev - sub) * 100) / 100;
+                  const r2 = iR.run(g.nombre, g.apellido||'', g.email||'', g.telefono||'', g.pais||'', room.id, room.tipo, ci, co, an, Math.min(2, Math.max(1, Math.ceil(rev/150))), 'Estadía Todo Incluido', sub, tax, rev, rev, `Historial Cloudbeds #${i+1}/${nr}`, ci+'T08:00:00');
+                  iF.run(r2.lastInsertRowid, rev, ci, ci+'T08:00:00');
+                  migratedRes++; migratedRev += rev;
+                }
+              }
+            });
+            txn2();
+            console.log(`✅ Auto-generated ${migratedRes} historical reservations ($${migratedRev.toLocaleString()})`);
+          }
+        }
+      } catch (me) { console.error('Migration after import:', me.message); }
+    }
+
     ok(res, {
       type: 'guests',
       filename: req.file.originalname,
-      summary: { total: rows.length, imported, duplicates, errors },
+      summary: { total: rows.length, imported, duplicates, errors, reservas_generadas: migratedRes },
       details: details.slice(0, 50),
     });
   } catch (e) {
@@ -2196,6 +2240,57 @@ if (fs.existsSync(distPath)) {
 // ══════════════════════════════════════
 
 app.listen(PORT, () => {
-  getDb(); // Initialize on startup
+  const db = getDb(); // Initialize on startup
+
+  // ── Auto-migrate Cloudbeds guest history (one-time) ──
+  try {
+    const guestCount = db.prepare("SELECT COUNT(*) as c FROM huespedes WHERE total_reservas > 0 AND total_ingresos > 0").get().c;
+    const importedCount = db.prepare("SELECT COUNT(*) as c FROM reservas_hotel WHERE created_by = 'Cloudbeds Import'").get().c;
+
+    if (guestCount > 0 && importedCount === 0) {
+      console.log(`🔄 Auto-migrating ${guestCount} guests into historical reservations...`);
+
+      const rooms = db.prepare("SELECT id, nombre, tipo FROM habitaciones WHERE categoria = 'Estadía' AND activa = 1").all();
+      if (rooms.length === 0) { console.log('⚠️ No Estadía rooms found, skipping migration'); }
+      else {
+        const guests = db.prepare("SELECT * FROM huespedes WHERE total_reservas > 0 AND total_ingresos > 0 ORDER BY ultima_estadia DESC").all();
+
+        const addDays = (ds, days) => { const d = new Date(ds + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + days); return d.toISOString().split('T')[0]; };
+
+        const insertR = db.prepare(`INSERT INTO reservas_hotel (cliente, apellido, email, telefono, nacionalidad, habitacion_id, tipo_habitacion, check_in, check_out, noches, adultos, menores, mascotas, plan_nombre, subtotal, impuesto_pct, impuesto_monto, monto_total, monto_pagado, saldo_pendiente, estado, fuente, notas, created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,0,0,?,?,10,?,?,?,0,'Check-Out','Cloudbeds',?,'Cloudbeds Import',?)`);
+        const insertF = db.prepare("INSERT INTO folio_hotel (reserva_id, tipo, concepto, monto, metodo_pago, registrado_por, fecha, created_at) VALUES (?,'credito','Pago histórico Cloudbeds',?,'Histórico','Cloudbeds Import',?,?)");
+
+        let total = 0, revenue = 0, ri = 0;
+        const txn = db.transaction(() => {
+          for (const g of guests) {
+            const nr = Math.max(1, g.total_reservas || 1);
+            const tn = Math.max(nr, g.noches_estadia || nr);
+            const tr = g.total_ingresos || 0;
+            const an = Math.max(1, Math.round(tn / nr));
+            const ar = Math.round((tr / nr) * 100) / 100;
+            let anchor = g.ultima_estadia;
+            if (!anchor || anchor.length < 8) anchor = '2024-06-01';
+
+            for (let i = 0; i < nr; i++) {
+              const off = i * (an + 30 + Math.floor(Math.random() * 30));
+              const co = addDays(anchor, -off);
+              const ci = addDays(co, -an);
+              const room = rooms[ri % rooms.length]; ri++;
+              let rev = i === nr - 1 && nr > 1 ? Math.round((tr - ar * (nr - 1)) * 100) / 100 : ar;
+              if (rev < 0) rev = ar;
+              const sub = Math.round(rev / 1.10 * 100) / 100;
+              const tax = Math.round((rev - sub) * 100) / 100;
+              const r = insertR.run(g.nombre, g.apellido||'', g.email||'', g.telefono||'', g.pais||'', room.id, room.tipo, ci, co, an, Math.min(2, Math.max(1, Math.ceil(rev/150))), 'Estadía Todo Incluido', sub, tax, rev, rev, `Historial Cloudbeds #${i+1}/${nr}`, ci+'T08:00:00');
+              insertF.run(r.lastInsertRowid, rev, ci, ci+'T08:00:00');
+              total++; revenue += rev;
+            }
+          }
+        });
+        txn();
+        console.log(`✅ Migrated ${total.toLocaleString()} historical reservations ($${revenue.toLocaleString()})`);
+      }
+    }
+  } catch (e) { console.log('Migration check:', e.message); }
+
   console.log(`🏨 Casa Mahana PMS running on port ${PORT}`);
 });
