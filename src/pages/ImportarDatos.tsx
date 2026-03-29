@@ -59,7 +59,7 @@ export default function ImportarDatos() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    api.get('/admin/import/stats').then(r => setStats(r.data.data)).catch(() => {});
+    api.get('/admin/import/stats').then(r => setStats(r.data)).catch(() => {});
   }, []);
 
   const handleFile = (f: File) => {
@@ -107,7 +107,7 @@ export default function ImportarDatos() {
           const r = await api.post('/admin/import/guests/preview', form, {
             headers: { 'Content-Type': 'multipart/form-data' }
           });
-          if (r.data?.data?.type === 'guests') {
+          if (r.data?.type === 'guests') {
             useGuestEndpoint = true;
           }
         } catch (e) {
@@ -121,7 +121,7 @@ export default function ImportarDatos() {
         const r = await api.post('/admin/import/guests/preview', form2, {
           headers: { 'Content-Type': 'multipart/form-data' }
         });
-        setPreview(r.data.data);
+        setPreview(r.data);
         setDetectedType('guests');
       } else {
         const form2 = new FormData();
@@ -129,7 +129,7 @@ export default function ImportarDatos() {
         const r = await api.post('/admin/import/preview', form2, {
           headers: { 'Content-Type': 'multipart/form-data' }
         });
-        setPreview(r.data.data);
+        setPreview(r.data);
         setDetectedType('reservations');
       }
       setPhase('preview');
@@ -152,9 +152,9 @@ export default function ImportarDatos() {
       const r = await api.post(endpoint, form, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
-      setResult(r.data.data);
+      setResult(r.data);
       setPhase('done');
-      api.get('/admin/import/stats').then(r => setStats(r.data.data)).catch(() => {});
+      api.get('/admin/import/stats').then(r => setStats(r.data)).catch(() => {});
     } catch (e: any) {
       setError(e.response?.data?.error?.message || 'Error importando datos');
       setPhase('preview');

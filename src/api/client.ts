@@ -49,7 +49,17 @@ async function request(method: string, path: string, body?: any, options?: { hea
 }
 
 export const api = {
-  get: (path: string) => request('GET', path),
+  get: (path: string, config?: { params?: Record<string, any> }) => {
+    if (config?.params) {
+      const qs = new URLSearchParams();
+      for (const [k, v] of Object.entries(config.params)) {
+        if (v !== undefined && v !== null && v !== '') qs.set(k, String(v));
+      }
+      const qstr = qs.toString();
+      if (qstr) path = `${path}?${qstr}`;
+    }
+    return request('GET', path);
+  },
   post: (path: string, body: any, options?: any) => request('POST', path, body, options),
   put: (path: string, body: any, options?: any) => request('PUT', path, body, options),
   patch: (path: string, body: any, options?: any) => request('PATCH', path, body, options),

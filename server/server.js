@@ -2126,6 +2126,54 @@ app.get('/api/v1/hotel/huespedes/buscar', requireAuth, (req, res) => {
   } catch (e) { err(res, 'SERVER_ERROR', 'Error buscando huéspedes', 500); }
 });
 
+// Guest aggregate stats
+app.get('/api/v1/hotel/huespedes/stats', requireAuth, (req, res) => {
+  try {
+    const db = getDb();
+    const totals = db.prepare(`
+      SELECT 
+        COUNT(*) as total_huespedes,
+        SUM(total_reservas) as total_reservas_historico,
+        SUM(noches_estadia) as total_noches_historico,
+        SUM(total_ingresos) as total_ingresos_historico,
+        SUM(CASE WHEN huesped_habitual = 1 THEN 1 ELSE 0 END) as total_habituales,
+        MIN(ultima_estadia) as primera_estadia,
+        MAX(ultima_estadia) as ultima_estadia
+      FROM huespedes
+    `).get();
+
+    const topPaises = db.prepare(`
+      SELECT pais, COUNT(*) as count, SUM(total_ingresos) as ingresos
+      FROM huespedes WHERE pais != '' AND pais IS NOT NULL
+      GROUP BY pais ORDER BY count DESC LIMIT 10
+    `).all();
+
+    const topHuespedes = db.prepare(`
+      SELECT nombre, apellido, email, pais, total_reservas, noches_estadia, total_ingresos, ultima_estadia
+      FROM huespedes ORDER BY total_ingresos DESC LIMIT 10
+    `).all();
+
+    // Revenue by year (from ultima_estadia dates)
+    const revenueByYear = db.prepare(`
+      SELECT 
+        SUBSTR(ultima_estadia, 1, 4) as year,
+        COUNT(*) as huespedes,
+        SUM(total_ingresos) as ingresos,
+        SUM(noches_estadia) as noches
+      FROM huespedes 
+      WHERE ultima_estadia IS NOT NULL AND ultima_estadia != ''
+      GROUP BY SUBSTR(ultima_estadia, 1, 4) ORDER BY year
+    `).all();
+
+    ok(res, {
+      ...totals,
+      topPaises,
+      topHuespedes,
+      revenueByYear,
+    });
+  } catch (e) { err(res, 'SERVER_ERROR', 'Error obteniendo stats huéspedes', 500); }
+});
+
 // Serve uploads
 app.use('/uploads', express.static(path.join(__dirname, '../data/uploads')));
 
