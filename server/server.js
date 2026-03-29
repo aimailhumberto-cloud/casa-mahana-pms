@@ -949,6 +949,7 @@ app.get('/api/v1/hotel/dashboard', requireAuth, (req, res) => {
     else if (periodo === 'semana') { d.setDate(d.getDate() - 7); periodoDesde = d.toISOString().split('T')[0]; }
     else if (periodo === 'total') periodoDesde = '2000-01-01';
     else { periodoDesde = hoy.substring(0, 7) + '-01'; } // mes
+    const periodoHasta = hoy;
 
     const totalRooms = db.prepare('SELECT COUNT(*) as c FROM habitaciones WHERE activa = 1').get().c;
     const occupied = db.prepare(`
@@ -1030,7 +1031,6 @@ app.get('/api/v1/hotel/dashboard', requireAuth, (req, res) => {
     const totalPasadia = db.prepare("SELECT COUNT(*) as c FROM habitaciones WHERE activa = 1 AND categoria = 'Pasadía'").get().c;
 
     // Calculate days in period
-    const periodoHasta = hoy;
     const daysInPeriod = Math.max(1, Math.ceil((new Date(periodoHasta).getTime() - new Date(periodoDesde).getTime()) / 86400000) + 1);
 
     // Total room-nights occupied in the period (Estadía)
