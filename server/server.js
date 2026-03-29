@@ -6,6 +6,7 @@ const fs = require('fs');
 const { getDb, findAll, findById, create, update, remove } = require('./db/database');
 const { verifyPassword, hashPassword, generateToken, requireAuth, requireRole, requireWrite, generateApiKey, hashApiKey } = require('./auth');
 const crypto = require('crypto');
+const { parseFile, detectColumns, runImport } = require('./import-cloudbeds');
 
 const app = express();
 const PORT = process.env.PORT || 3201;
@@ -1762,6 +1763,102 @@ app.post('/api/v1/public/reservar', (req, res) => {
 
     ok(res, { reserva_id: reserva.id, mensaje: 'Reserva recibida. Nuestro equipo la revisará y confirmaremos por email/WhatsApp.' }, null, 201);
   } catch (e) { console.error('Public booking error:', e); err(res, 'SERVER_ERROR', 'Error creando reserva', 500); }
+});
+
+// ══════════════════════════════════════
+// CLOUDBEDS IMPORT (Admin)
+// ══════════════════════════════════════
+
+// Upload for import (separate multer config — store in temp)
+const importUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+  fileFilter: (req, file, cb) => {
+    const allowed = ['.csv', '.xlsx', '.xls', '.tsv'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, allowed.includes(ext));
+  }
+});
+
+// Preview import (dry run — no data saved)
+app.post('/api/v1/admin/import/preview', requireAuth, requireRole('admin'), importUpload.single('archivo'), (req, res) => {
+  try {
+    if (!req.file) return err(res, 'VALIDATION_ERROR', 'Archivo CSV o XLSX requerido');
+    const { headers, rows, errors: parseErrors } = parseFile(req.file.buffer, req.file.originalname);
+    if (rows.length === 0) return err(res, 'EMPTY_FILE', 'El archivo no contiene datos');
+    const { mapping, unmapped } = detectColumns(headers);
+
+    // Check minimum required columns
+    if (!mapping.first_name) return err(res, 'MISSING_COLUMN', 'No se encontró columna de nombre del huésped');
+    if (!mapping.check_in) return err(res, 'MISSING_COLUMN', 'No se encontró columna de check-in');
+    if (!mapping.check_out) return err(res, 'MISSING_COLUMN', 'No se encontró columna de check-out');
+
+    const db = getDb();
+    const results = runImport(db, rows, mapping, { dryRun: true, skipDuplicates: true });
+
+    ok(res, {
+      filename: req.file.originalname,
+      total_rows: rows.length,
+      headers,
+      mapping,
+      unmapped,
+      preview: results.details.slice(0, 20),
+      summary: {
+        will_import: results.imported,
+        duplicates: results.duplicates,
+        errors: results.errors,
+      },
+      parse_errors: parseErrors?.slice(0, 5) || [],
+    });
+  } catch (e) {
+    console.error('Import preview error:', e);
+    err(res, 'SERVER_ERROR', `Error procesando archivo: ${e.message}`, 500);
+  }
+});
+
+// Execute import (saves data)
+app.post('/api/v1/admin/import/execute', requireAuth, requireRole('admin'), importUpload.single('archivo'), (req, res) => {
+  try {
+    if (!req.file) return err(res, 'VALIDATION_ERROR', 'Archivo CSV o XLSX requerido');
+    const { headers, rows, errors: parseErrors } = parseFile(req.file.buffer, req.file.originalname);
+    if (rows.length === 0) return err(res, 'EMPTY_FILE', 'El archivo no contiene datos');
+    const { mapping, unmapped } = detectColumns(headers);
+
+    if (!mapping.first_name) return err(res, 'MISSING_COLUMN', 'No se encontró columna de nombre del huésped');
+    if (!mapping.check_in) return err(res, 'MISSING_COLUMN', 'No se encontró columna de check-in');
+    if (!mapping.check_out) return err(res, 'MISSING_COLUMN', 'No se encontró columna de check-out');
+
+    const db = getDb();
+    const results = runImport(db, rows, mapping, { dryRun: false, skipDuplicates: true });
+
+    ok(res, {
+      filename: req.file.originalname,
+      summary: {
+        total: results.total,
+        imported: results.imported,
+        duplicates: results.duplicates,
+        errors: results.errors,
+      },
+      mapping,
+      details: results.details,
+    });
+  } catch (e) {
+    console.error('Import execute error:', e);
+    err(res, 'SERVER_ERROR', `Error importando: ${e.message}`, 500);
+  }
+});
+
+// Import history — count imported reservations
+app.get('/api/v1/admin/import/stats', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const db = getDb();
+    const imported = db.prepare("SELECT COUNT(*) as c FROM reservas_hotel WHERE created_by = 'Cloudbeds Import'").get().c;
+    const lastImport = db.prepare("SELECT created_at FROM reservas_hotel WHERE created_by = 'Cloudbeds Import' ORDER BY id DESC LIMIT 1").get();
+    ok(res, {
+      total_imported: imported,
+      last_import: lastImport?.created_at || null,
+    });
+  } catch (e) { err(res, 'SERVER_ERROR', 'Error obteniendo stats', 500); }
 });
 
 // Serve uploads

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, Link, useNavigate, useLocation } from 'react-router-dom';
 import { api, setToken, clearToken, isLoggedIn } from './api/client';
-import { Hotel, CalendarDays, BedDouble, DollarSign, LogOut, Menu, X, LayoutGrid, Settings, Package, ExternalLink, BarChart3 } from 'lucide-react';
+import { Hotel, CalendarDays, BedDouble, DollarSign, LogOut, Menu, X, LayoutGrid, Settings, Package, ExternalLink, BarChart3, Upload } from 'lucide-react';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Reservas from './pages/Reservas';
@@ -14,6 +14,7 @@ import Saldos from './pages/Saldos';
 import Productos from './pages/Productos';
 import Reportes from './pages/Reportes';
 import BookingWidget from './pages/BookingWidget';
+import ImportarDatos from './pages/ImportarDatos';
 
 function App() {
   const [user, setUser] = useState<any>(null);
@@ -52,6 +53,7 @@ function App() {
     { path: '/admin/habitaciones', label: 'Config Rooms', icon: Settings },
     { path: '/saldos', label: 'CxC', icon: DollarSign },
     { path: '/reportes', label: 'Reportes', icon: BarChart3 },
+    { path: '/admin/importar', label: 'Importar', icon: Upload },
   ];
 
   const isActive = (path: string) => location.pathname === path || (path !== '/' && location.pathname.startsWith(path));
@@ -114,6 +116,7 @@ function App() {
             <Route path="/productos" element={<Productos />} />
             <Route path="/saldos" element={<Saldos />} />
             <Route path="/reportes" element={<Reportes />} />
+            <Route path="/admin/importar" element={<ImportarDatos />} />
             <Route path="/login" element={<Navigate to="/" />} />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
