@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { api } from '../api/client';
-import { BedDouble, ArrowDownRight, ArrowUpRight, DollarSign, CalendarDays, Users, Globe, TrendingUp, Star } from 'lucide-react';
+import { BedDouble, ArrowDownRight, ArrowUpRight, DollarSign, CalendarDays, Users, TrendingUp } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 const estadoColor: Record<string, string> = {
@@ -24,7 +24,6 @@ export default function Dashboard() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [periodo, setPeriodo] = useState('mes');
-  const [guestStats, setGuestStats] = useState<any>(null);
 
   const load = (p: string) => {
     setLoading(true);
@@ -33,15 +32,11 @@ export default function Dashboard() {
 
   useEffect(() => { load(periodo); }, [periodo]);
 
-  // Load guest historical stats
-  useEffect(() => {
-    api.get('/hotel/huespedes/stats').then(r => setGuestStats(r.data)).catch(() => {});
-  }, []);
-
   if (loading && !data) return <div className="animate-pulse text-gray-400 p-8">Cargando dashboard...</div>;
   if (!data) return null;
 
   const periodoLabel = periodos.find(p => p.key === periodo)?.label || 'Mes';
+  const hist = data.historico;
 
   return (
     <div>
@@ -69,7 +64,7 @@ export default function Dashboard() {
             <span className="text-sm font-bold text-ocean-700">🏨 Estadía</span>
           </div>
           <div className="text-2xl font-bold text-gray-800">{data.ocupacion.estadia?.pct || 0}%</div>
-          <div className="text-sm text-gray-400">Ocupación • {data.ocupacion.estadia?.ocupadas || 0}/{data.ocupacion.estadia?.total || 0} hab</div>
+          <div className="text-sm text-gray-400">Ocupación ({periodoLabel}) • {data.ocupacion.estadia?.ocupadas || 0} noches/{data.ocupacion.estadia?.total || 0} hab</div>
           <div className="text-xs text-gray-300 mt-1">{data.financiero.reservas_estadia || 0} reservas ({periodoLabel})</div>
         </div>
         {/* Pasadía Column */}
@@ -81,7 +76,7 @@ export default function Dashboard() {
             <span className="text-sm font-bold text-amber-700">☀️ Pasadía</span>
           </div>
           <div className="text-2xl font-bold text-gray-800">{data.ocupacion.pasadia?.pct || 0}%</div>
-          <div className="text-sm text-gray-400">Ocupación • {data.ocupacion.pasadia?.ocupadas || 0}/{data.ocupacion.pasadia?.total || 0} unidades</div>
+          <div className="text-sm text-gray-400">Ocupación ({periodoLabel}) • {data.ocupacion.pasadia?.ocupadas || 0} noches/{data.ocupacion.pasadia?.total || 0} hab</div>
           <div className="text-xs text-gray-300 mt-1">{data.financiero.reservas_pasadia || 0} reservas ({periodoLabel})</div>
         </div>
         {/* Financial */}
@@ -101,13 +96,13 @@ export default function Dashboard() {
       {/* Dual Occupancy Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
         <div className="bg-white rounded-xl p-5 shadow-sm border-t-4 border-ocean-400">
-          <h3 className="font-semibold text-ocean-700 mb-1">🏨 Ocupación Estadía — 14 días</h3>
-          <p className="text-xs text-gray-400 mb-3">{data.ocupacion.estadia?.ocupadas || 0}/{data.ocupacion.estadia?.total || 0} hab ocupadas hoy ({data.ocupacion.estadia?.pct || 0}%)</p>
+          <h3 className="font-semibold text-ocean-700 mb-1">🏨 Ocupación Estadía</h3>
+          <p className="text-xs text-gray-400 mb-3">{data.ocupacion.estadia?.pct || 0}% promedio ({periodoLabel})</p>
           <OccupancyBarChart timeline={data.timeline_estadia || []} color="ocean" />
         </div>
         <div className="bg-white rounded-xl p-5 shadow-sm border-t-4 border-amber-400">
-          <h3 className="font-semibold text-amber-700 mb-1">☀️ Ocupación Pasadía — 14 días</h3>
-          <p className="text-xs text-gray-400 mb-3">{data.ocupacion.pasadia?.ocupadas || 0}/{data.ocupacion.pasadia?.total || 0} unidades hoy ({data.ocupacion.pasadia?.pct || 0}%)</p>
+          <h3 className="font-semibold text-amber-700 mb-1">☀️ Ocupación Pasadía</h3>
+          <p className="text-xs text-gray-400 mb-3">{data.ocupacion.pasadia?.pct || 0}% promedio ({periodoLabel})</p>
           <OccupancyBarChart timeline={data.timeline_pasadia || []} color="amber" />
         </div>
       </div>
@@ -148,127 +143,73 @@ export default function Dashboard() {
       </div>
 
       {/* ══════════════════════════════════════ */}
-      {/* HISTORIAL CLOUDBEDS — Guest Stats     */}
+      {/* HISTORIAL CLOUDBEDS — filtered by period */}
       {/* ══════════════════════════════════════ */}
-      {guestStats && guestStats.total_huespedes > 0 && (
+      {hist && hist.total_reservas > 0 && (
         <div className="mb-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
               <Users size={22} className="text-purple-600" />
-              📊 Historial Cloudbeds
+              📊 Historial Cloudbeds ({periodoLabel})
             </h2>
             <Link to="/huespedes" className="text-sm text-mahana-600 hover:underline">Ver todos →</Link>
           </div>
 
-          {/* Historical KPI Cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
             <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl p-4 border border-purple-200">
               <div className="flex items-center gap-2 mb-2">
                 <Users size={18} className="text-purple-600" />
-                <span className="text-xs font-medium text-purple-700">Huéspedes</span>
+                <span className="text-xs font-medium text-purple-700">Clientes ({periodoLabel})</span>
               </div>
-              <div className="text-2xl font-bold text-gray-800">{guestStats.total_huespedes?.toLocaleString()}</div>
-              <div className="text-xs text-purple-500">{guestStats.total_habituales || 0} habituales ⭐</div>
+              <div className="text-2xl font-bold text-gray-800">{(hist.total_clientes || 0).toLocaleString()}</div>
             </div>
             <div className="bg-gradient-to-br from-green-50 to-emerald-100 rounded-xl p-4 border border-green-200">
               <div className="flex items-center gap-2 mb-2">
                 <DollarSign size={18} className="text-green-600" />
-                <span className="text-xs font-medium text-green-700">Ingresos Históricos</span>
+                <span className="text-xs font-medium text-green-700">Ingresos ({periodoLabel})</span>
               </div>
-              <div className="text-2xl font-bold text-gray-800">${(guestStats.total_ingresos_historico || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
-              <div className="text-xs text-green-500">Total acumulado</div>
+              <div className="text-2xl font-bold text-gray-800">${(hist.total_ingresos || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
             </div>
             <div className="bg-gradient-to-br from-ocean-50 to-blue-100 rounded-xl p-4 border border-ocean-200">
               <div className="flex items-center gap-2 mb-2">
                 <CalendarDays size={18} className="text-ocean-600" />
-                <span className="text-xs font-medium text-ocean-700">Reservas Históricas</span>
+                <span className="text-xs font-medium text-ocean-700">Reservas ({periodoLabel})</span>
               </div>
-              <div className="text-2xl font-bold text-gray-800">{(guestStats.total_reservas_historico || 0).toLocaleString()}</div>
-              <div className="text-xs text-ocean-500">{(guestStats.total_noches_historico || 0).toLocaleString()} noches totales</div>
+              <div className="text-2xl font-bold text-gray-800">{(hist.total_reservas || 0).toLocaleString()}</div>
             </div>
             <div className="bg-gradient-to-br from-amber-50 to-amber-100 rounded-xl p-4 border border-amber-200">
               <div className="flex items-center gap-2 mb-2">
-                <Globe size={18} className="text-amber-600" />
-                <span className="text-xs font-medium text-amber-700">Operación</span>
+                <BedDouble size={18} className="text-amber-600" />
+                <span className="text-xs font-medium text-amber-700">Noches ({periodoLabel})</span>
               </div>
-              <div className="text-2xl font-bold text-gray-800">
-                {guestStats.primera_estadia ? new Date(guestStats.primera_estadia + 'T12:00:00').getFullYear() : '—'}
-                {' → '}
-                {guestStats.ultima_estadia ? new Date(guestStats.ultima_estadia + 'T12:00:00').getFullYear() : '—'}
-              </div>
-              <div className="text-xs text-amber-500">Rango de estadías</div>
+              <div className="text-2xl font-bold text-gray-800">{(hist.total_noches || 0).toLocaleString()}</div>
             </div>
           </div>
 
-          {/* Revenue by Year + Top Countries + Top Guests */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            {/* Revenue by Year */}
-            <div className="bg-white rounded-xl p-5 shadow-sm border-t-4 border-green-400">
-              <h3 className="font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                <TrendingUp size={16} className="text-green-600" /> Ingresos por Año
-              </h3>
-              {guestStats.revenueByYear?.length > 0 ? (
-                <div className="space-y-2">
-                  {guestStats.revenueByYear.map((y: any) => {
-                    const maxRev = Math.max(...(guestStats.revenueByYear || []).map((r: any) => r.ingresos || 0), 1);
-                    return (
-                      <div key={y.year} className="group">
-                        <div className="flex items-center justify-between text-xs mb-0.5">
-                          <span className="font-semibold text-gray-700">{y.year}</span>
-                          <span className="text-gray-500">${(y.ingresos || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })} • {y.huespedes} huésp</span>
-                        </div>
-                        <div className="w-full bg-gray-100 rounded-full h-2.5">
-                          <div className="h-2.5 rounded-full bg-gradient-to-r from-green-400 to-emerald-500 transition-all"
-                            style={{ width: `${Math.max(3, ((y.ingresos || 0) / maxRev) * 100)}%` }} />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : <div className="text-gray-400 text-sm">Sin datos por año</div>}
-            </div>
-
-            {/* Top Countries */}
+          {(data.historico_por_tipo || []).length > 0 && (
             <div className="bg-white rounded-xl p-5 shadow-sm border-t-4 border-purple-400">
               <h3 className="font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                <Globe size={16} className="text-purple-600" /> Top Países
+                <TrendingUp size={16} className="text-purple-600" /> Por Tipo de Habitación ({periodoLabel})
               </h3>
               <div className="space-y-2">
-                {(guestStats.topPaises || []).slice(0, 7).map((p: any, i: number) => (
-                  <div key={i} className="flex items-center justify-between text-sm">
-                    <span className="text-gray-700">{p.pais || 'N/D'}</span>
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs text-gray-400">{p.count} huésp</span>
-                      <span className="font-medium text-gray-700">${(p.ingresos || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Top Guests */}
-            <div className="bg-white rounded-xl p-5 shadow-sm border-t-4 border-amber-400">
-              <h3 className="font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                <Star size={16} className="text-amber-500" /> Top Huéspedes
-              </h3>
-              <div className="space-y-2">
-                {(guestStats.topHuespedes || []).slice(0, 7).map((g: any, i: number) => (
-                  <div key={i} className="flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-full bg-mahana-100 text-mahana-700 text-xs flex items-center justify-center font-bold">
-                        {i + 1}
+                {(data.historico_por_tipo || []).map((t: any, i: number) => {
+                  const maxRev = Math.max(...(data.historico_por_tipo || []).map((r: any) => r.ingresos || 0), 1);
+                  return (
+                    <div key={i}>
+                      <div className="flex items-center justify-between text-xs mb-0.5">
+                        <span className="font-semibold text-gray-700">{t.tipo_habitacion}</span>
+                        <span className="text-gray-500">${(t.ingresos || 0).toLocaleString()} • {t.reservas} reservas</span>
                       </div>
-                      <span className="text-gray-700 truncate max-w-[120px]">{g.nombre} {g.apellido}</span>
+                      <div className="w-full bg-gray-100 rounded-full h-2.5">
+                        <div className="h-2.5 rounded-full bg-gradient-to-r from-purple-400 to-purple-600 transition-all"
+                          style={{ width: `${Math.max(3, ((t.ingresos || 0) / maxRev) * 100)}%` }} />
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <span className="font-semibold text-green-700">${(g.total_ingresos || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-                      <span className="text-xs text-gray-400 ml-1">({g.total_reservas})</span>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 

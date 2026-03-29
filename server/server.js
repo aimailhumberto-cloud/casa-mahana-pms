@@ -1003,27 +1003,6 @@ app.get('/api/v1/hotel/dashboard', requireAuth, (req, res) => {
       WHERE check_in >= ? GROUP BY estado ORDER BY c DESC
     `).all(periodoDesde);
 
-    // Occupancy timeline (last 14 days) — SPLIT by category
-    const totalEstadia = db.prepare("SELECT COUNT(*) as c FROM habitaciones WHERE activa = 1 AND categoria = 'Estadía'").get().c;
-    const totalPasadia = db.prepare("SELECT COUNT(*) as c FROM habitaciones WHERE activa = 1 AND categoria = 'Pasadía'").get().c;
-    const timelineEstadia = [];
-    const timelinePasadia = [];
-    for (let i = 13; i >= 0; i--) {
-      const dd = new Date(); dd.setDate(dd.getDate() - i);
-      const ds = dd.toISOString().split('T')[0];
-      const occE = db.prepare(`
-        SELECT COUNT(DISTINCT r.habitacion_id) as c FROM reservas_hotel r
-        JOIN habitaciones h ON r.habitacion_id = h.id
-        WHERE h.categoria = 'Estadía' AND r.estado NOT IN ('Cancelada', 'No-Show') AND r.check_in <= ? AND r.check_out > ?
-      `).get(ds, ds).c;
-      const occP = db.prepare(`
-        SELECT COUNT(DISTINCT r.habitacion_id) as c FROM reservas_hotel r
-        JOIN habitaciones h ON r.habitacion_id = h.id
-        WHERE h.categoria = 'Pasadía' AND r.estado NOT IN ('Cancelada', 'No-Show') AND r.check_in <= ? AND r.check_out > ?
-      `).get(ds, ds).c;
-      timelineEstadia.push({ fecha: ds, ocupadas: occE, pct: totalEstadia > 0 ? Math.round((occE / totalEstadia) * 100) : 0 });
-      timelinePasadia.push({ fecha: ds, ocupadas: occP, pct: totalPasadia > 0 ? Math.round((occP / totalPasadia) * 100) : 0 });
-    }
 
     // Ingresos por plan (for pie chart — more business-relevant)
     const ingresosPorPlan = db.prepare(`
@@ -1046,23 +1025,84 @@ app.get('/api/v1/hotel/dashboard', requireAuth, (req, res) => {
     const limpiezaEstadia = db.prepare(`SELECT estado_limpieza, COUNT(*) as c FROM habitaciones WHERE activa = 1 AND categoria = 'Estadía' GROUP BY estado_limpieza`).all();
     const limpiezaPasadia = db.prepare(`SELECT estado_limpieza, COUNT(*) as c FROM habitaciones WHERE activa = 1 AND categoria = 'Pasadía' GROUP BY estado_limpieza`).all();
 
-    // Occupied counts by category
-    const occupiedEstadia = db.prepare(`
-      SELECT COUNT(DISTINCT r.habitacion_id) as c FROM reservas_hotel r
+    // Occupied counts by category — period-based occupancy
+    // For 'dia': rooms active today. For others: avg occupancy across the period.
+    const totalEstadia = db.prepare("SELECT COUNT(*) as c FROM habitaciones WHERE activa = 1 AND categoria = 'Estadía'").get().c;
+    const totalPasadia = db.prepare("SELECT COUNT(*) as c FROM habitaciones WHERE activa = 1 AND categoria = 'Pasadía'").get().c;
+
+    // Calculate days in period
+    const periodoHasta = hoy;
+    const daysInPeriod = Math.max(1, Math.ceil((new Date(periodoHasta).getTime() - new Date(periodoDesde).getTime()) / 86400000) + 1);
+
+    // Total room-nights occupied in the period (Estadía)
+    const nochesEstadia = db.prepare(`
+      SELECT COALESCE(SUM(r.noches), 0) as n FROM reservas_hotel r
       JOIN habitaciones h ON r.habitacion_id = h.id
-      WHERE h.categoria = 'Estadía' AND r.estado = 'Hospedado' AND r.check_in <= ? AND r.check_out > ?
-    `).get(hoy, hoy).c;
-    const occupiedPasadia = db.prepare(`
-      SELECT COUNT(DISTINCT r.habitacion_id) as c FROM reservas_hotel r
+      WHERE h.categoria = 'Estadía' AND r.estado NOT IN ('Cancelada', 'No-Show')
+        AND r.check_in <= ? AND r.check_out >= ?
+    `).get(periodoHasta, periodoDesde).n;
+    const slotsEstadia = totalEstadia * daysInPeriod;
+    const pctEstadia = slotsEstadia > 0 ? Math.min(100, Math.round((nochesEstadia / slotsEstadia) * 100)) : 0;
+
+    // Total room-nights occupied in the period (Pasadía)
+    const nochesPasadia = db.prepare(`
+      SELECT COALESCE(SUM(r.noches), 0) as n FROM reservas_hotel r
       JOIN habitaciones h ON r.habitacion_id = h.id
-      WHERE h.categoria = 'Pasadía' AND r.estado = 'Hospedado' AND r.check_in <= ? AND r.check_out > ?
-    `).get(hoy, hoy).c;
+      WHERE h.categoria = 'Pasadía' AND r.estado NOT IN ('Cancelada', 'No-Show')
+        AND r.check_in <= ? AND r.check_out >= ?
+    `).get(periodoHasta, periodoDesde).n;
+    const slotsPasadia = totalPasadia * daysInPeriod;
+    const pctPasadia = slotsPasadia > 0 ? Math.min(100, Math.round((nochesPasadia / slotsPasadia) * 100)) : 0;
+
+    // Occupancy timeline — adapts to period
+    const timelineEstadia = [];
+    const timelinePasadia = [];
+    const timelineDays = periodo === 'dia' ? 1 : periodo === 'semana' ? 7 : periodo === 'total' ? 30 : 14;
+    // For 'total', show last 30 days; for others use actual period length
+    const tlStart = periodo === 'total' ? 29 : Math.min(timelineDays - 1, 29);
+
+    for (let i = tlStart; i >= 0; i--) {
+      const dd = new Date(); dd.setDate(dd.getDate() - i);
+      const ds = dd.toISOString().split('T')[0];
+      const occE = db.prepare(`
+        SELECT COUNT(DISTINCT r.habitacion_id) as c FROM reservas_hotel r
+        JOIN habitaciones h ON r.habitacion_id = h.id
+        WHERE h.categoria = 'Estadía' AND r.estado NOT IN ('Cancelada', 'No-Show') AND r.check_in <= ? AND r.check_out > ?
+      `).get(ds, ds).c;
+      const occP = db.prepare(`
+        SELECT COUNT(DISTINCT r.habitacion_id) as c FROM reservas_hotel r
+        JOIN habitaciones h ON r.habitacion_id = h.id
+        WHERE h.categoria = 'Pasadía' AND r.estado NOT IN ('Cancelada', 'No-Show') AND r.check_in <= ? AND r.check_out > ?
+      `).get(ds, ds).c;
+      timelineEstadia.push({ fecha: ds, ocupadas: occE, pct: totalEstadia > 0 ? Math.round((occE / totalEstadia) * 100) : 0 });
+      timelinePasadia.push({ fecha: ds, ocupadas: occP, pct: totalPasadia > 0 ? Math.round((occP / totalPasadia) * 100) : 0 });
+    }
+
+    // Historical stats filtered by period
+    const histStats = db.prepare(`
+      SELECT 
+        COUNT(*) as total_reservas,
+        SUM(noches) as total_noches,
+        ROUND(SUM(monto_total), 2) as total_ingresos,
+        COUNT(DISTINCT cliente || apellido) as total_clientes
+      FROM reservas_hotel
+      WHERE created_by = 'Cloudbeds Import' AND check_in >= ? AND check_in <= ?
+        AND estado NOT IN ('Cancelada', 'No-Show')
+    `).get(periodoDesde, periodoHasta);
+
+    const histByType = db.prepare(`
+      SELECT tipo_habitacion, COUNT(*) as reservas, ROUND(SUM(monto_total)) as ingresos
+      FROM reservas_hotel
+      WHERE created_by = 'Cloudbeds Import' AND check_in >= ? AND check_in <= ?
+        AND estado NOT IN ('Cancelada', 'No-Show')
+      GROUP BY tipo_habitacion ORDER BY ingresos DESC
+    `).all(periodoDesde, periodoHasta);
 
     ok(res, {
       ocupacion: {
-        total: totalRooms, ocupadas: occupied, porcentaje: Math.round((occupied / totalRooms) * 100),
-        estadia: { total: totalEstadia, ocupadas: occupiedEstadia, pct: totalEstadia > 0 ? Math.round((occupiedEstadia / totalEstadia) * 100) : 0 },
-        pasadia: { total: totalPasadia, ocupadas: occupiedPasadia, pct: totalPasadia > 0 ? Math.round((occupiedPasadia / totalPasadia) * 100) : 0 },
+        total: totalEstadia + totalPasadia, ocupadas: nochesEstadia + nochesPasadia, porcentaje: (slotsEstadia + slotsPasadia) > 0 ? Math.round(((nochesEstadia + nochesPasadia) / (slotsEstadia + slotsPasadia)) * 100) : 0,
+        estadia: { total: totalEstadia, ocupadas: nochesEstadia, pct: pctEstadia, dias: daysInPeriod },
+        pasadia: { total: totalPasadia, ocupadas: nochesPasadia, pct: pctPasadia, dias: daysInPeriod },
       },
       hoy: { llegadas: llegadasHoy, salidas: salidasHoy, hospedados },
       financiero: { ingresos_periodo: Math.round(ingresosPeriodo * 100) / 100, saldo_pendiente_total: Math.round(saldoTotal * 100) / 100, reservas_periodo: reservasPeriodo, reservas_estadia: reservasEstadia, reservas_pasadia: reservasPasadia },
@@ -1075,6 +1115,8 @@ app.get('/api/v1/hotel/dashboard', requireAuth, (req, res) => {
       timeline_pasadia: timelinePasadia,
       ingresos_por_plan: ingresosPorPlan,
       ocupacion_por_tipo: ocupacionPorTipo,
+      historico: histStats,
+      historico_por_tipo: histByType,
       periodo
     });
   } catch (e) { console.error(e); err(res, 'SERVER_ERROR', 'Error cargando dashboard', 500); }
