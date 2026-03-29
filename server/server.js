@@ -1848,17 +1848,282 @@ app.post('/api/v1/admin/import/execute', requireAuth, requireRole('admin'), impo
   }
 });
 
-// Import history — count imported reservations
+
+// Import history — count imported reservations + guests
 app.get('/api/v1/admin/import/stats', requireAuth, requireRole('admin'), (req, res) => {
   try {
     const db = getDb();
     const imported = db.prepare("SELECT COUNT(*) as c FROM reservas_hotel WHERE created_by = 'Cloudbeds Import'").get().c;
     const lastImport = db.prepare("SELECT created_at FROM reservas_hotel WHERE created_by = 'Cloudbeds Import' ORDER BY id DESC LIMIT 1").get();
+    // Guest stats
+    let guestsImported = 0, lastGuestImport = null;
+    try {
+      guestsImported = db.prepare("SELECT COUNT(*) as c FROM huespedes WHERE fuente_import = 'Cloudbeds'").get().c;
+      const lg = db.prepare("SELECT created_at FROM huespedes WHERE fuente_import = 'Cloudbeds' ORDER BY id DESC LIMIT 1").get();
+      lastGuestImport = lg?.created_at || null;
+    } catch(e) { /* table may not exist yet */ }
     ok(res, {
       total_imported: imported,
       last_import: lastImport?.created_at || null,
+      guests_imported: guestsImported,
+      last_guest_import: lastGuestImport,
     });
   } catch (e) { err(res, 'SERVER_ERROR', 'Error obteniendo stats', 500); }
+});
+
+// ── Import Cloudbeds Guests (guests.xlsx) ──
+
+// Guest column mapping (Cloudbeds Spanish export)
+const GUEST_COLUMNS = {
+  nombre: ['nombre', 'first name', 'first_name', 'name', 'guest name'],
+  apellido: ['apellido', 'last name', 'last_name', 'surname', 'family name'],
+  email: ['correo electrónico', 'correo electronico', 'correo', 'email', 'e-mail', 'guest email'],
+  telefono: ['teléfono', 'telefono', 'phone', 'telephone', 'mobile', 'cell'],
+  direccion: ['dirección', 'direccion', 'address', 'street'],
+  ciudad: ['ciudad', 'city'],
+  pais: ['país', 'pais', 'country', 'nationality'],
+  provincia: ['provincia', 'state', 'region'],
+  codigo_postal: ['código postal', 'codigo postal', 'zip', 'postal code', 'zip code'],
+  total_reservas: ['total de las reservas', 'total reservas', 'reservations', 'total reservations', 'bookings'],
+  noches_estadia: ['noches de estadía', 'noches de estadia', 'noches', 'nights', 'total nights', 'stay nights'],
+  total_ingresos: ['total de ingresos', 'ingresos', 'revenue', 'total revenue', 'income'],
+  ultima_estadia: ['última estadía', 'ultima estadia', 'last stay', 'last visit', 'last checkout'],
+  huesped_habitual: ['huésped habitual', 'huesped habitual', 'returning guest', 'repeat guest', 'habitual'],
+  estado_huesped: ['estado del huésped', 'estado del huesped', 'guest status', 'status'],
+};
+
+function detectGuestColumns(fileHeaders) {
+  const mapping = {};
+  const used = new Set();
+  const normalized = fileHeaders.map(h => h.toLowerCase().trim());
+
+  for (const [field, variations] of Object.entries(GUEST_COLUMNS)) {
+    for (const variant of variations) {
+      const idx = normalized.findIndex((h, i) => !used.has(i) && (h === variant || h.includes(variant)));
+      if (idx !== -1) {
+        mapping[field] = fileHeaders[idx];
+        used.add(idx);
+        break;
+      }
+    }
+  }
+  const unmapped = fileHeaders.filter((_, i) => !used.has(i));
+  return { mapping, unmapped };
+}
+
+function isGuestFile(headers) {
+  const lower = headers.map(h => h.toLowerCase().trim());
+  // Guest files have "total de las reservas" or "noches de estadía" but NO check-in/check-out
+  const hasGuestFields = lower.some(h => h.includes('total de las reservas') || h.includes('noches de estad') || h.includes('total reservations'));
+  const hasReservationFields = lower.some(h => h.includes('check-in') || h.includes('check_in') || h.includes('checkin') || h.includes('arrival'));
+  return hasGuestFields && !hasReservationFields;
+}
+
+// Preview guests import
+app.post('/api/v1/admin/import/guests/preview', requireAuth, requireRole('admin'), importUpload.single('archivo'), (req, res) => {
+  try {
+    if (!req.file) return err(res, 'VALIDATION_ERROR', 'Archivo requerido');
+    const { parseFile } = require('./import-cloudbeds');
+    const { headers, rows } = parseFile(req.file.buffer, req.file.originalname);
+    if (rows.length === 0) return err(res, 'EMPTY_FILE', 'El archivo no contiene datos');
+
+    const { mapping, unmapped } = detectGuestColumns(headers);
+    if (!mapping.nombre) return err(res, 'MISSING_COLUMN', 'No se encontró columna de nombre');
+
+    const db = getDb();
+    let duplicates = 0, willImport = 0, errors = 0;
+    const preview = [];
+
+    for (let i = 0; i < Math.min(rows.length, 20); i++) {
+      const row = rows[i];
+      const nombre = row[mapping.nombre]?.toString().trim();
+      const apellido = mapping.apellido ? row[mapping.apellido]?.toString().trim() : '';
+      const email = mapping.email ? row[mapping.email]?.toString().trim() : '';
+
+      if (!nombre) { errors++; preview.push({ row: i+1, status: 'error', errors: ['Sin nombre'] }); continue; }
+
+      // Check duplicate
+      let isDup = false;
+      try {
+        if (email) {
+          isDup = !!db.prepare("SELECT id FROM huespedes WHERE email = ?").get(email);
+        }
+        if (!isDup) {
+          isDup = !!db.prepare("SELECT id FROM huespedes WHERE LOWER(nombre) = LOWER(?) AND LOWER(apellido) = LOWER(?)").get(nombre, apellido || '');
+        }
+      } catch(e) { /* table may not exist */ }
+
+      if (isDup) {
+        duplicates++;
+        preview.push({ row: i+1, status: 'duplicate', guest: `${nombre} ${apellido}`, email });
+      } else {
+        willImport++;
+        const totalRes = mapping.total_reservas ? parseInt(row[mapping.total_reservas]) || 0 : 0;
+        const totalRev = mapping.total_ingresos ? parseFloat(row[mapping.total_ingresos]) || 0 : 0;
+        const noches = mapping.noches_estadia ? parseInt(row[mapping.noches_estadia]) || 0 : 0;
+        const pais = mapping.pais ? row[mapping.pais]?.toString().trim() : '';
+        preview.push({
+          row: i+1, status: 'preview', guest: `${nombre} ${apellido}`,
+          email, pais, total_reservas: totalRes, total_ingresos: totalRev, noches,
+        });
+      }
+    }
+
+    // Count totals for full file
+    let fullDups = 0, fullImport = 0, fullErrors = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const nombre = row[mapping.nombre]?.toString().trim();
+      if (!nombre) { fullErrors++; continue; }
+      const apellido = mapping.apellido ? row[mapping.apellido]?.toString().trim() : '';
+      const email = mapping.email ? row[mapping.email]?.toString().trim() : '';
+      let isDup = false;
+      try {
+        if (email) isDup = !!db.prepare("SELECT id FROM huespedes WHERE email = ?").get(email);
+        if (!isDup) isDup = !!db.prepare("SELECT id FROM huespedes WHERE LOWER(nombre) = LOWER(?) AND LOWER(apellido) = LOWER(?)").get(nombre, apellido || '');
+      } catch(e) { }
+      if (isDup) fullDups++; else fullImport++;
+    }
+
+    ok(res, {
+      type: 'guests',
+      filename: req.file.originalname,
+      total_rows: rows.length,
+      headers,
+      mapping,
+      unmapped,
+      preview,
+      summary: {
+        will_import: fullImport,
+        duplicates: fullDups,
+        errors: fullErrors,
+      },
+    });
+  } catch (e) {
+    console.error('Guest preview error:', e);
+    err(res, 'SERVER_ERROR', `Error procesando archivo: ${e.message}`, 500);
+  }
+});
+
+// Execute guests import
+app.post('/api/v1/admin/import/guests/execute', requireAuth, requireRole('admin'), importUpload.single('archivo'), (req, res) => {
+  try {
+    if (!req.file) return err(res, 'VALIDATION_ERROR', 'Archivo requerido');
+    const { parseFile } = require('./import-cloudbeds');
+    const { headers, rows } = parseFile(req.file.buffer, req.file.originalname);
+    if (rows.length === 0) return err(res, 'EMPTY_FILE', 'El archivo no contiene datos');
+
+    const { mapping } = detectGuestColumns(headers);
+    if (!mapping.nombre) return err(res, 'MISSING_COLUMN', 'No se encontró columna de nombre');
+
+    const db = getDb();
+    let imported = 0, duplicates = 0, errors = 0;
+    const details = [];
+
+    const parseGuestDate = (val) => {
+      if (!val) return null;
+      const str = String(val).trim();
+      // DD/MM/YYYY format (Cloudbeds Spanish)
+      const m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      if (m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+      // ISO
+      if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.substring(0, 10);
+      // Date object
+      if (val instanceof Date) return val.toISOString().split('T')[0];
+      return str;
+    };
+
+    const txn = db.transaction(() => {
+      const insertStmt = db.prepare(`INSERT INTO huespedes 
+        (nombre, apellido, email, telefono, direccion, ciudad, pais, provincia, codigo_postal,
+         total_reservas, noches_estadia, total_ingresos, ultima_estadia, huesped_habitual, estado_huesped, fuente_import)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        try {
+          const nombre = row[mapping.nombre]?.toString().trim();
+          if (!nombre) { errors++; details.push({ row: i+1, status: 'error', errors: ['Sin nombre'] }); continue; }
+
+          const apellido = mapping.apellido ? row[mapping.apellido]?.toString().trim() || '' : '';
+          const email = mapping.email ? row[mapping.email]?.toString().trim() || '' : '';
+          const telefono = mapping.telefono ? row[mapping.telefono]?.toString().trim() || '' : '';
+          const direccion = mapping.direccion ? row[mapping.direccion]?.toString().trim() || '' : '';
+          const ciudad = mapping.ciudad ? row[mapping.ciudad]?.toString().trim() || '' : '';
+          const pais = mapping.pais ? row[mapping.pais]?.toString().trim() || '' : '';
+          const provincia = mapping.provincia ? row[mapping.provincia]?.toString().trim() || '' : '';
+          const codigoPostal = mapping.codigo_postal ? row[mapping.codigo_postal]?.toString().trim() || '' : '';
+          const totalReservas = mapping.total_reservas ? parseInt(row[mapping.total_reservas]) || 0 : 0;
+          const nochesEstadia = mapping.noches_estadia ? parseInt(row[mapping.noches_estadia]) || 0 : 0;
+          const totalIngresos = mapping.total_ingresos ? parseFloat(row[mapping.total_ingresos]) || 0 : 0;
+          const ultimaEstadia = mapping.ultima_estadia ? parseGuestDate(row[mapping.ultima_estadia]) : null;
+          const habitual = mapping.huesped_habitual ? (row[mapping.huesped_habitual]?.toString().toLowerCase() === 'sí' || row[mapping.huesped_habitual]?.toString().toLowerCase() === 'si' || row[mapping.huesped_habitual]?.toString().toLowerCase() === 'yes' ? 1 : 0) : 0;
+          const estadoHuesped = mapping.estado_huesped ? row[mapping.estado_huesped]?.toString().trim() || '' : '';
+
+          // Duplicate check
+          let isDup = false;
+          if (email) isDup = !!db.prepare("SELECT id FROM huespedes WHERE email = ?").get(email);
+          if (!isDup) isDup = !!db.prepare("SELECT id FROM huespedes WHERE LOWER(nombre) = LOWER(?) AND LOWER(apellido) = LOWER(?)").get(nombre, apellido);
+
+          if (isDup) {
+            duplicates++;
+            details.push({ row: i+1, status: 'duplicate', guest: `${nombre} ${apellido}` });
+            continue;
+          }
+
+          insertStmt.run(nombre, apellido, email, telefono, direccion, ciudad, pais, provincia, codigoPostal,
+            totalReservas, nochesEstadia, totalIngresos, ultimaEstadia, habitual, estadoHuesped, 'Cloudbeds');
+
+          imported++;
+          if (details.length < 100) {
+            details.push({ row: i+1, status: 'imported', guest: `${nombre} ${apellido}`, email, pais, total_reservas: totalReservas, total_ingresos: totalIngresos });
+          }
+        } catch (e) {
+          errors++;
+          details.push({ row: i+1, status: 'error', errors: [e.message] });
+        }
+      }
+    });
+    txn();
+
+    ok(res, {
+      type: 'guests',
+      filename: req.file.originalname,
+      summary: { total: rows.length, imported, duplicates, errors },
+      details: details.slice(0, 50),
+    });
+  } catch (e) {
+    console.error('Guest import error:', e);
+    err(res, 'SERVER_ERROR', `Error importando huéspedes: ${e.message}`, 500);
+  }
+});
+
+// List guests
+app.get('/api/v1/hotel/huespedes', requireAuth, (req, res) => {
+  try {
+    const { q, page = 1, limit = 50, habitual } = req.query;
+    const db = getDb();
+    const conditions = [];
+    const values = [];
+    if (q) { conditions.push("(nombre LIKE ? OR apellido LIKE ? OR email LIKE ?)"); values.push(`%${q}%`, `%${q}%`, `%${q}%`); }
+    if (habitual === '1') { conditions.push("huesped_habitual = 1"); }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const offset = ((+page) - 1) * (+limit);
+    const total = db.prepare(`SELECT COUNT(*) as c FROM huespedes ${where}`).get(...values).c;
+    const data = db.prepare(`SELECT * FROM huespedes ${where} ORDER BY total_ingresos DESC LIMIT ? OFFSET ?`).all(...values, +limit, offset);
+    ok(res, data, { total, page: +page, limit: +limit, pages: Math.ceil(total / +limit) });
+  } catch (e) { err(res, 'SERVER_ERROR', 'Error listando huéspedes', 500); }
+});
+
+// Search guests (autocomplete)
+app.get('/api/v1/hotel/huespedes/buscar', requireAuth, (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q || q.length < 2) return ok(res, []);
+    const db = getDb();
+    const results = db.prepare("SELECT id, nombre, apellido, email, telefono, pais, total_reservas, total_ingresos FROM huespedes WHERE nombre LIKE ? OR apellido LIKE ? OR email LIKE ? ORDER BY total_ingresos DESC LIMIT 10").all(`%${q}%`, `%${q}%`, `%${q}%`);
+    ok(res, results);
+  } catch (e) { err(res, 'SERVER_ERROR', 'Error buscando huéspedes', 500); }
 });
 
 // Serve uploads

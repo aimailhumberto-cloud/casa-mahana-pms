@@ -196,6 +196,32 @@ CREATE TABLE IF NOT EXISTS webhooks (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+-- ═══ DIRECTORIO DE HUÉSPEDES ═══
+CREATE TABLE IF NOT EXISTS huespedes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  nombre TEXT NOT NULL,
+  apellido TEXT,
+  email TEXT,
+  telefono TEXT,
+  direccion TEXT,
+  ciudad TEXT,
+  pais TEXT,
+  provincia TEXT,
+  codigo_postal TEXT,
+  total_reservas INTEGER DEFAULT 0,
+  noches_estadia INTEGER DEFAULT 0,
+  total_ingresos REAL DEFAULT 0,
+  ultima_estadia TEXT,              -- fecha última estadía
+  huesped_habitual INTEGER DEFAULT 0,
+  estado_huesped TEXT,
+  fuente_import TEXT,               -- "Cloudbeds", "Manual", etc.
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_huespedes_email ON huespedes(email);
+CREATE INDEX IF NOT EXISTS idx_huespedes_nombre ON huespedes(nombre, apellido);
+
 -- ═══ ÍNDICES ═══
 CREATE INDEX IF NOT EXISTS idx_reservas_checkin ON reservas_hotel(check_in);
 CREATE INDEX IF NOT EXISTS idx_reservas_checkout ON reservas_hotel(check_out);

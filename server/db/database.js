@@ -225,7 +225,7 @@ function getDb() {
 }
 
 // ── Table whitelist ──
-const VALID_TABLES = ['habitaciones', 'planes_tarifa', 'reservas_hotel', 'folio_hotel', 'huespedes_reserva', 'usuarios', 'config_hotel'];
+const VALID_TABLES = ['habitaciones', 'planes_tarifa', 'reservas_hotel', 'folio_hotel', 'huespedes_reserva', 'huespedes', 'usuarios', 'config_hotel'];
 
 function validateTable(table) {
   if (!VALID_TABLES.includes(table)) throw new Error(`Invalid table: ${table}`);
