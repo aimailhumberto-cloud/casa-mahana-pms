@@ -83,7 +83,7 @@ export default function Reportes() {
       case 'este_mes': { d = new Date(now.getFullYear(), now.getMonth(), 1); h = now; break; }
       case 'mes_pasado': { d = new Date(now.getFullYear(), now.getMonth() - 1, 1); h = new Date(now.getFullYear(), now.getMonth(), 0); break; }
       case 'este_ano': { d = new Date(now.getFullYear(), 0, 1); h = now; break; }
-      case 'todo': { d = new Date(2020, 0, 1); h = now; break; }
+      case 'todo': { d = new Date(2018, 0, 1); h = now; break; }
       default: return;
     }
     setDesde(d.toISOString().split('T')[0]);

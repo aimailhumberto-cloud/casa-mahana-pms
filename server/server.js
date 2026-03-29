@@ -947,7 +947,7 @@ app.get('/api/v1/hotel/dashboard', requireAuth, (req, res) => {
     const d = new Date();
     if (periodo === 'dia') periodoDesde = hoy;
     else if (periodo === 'semana') { d.setDate(d.getDate() - 7); periodoDesde = d.toISOString().split('T')[0]; }
-    else if (periodo === 'total') periodoDesde = '2020-01-01';
+    else if (periodo === 'total') periodoDesde = '2000-01-01';
     else { periodoDesde = hoy.substring(0, 7) + '-01'; } // mes
 
     const totalRooms = db.prepare('SELECT COUNT(*) as c FROM habitaciones WHERE activa = 1').get().c;
@@ -972,19 +972,19 @@ app.get('/api/v1/hotel/dashboard', requireAuth, (req, res) => {
     `).get(periodoDesde).total;
 
     const reservasPeriodo = db.prepare(`
-      SELECT COUNT(*) as c FROM reservas_hotel WHERE created_at >= ? AND estado NOT IN ('Cancelada', 'No-Show')
+      SELECT COUNT(*) as c FROM reservas_hotel WHERE check_in >= ? AND estado NOT IN ('Cancelada', 'No-Show')
     `).get(periodoDesde).c;
 
     // Split reservas by category
     const reservasEstadia = db.prepare(`
       SELECT COUNT(*) as c FROM reservas_hotel r
       JOIN habitaciones h ON r.habitacion_id = h.id
-      WHERE r.created_at >= ? AND r.estado NOT IN ('Cancelada', 'No-Show') AND h.categoria = 'Estadía'
+      WHERE r.check_in >= ? AND r.estado NOT IN ('Cancelada', 'No-Show') AND h.categoria = 'Estadía'
     `).get(periodoDesde).c;
     const reservasPasadia = db.prepare(`
       SELECT COUNT(*) as c FROM reservas_hotel r
       JOIN habitaciones h ON r.habitacion_id = h.id
-      WHERE r.created_at >= ? AND r.estado NOT IN ('Cancelada', 'No-Show') AND h.categoria = 'Pasadía'
+      WHERE r.check_in >= ? AND r.estado NOT IN ('Cancelada', 'No-Show') AND h.categoria = 'Pasadía'
     `).get(periodoDesde).c;
 
     const recientes = db.prepare(`
@@ -1428,14 +1428,14 @@ app.get('/api/v1/reportes/financiero', requireAuth, (req, res) => {
         SUM(CASE WHEN estado IN ('Confirmada','Check-In','Check-Out') THEN saldo_pendiente ELSE 0 END) as pendiente,
         AVG(CASE WHEN estado IN ('Confirmada','Check-In','Check-Out') THEN noches ELSE NULL END) as promedio_noches,
         AVG(CASE WHEN estado IN ('Confirmada','Check-In','Check-Out') THEN monto_total ELSE NULL END) as ticket_promedio
-      FROM reservas_hotel WHERE created_at >= ? AND created_at <= ? || ' 23:59:59'
+      FROM reservas_hotel WHERE check_in >= ? AND check_in <= ?
     `).get(d, h);
 
     // 2. Revenue by plan
     const byPlan = db.prepare(`
       SELECT plan_nombre as plan, COUNT(*) as reservas, SUM(monto_total) as revenue, SUM(monto_pagado) as cobrado
       FROM reservas_hotel
-      WHERE estado NOT IN ('Cancelada','No-Show') AND created_at >= ? AND created_at <= ? || ' 23:59:59'
+      WHERE estado NOT IN ('Cancelada','No-Show') AND check_in >= ? AND check_in <= ?
       GROUP BY plan_nombre ORDER BY revenue DESC
     `).all(d, h);
 
@@ -1443,7 +1443,7 @@ app.get('/api/v1/reportes/financiero', requireAuth, (req, res) => {
     const byFuente = db.prepare(`
       SELECT fuente, COUNT(*) as reservas, SUM(monto_total) as revenue
       FROM reservas_hotel
-      WHERE estado NOT IN ('Cancelada','No-Show') AND created_at >= ? AND created_at <= ? || ' 23:59:59'
+      WHERE estado NOT IN ('Cancelada','No-Show') AND check_in >= ? AND check_in <= ?
       GROUP BY fuente ORDER BY revenue DESC
     `).all(d, h);
 
@@ -1451,7 +1451,7 @@ app.get('/api/v1/reportes/financiero', requireAuth, (req, res) => {
     const byTipo = db.prepare(`
       SELECT tipo_habitacion as tipo, COUNT(*) as reservas, SUM(monto_total) as revenue
       FROM reservas_hotel
-      WHERE estado NOT IN ('Cancelada','No-Show') AND created_at >= ? AND created_at <= ? || ' 23:59:59'
+      WHERE estado NOT IN ('Cancelada','No-Show') AND check_in >= ? AND check_in <= ?
       GROUP BY tipo_habitacion ORDER BY revenue DESC
     `).all(d, h);
 
@@ -1466,10 +1466,10 @@ app.get('/api/v1/reportes/financiero', requireAuth, (req, res) => {
 
     // 6. Daily revenue (for chart)
     const daily = db.prepare(`
-      SELECT date(created_at) as fecha, COUNT(*) as reservas, SUM(monto_total) as revenue
+      SELECT check_in as fecha, COUNT(*) as reservas, SUM(monto_total) as revenue
       FROM reservas_hotel
-      WHERE estado NOT IN ('Cancelada','No-Show') AND created_at >= ? AND created_at <= ? || ' 23:59:59'
-      GROUP BY date(created_at) ORDER BY fecha
+      WHERE estado NOT IN ('Cancelada','No-Show') AND check_in >= ? AND check_in <= ?
+      GROUP BY check_in ORDER BY fecha
     `).all(d, h);
 
     // 7. Occupancy rate
