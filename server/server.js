@@ -965,27 +965,26 @@ app.get('/api/v1/hotel/dashboard', requireAuth, (req, res) => {
       WHERE saldo_pendiente > 0 AND estado NOT IN ('Cancelada', 'No-Show')
     `).get().total;
 
-    // Period-filtered financials
     const ingresosPeriodo = db.prepare(`
       SELECT COALESCE(SUM(monto_total), 0) as total FROM reservas_hotel
-      WHERE check_in >= ? AND estado NOT IN ('Cancelada', 'No-Show')
-    `).get(periodoDesde).total;
+      WHERE check_in >= ? AND check_in <= ? AND estado NOT IN ('Cancelada', 'No-Show')
+    `).get(periodoDesde, periodoHasta).total;
 
     const reservasPeriodo = db.prepare(`
-      SELECT COUNT(*) as c FROM reservas_hotel WHERE check_in >= ? AND estado NOT IN ('Cancelada', 'No-Show')
-    `).get(periodoDesde).c;
+      SELECT COUNT(*) as c FROM reservas_hotel WHERE check_in >= ? AND check_in <= ? AND estado NOT IN ('Cancelada', 'No-Show')
+    `).get(periodoDesde, periodoHasta).c;
 
     // Split reservas by category
     const reservasEstadia = db.prepare(`
       SELECT COUNT(*) as c FROM reservas_hotel r
       JOIN habitaciones h ON r.habitacion_id = h.id
-      WHERE r.check_in >= ? AND r.estado NOT IN ('Cancelada', 'No-Show') AND h.categoria = 'Estadía'
-    `).get(periodoDesde).c;
+      WHERE r.check_in >= ? AND r.check_in <= ? AND r.estado NOT IN ('Cancelada', 'No-Show') AND h.categoria = 'Estadía'
+    `).get(periodoDesde, periodoHasta).c;
     const reservasPasadia = db.prepare(`
       SELECT COUNT(*) as c FROM reservas_hotel r
       JOIN habitaciones h ON r.habitacion_id = h.id
-      WHERE r.check_in >= ? AND r.estado NOT IN ('Cancelada', 'No-Show') AND h.categoria = 'Pasadía'
-    `).get(periodoDesde).c;
+      WHERE r.check_in >= ? AND r.check_in <= ? AND r.estado NOT IN ('Cancelada', 'No-Show') AND h.categoria = 'Pasadía'
+    `).get(periodoDesde, periodoHasta).c;
 
     const recientes = db.prepare(`
       SELECT r.*, h.nombre as habitacion_nombre FROM reservas_hotel r
@@ -1000,26 +999,26 @@ app.get('/api/v1/hotel/dashboard', requireAuth, (req, res) => {
     // Status distribution (pie chart data)
     const statusDist = db.prepare(`
       SELECT estado, COUNT(*) as c FROM reservas_hotel
-      WHERE check_in >= ? GROUP BY estado ORDER BY c DESC
-    `).all(periodoDesde);
+      WHERE check_in >= ? AND check_in <= ? GROUP BY estado ORDER BY c DESC
+    `).all(periodoDesde, periodoHasta);
 
 
     // Ingresos por plan (for pie chart — more business-relevant)
     const ingresosPorPlan = db.prepare(`
       SELECT plan_nombre, COUNT(*) as reservas, COALESCE(SUM(monto_total), 0) as total
       FROM reservas_hotel
-      WHERE check_in >= ? AND estado NOT IN ('Cancelada', 'No-Show') AND plan_nombre IS NOT NULL AND plan_nombre != ''
+      WHERE check_in >= ? AND check_in <= ? AND estado NOT IN ('Cancelada', 'No-Show') AND plan_nombre IS NOT NULL AND plan_nombre != ''
       GROUP BY plan_nombre ORDER BY total DESC
-    `).all(periodoDesde);
+    `).all(periodoDesde, periodoHasta);
 
     // Ocupación por tipo de habitación
     const ocupacionPorTipo = db.prepare(`
       SELECT h.tipo, h.categoria, COUNT(DISTINCT r.id) as reservas
       FROM reservas_hotel r
       JOIN habitaciones h ON r.habitacion_id = h.id
-      WHERE r.check_in >= ? AND r.estado NOT IN ('Cancelada', 'No-Show')
+      WHERE r.check_in >= ? AND r.check_in <= ? AND r.estado NOT IN ('Cancelada', 'No-Show')
       GROUP BY h.tipo ORDER BY reservas DESC
-    `).all(periodoDesde);
+    `).all(periodoDesde, periodoHasta);
 
     // Limpieza by category
     const limpiezaEstadia = db.prepare(`SELECT estado_limpieza, COUNT(*) as c FROM habitaciones WHERE activa = 1 AND categoria = 'Estadía' GROUP BY estado_limpieza`).all();
@@ -1465,11 +1464,11 @@ app.get('/api/v1/reportes/financiero', requireAuth, (req, res) => {
         SUM(CASE WHEN estado NOT IN ('Cancelada','No-Show') THEN 1 ELSE 0 END) as activas,
         SUM(CASE WHEN estado = 'Cancelada' THEN 1 ELSE 0 END) as canceladas,
         SUM(CASE WHEN estado = 'Por Aprobar' THEN 1 ELSE 0 END) as por_aprobar,
-        SUM(CASE WHEN estado IN ('Confirmada','Check-In','Check-Out') THEN monto_total ELSE 0 END) as revenue_total,
-        SUM(CASE WHEN estado IN ('Confirmada','Check-In','Check-Out') THEN monto_pagado ELSE 0 END) as cobrado,
-        SUM(CASE WHEN estado IN ('Confirmada','Check-In','Check-Out') THEN saldo_pendiente ELSE 0 END) as pendiente,
-        AVG(CASE WHEN estado IN ('Confirmada','Check-In','Check-Out') THEN noches ELSE NULL END) as promedio_noches,
-        AVG(CASE WHEN estado IN ('Confirmada','Check-In','Check-Out') THEN monto_total ELSE NULL END) as ticket_promedio
+        SUM(CASE WHEN estado IN ('Confirmada','Check-In','Hospedado','Check-Out') THEN monto_total ELSE 0 END) as revenue_total,
+        SUM(CASE WHEN estado IN ('Confirmada','Check-In','Hospedado','Check-Out') THEN monto_pagado ELSE 0 END) as cobrado,
+        SUM(CASE WHEN estado IN ('Confirmada','Check-In','Hospedado','Check-Out') THEN saldo_pendiente ELSE 0 END) as pendiente,
+        AVG(CASE WHEN estado IN ('Confirmada','Check-In','Hospedado','Check-Out') THEN noches ELSE NULL END) as promedio_noches,
+        AVG(CASE WHEN estado IN ('Confirmada','Check-In','Hospedado','Check-Out') THEN monto_total ELSE NULL END) as ticket_promedio
       FROM reservas_hotel WHERE check_in >= ? AND check_in <= ?
     `).get(d, h);
 
