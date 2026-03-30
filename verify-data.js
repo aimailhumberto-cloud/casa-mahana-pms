@@ -1,16 +1,33 @@
 const { getDb } = require('./server/db/database');
 const db = getDb();
 
-const t = db.prepare('SELECT COUNT(*) as c, SUM(monto_total) as i, SUM(noches) as n FROM reservas_hotel').get();
-console.log('Total reservas:', t.c, '| Ingresos: $' + t.i?.toLocaleString(), '| Noches:', t.n);
+console.log('=== Reservas por tipo habitacion ===');
+db.prepare("SELECT tipo_habitacion, COUNT(*) as res, SUM(noches) as noches, ROUND(SUM(monto_total)) as ing FROM reservas_hotel GROUP BY tipo_habitacion ORDER BY noches DESC").all().forEach(r => {
+  console.log(`  ${r.tipo_habitacion}: ${r.res} res, ${r.noches} noches, $${r.ing}`);
+});
 
-const y = db.prepare("SELECT SUBSTR(check_in,1,4) as yr, COUNT(*) as r, ROUND(SUM(monto_total)) as i FROM reservas_hotel GROUP BY yr ORDER BY yr").all();
-console.log('\nPor año:');
-y.forEach(x => console.log(' ', x.yr, ':', x.r, 'res, $' + x.i?.toLocaleString()));
+console.log('\n=== Habitaciones Estadia por tipo ===');
+db.prepare("SELECT tipo, COUNT(*) as c FROM habitaciones WHERE activa=1 AND categoria='Estadía' GROUP BY tipo").all().forEach(r => {
+  console.log(`  ${r.tipo}: ${r.c} habitaciones`);
+});
 
-const f = db.prepare('SELECT COUNT(*) as c, ROUND(SUM(monto)) as t FROM folio_hotel').get();
-console.log('\nFolios:', f.c, '| Total: $' + f.t?.toLocaleString());
+console.log('\n=== Proporcion esperada ===');
+const total = db.prepare("SELECT COUNT(*) as c FROM habitaciones WHERE activa=1 AND categoria='Estadía'").get().c;
+db.prepare("SELECT tipo, COUNT(*) as c FROM habitaciones WHERE activa=1 AND categoria='Estadía' GROUP BY tipo").all().forEach(r => {
+  console.log(`  ${r.tipo}: ${((r.c / total) * 100).toFixed(0)}% de habitaciones`);
+});
 
-const byRoom = db.prepare("SELECT h.nombre, h.tipo, COUNT(r.id) as res, SUM(r.noches) as noches FROM reservas_hotel r JOIN habitaciones h ON h.id=r.habitacion_id GROUP BY h.id ORDER BY res DESC LIMIT 10").all();
-console.log('\nTop 10 habitaciones:');
-byRoom.forEach(r => console.log(' ', r.nombre, r.tipo, ':', r.res, 'res,', r.noches, 'noches'));
+console.log('\n=== Reservas Camping sample ===');
+db.prepare("SELECT id, cliente, check_in, check_out, noches, monto_total, tipo_habitacion FROM reservas_hotel WHERE tipo_habitacion='Camping' ORDER BY noches DESC LIMIT 10").all().forEach(r => {
+  console.log(`  #${r.id} ${r.cliente} ${r.check_in}->${r.check_out} ${r.noches}n $${r.monto_total}`);
+});
+
+// The issue: camping has 20 rooms out of 32 total = 62.5% of rooms
+// So they get 62.5% of all reservations by the rotation logic
+// But in reality camping probably has lower revenue per booking
+console.log('\n=== Diagnostico ===');
+const camping = db.prepare("SELECT COUNT(*) as c FROM habitaciones WHERE tipo='Camping' AND activa=1").get().c;
+const totalR = db.prepare("SELECT COUNT(*) as c FROM habitaciones WHERE activa=1 AND categoria='Estadía'").get().c;
+console.log(`  Camping: ${camping}/${totalR} habitaciones = ${((camping/totalR)*100).toFixed(0)}%`);
+console.log(`  El script de migracion rota ROUND-ROBIN por las ${totalR} habitaciones`);
+console.log(`  Camping recibe ~${((camping/totalR)*100).toFixed(0)}% de todas las reservas`);

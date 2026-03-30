@@ -2291,7 +2291,7 @@ app.listen(PORT, () => {
     if (guestCount > 0 && importedCount === 0) {
       console.log(`🔄 Auto-migrating ${guestCount} guests into historical reservations...`);
 
-      const rooms = db.prepare("SELECT id, nombre, tipo FROM habitaciones WHERE categoria = 'Estadía' AND activa = 1").all();
+      const rooms = db.prepare("SELECT id, nombre, tipo FROM habitaciones WHERE categoria = 'Estadía' AND activa = 1 AND tipo != 'Camping'").all();
       if (rooms.length === 0) { console.log('⚠️ No Estadía rooms found, skipping migration'); }
       else {
         const guests = db.prepare("SELECT * FROM huespedes WHERE total_reservas > 0 AND total_ingresos > 0 ORDER BY ultima_estadia DESC").all();

@@ -87,9 +87,9 @@ export default function Dashboard() {
             </div>
             <span className="text-sm font-bold text-mahana-700">💰 Finanzas</span>
           </div>
-          <div className="text-2xl font-bold text-gray-800">${data.financiero.ingresos_periodo.toFixed(0)}</div>
+          <div className="text-2xl font-bold text-gray-800">${data.financiero.ingresos_periodo.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
           <div className="text-sm text-gray-400">Ingresos ({periodoLabel})</div>
-          <div className="text-xs text-red-400 mt-1">Saldo pend: ${data.financiero.saldo_pendiente_total.toFixed(0)}</div>
+          <div className="text-xs text-red-400 mt-1">Saldo pend: ${data.financiero.saldo_pendiente_total.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
         </div>
       </div>
 

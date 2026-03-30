@@ -18,7 +18,7 @@ const db = getDb();
 // ── Get all Estadía rooms for assignment ──
 const rooms = db.prepare(`
   SELECT id, nombre, tipo FROM habitaciones 
-  WHERE categoria = 'Estadía' AND activa = 1
+  WHERE categoria = 'Estadía' AND activa = 1 AND tipo != 'Camping'
 `).all();
 
 if (rooms.length === 0) {
