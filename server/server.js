@@ -2288,7 +2288,19 @@ app.listen(PORT, () => {
     const guestCount = db.prepare("SELECT COUNT(*) as c FROM huespedes WHERE total_reservas > 0 AND total_ingresos > 0").get().c;
     const importedCount = db.prepare("SELECT COUNT(*) as c FROM reservas_hotel WHERE created_by = 'Cloudbeds Import'").get().c;
 
-    if (guestCount > 0 && importedCount === 0) {
+    // Fix: if existing imports have Camping rooms, delete and re-generate
+    let needsMigration = guestCount > 0 && importedCount === 0;
+    if (importedCount > 0) {
+      const campingImports = db.prepare("SELECT COUNT(*) as c FROM reservas_hotel WHERE created_by = 'Cloudbeds Import' AND tipo_habitacion = 'Camping'").get().c;
+      if (campingImports > 0) {
+        console.log(`🔧 Fixing ${campingImports} Camping-assigned historical reservations...`);
+        db.prepare("DELETE FROM folio_hotel WHERE reserva_id IN (SELECT id FROM reservas_hotel WHERE created_by = 'Cloudbeds Import')").run();
+        db.prepare("DELETE FROM reservas_hotel WHERE created_by = 'Cloudbeds Import'").run();
+        needsMigration = true;
+      }
+    }
+
+    if (needsMigration) {
       console.log(`🔄 Auto-migrating ${guestCount} guests into historical reservations...`);
 
       const rooms = db.prepare("SELECT id, nombre, tipo FROM habitaciones WHERE categoria = 'Estadía' AND activa = 1 AND tipo != 'Camping'").all();
