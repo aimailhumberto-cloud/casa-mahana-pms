@@ -7,6 +7,7 @@ const { getDb, findAll, findById, create, update, remove } = require('./db/datab
 const { verifyPassword, hashPassword, generateToken, requireAuth, requireRole, requireWrite, generateApiKey, hashApiKey } = require('./auth');
 const crypto = require('crypto');
 const { parseFile, detectColumns, runImport } = require('./import-cloudbeds');
+const notifications = require('./notifications');
 
 const app = express();
 const PORT = process.env.PORT || 3201;
@@ -796,6 +797,11 @@ app.post('/api/v1/hotel/reservas', requireAuth, (req, res) => {
     }
 
     ok(res, reserva, null, 201);
+
+    // Fire notifications (async, non-blocking)
+    const hab = reserva.habitacion_id ? findById('habitaciones', reserva.habitacion_id) : null;
+    notifications.notifyReservationConfirmed(reserva, hab).catch(e => console.log('Notif error:', e.message));
+    notifications.notifyAdminNewBooking(reserva, hab).catch(e => console.log('Admin notif error:', e.message));
   } catch (e) { console.error('Error creating reserva:', e); err(res, 'SERVER_ERROR', 'Error creando reserva', 500); }
 });
 
@@ -871,6 +877,10 @@ app.patch('/api/v1/hotel/reservas/:id/status', requireAuth, (req, res) => {
     }
 
     ok(res, updated);
+
+    // Fire notification (async, non-blocking)
+    const hab = existing.habitacion_id ? findById('habitaciones', existing.habitacion_id) : null;
+    notifications.notifyStatusChange(updated, existing.estado, estado, hab).catch(e => console.log('Notif error:', e.message));
   } catch (e) { err(res, 'SERVER_ERROR', 'Error cambiando estado', 500); }
 });
 
@@ -914,6 +924,12 @@ app.post('/api/v1/hotel/reservas/:id/folio', requireAuth, (req, res) => {
 
     const updated = findById('reservas_hotel', req.params.id);
     ok(res, updated, null, 201);
+
+    // Fire payment notification (async)
+    if (tipo === 'credito') {
+      const hab = updated.habitacion_id ? findById('habitaciones', updated.habitacion_id) : null;
+      notifications.notifyPaymentReceived(updated, { monto: parseFloat(monto), concepto, metodo_pago }, hab).catch(e => console.log('Notif error:', e.message));
+    }
   } catch (e) { console.error(e); err(res, 'SERVER_ERROR', 'Error registrando movimiento', 500); }
 });
 
@@ -1803,6 +1819,12 @@ app.post('/api/v1/public/reservar', (req, res) => {
     fireWebhooks('reserva.creada', { reserva_id: reserva.id, cliente, check_in, check_out, plan: plan.nombre, monto_total: totals.monto_total, monto_pagado: paidAmount, fuente: 'Website' });
 
     ok(res, { reserva_id: reserva.id, mensaje: 'Reserva recibida. Nuestro equipo la revisará y confirmaremos por email/WhatsApp.' }, null, 201);
+
+    // Fire notifications for web booking (async)
+    const fullReserva = findById('reservas_hotel', reserva.id);
+    const hab = fullReserva.habitacion_id ? findById('habitaciones', fullReserva.habitacion_id) : null;
+    notifications.notifyReservationConfirmed(fullReserva, hab).catch(e => console.log('Notif error:', e.message));
+    notifications.notifyAdminNewBooking(fullReserva, hab).catch(e => console.log('Admin notif error:', e.message));
   } catch (e) { console.error('Public booking error:', e); err(res, 'SERVER_ERROR', 'Error creando reserva', 500); }
 });
 

@@ -222,6 +222,17 @@ CREATE TABLE IF NOT EXISTS huespedes (
 CREATE INDEX IF NOT EXISTS idx_huespedes_email ON huespedes(email);
 CREATE INDEX IF NOT EXISTS idx_huespedes_nombre ON huespedes(nombre, apellido);
 
+-- ═══ NOTIFICATION LOG ═══
+CREATE TABLE IF NOT EXISTS notificaciones_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  reserva_id INTEGER REFERENCES reservas_hotel(id),
+  tipo TEXT NOT NULL,                     -- 'confirmacion', 'estado', 'pago', 'recordatorio'
+  canal TEXT NOT NULL,                    -- 'email', 'whatsapp'
+  destinatario TEXT,
+  resultado TEXT,                         -- JSON with delivery status
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
 -- ═══ ÍNDICES ═══
 CREATE INDEX IF NOT EXISTS idx_reservas_checkin ON reservas_hotel(check_in);
 CREATE INDEX IF NOT EXISTS idx_reservas_checkout ON reservas_hotel(check_out);
@@ -231,4 +242,5 @@ CREATE INDEX IF NOT EXISTS idx_documentos_reserva ON documentos_reserva(reserva_
 CREATE INDEX IF NOT EXISTS idx_folio_reserva ON folio_hotel(reserva_id);
 CREATE INDEX IF NOT EXISTS idx_usuarios_email ON usuarios(email);
 CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
+CREATE INDEX IF NOT EXISTS idx_notif_reserva ON notificaciones_log(reserva_id);
 
