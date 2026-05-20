@@ -19,6 +19,25 @@ function getDb() {
 
     // Initialize schema
     const schema = fs.readFileSync(SCHEMA_PATH, 'utf-8');
+    
+    // If the table already exists, migrate it before executing the schema to avoid index creation errors
+    const tableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='reservas_hotel'").get();
+    if (tableExists) {
+      const resCols = db.prepare('PRAGMA table_info(reservas_hotel)').all().map(c => c.name);
+      if (!resCols.includes('grupo_codigo')) {
+        db.exec('ALTER TABLE reservas_hotel ADD COLUMN grupo_codigo TEXT');
+      }
+      if (!resCols.includes('es_maestra')) {
+        db.exec('ALTER TABLE reservas_hotel ADD COLUMN es_maestra INTEGER DEFAULT 0');
+      }
+      if (!resCols.includes('parent_reserva_id')) {
+        db.exec('ALTER TABLE reservas_hotel ADD COLUMN parent_reserva_id INTEGER');
+      }
+      if (!resCols.includes('facturacion_consolidada')) {
+        db.exec('ALTER TABLE reservas_hotel ADD COLUMN facturacion_consolidada INTEGER DEFAULT 1');
+      }
+    }
+
     db.exec(schema);
 
     // ── Seed habitaciones ──

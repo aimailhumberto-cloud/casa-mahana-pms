@@ -12,6 +12,20 @@ const estadoColors: Record<string, string> = {
   'No-Show': 'bg-red-300',
 };
 
+function getPastelColor(str: string) {
+  if (!str) return null;
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const h = Math.abs(hash % 360);
+  return {
+    bg: `hsl(${h}, 75%, 90%)`,
+    border: `hsl(${h}, 70%, 45%)`,
+    text: `hsl(${h}, 85%, 22%)`
+  };
+}
+
 function addDays(date: Date, days: number) {
   const d = new Date(date);
   d.setDate(d.getDate() + days);
@@ -73,6 +87,8 @@ interface RoomRowProps {
   onReservaMouseEnter: (e: React.MouseEvent, res: any) => void;
   onReservaMouseLeave: () => void;
   onReservaContextMenu: (e: React.MouseEvent, res: any) => void;
+  activeGroupCode?: string | null;
+  onReassignRoom?: (reservaId: number, roomId: number) => void;
 }
 
 const RoomRow = memo(({
@@ -84,6 +100,8 @@ const RoomRow = memo(({
   onReservaMouseEnter,
   onReservaMouseLeave,
   onReservaContextMenu,
+  activeGroupCode = null,
+  onReassignRoom,
 }: RoomRowProps) => {
   return (
     <div className="flex border-b border-gray-100 hover:bg-gray-50/50 group/row" style={{ minHeight: '40px' }}>
@@ -117,6 +135,25 @@ const RoomRow = memo(({
                 onClick={() => onCellClick(room.id, dateStr)}
                 title={`Nueva reserva: ${room.nombre} — ${dateStr}`}
                 onContextMenu={(e) => onCellContextMenu(e, room, dateStr)}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  try {
+                    const dragDataStr = e.dataTransfer.getData('text/plain');
+                    if (!dragDataStr) return;
+                    const dragData = JSON.parse(dragDataStr);
+                    if (dragData.id && onReassignRoom) {
+                      if (dragData.room_id !== room.id) {
+                        onReassignRoom(dragData.id, room.id);
+                      }
+                    }
+                  } catch (err) {
+                    console.error('Error onDrop:', err);
+                  }
+                }}
               />
             );
           })}
@@ -126,29 +163,61 @@ const RoomRow = memo(({
           const style = getBarStyle(res, dates);
           const coStyle = getCheckoutIndicator(res, dates);
           const isPending = res.estado === 'Pendiente';
+          const isGroupRes = !!res.grupo_codigo;
+          const pastelColors = isGroupRes ? getPastelColor(res.grupo_codigo) : null;
+          const isHoveredGroup = isGroupRes && activeGroupCode === res.grupo_codigo;
+
           const colorClass = isPending
             ? 'bg-amber-500/20 border border-dashed border-amber-500 text-amber-900 font-semibold backdrop-blur-sm'
             : `${estadoColors[res.estado] || 'bg-gray-400'} text-white`;
+
+          const combinedStyle = {
+            ...style,
+            ...(isGroupRes && pastelColors ? {
+              backgroundColor: pastelColors.bg,
+              color: pastelColors.text,
+              borderColor: isHoveredGroup ? '#ec4899' : pastelColors.border,
+              borderWidth: isHoveredGroup ? '3px' : '1px',
+              borderStyle: 'solid',
+              boxShadow: isHoveredGroup ? '0 0 12px rgba(236, 72, 153, 0.4)' : 'none',
+              zIndex: isHoveredGroup ? 30 : 10
+            } : {})
+          };
+
           return (
             <div key={res.id}>
               <Link
                 to={`/reservas/${res.id}`}
-                className={`absolute top-1 bottom-1 ${colorClass} rounded-md flex items-center px-2 text-xs font-medium shadow-sm hover:shadow-md hover:brightness-110 transition cursor-pointer overflow-hidden whitespace-nowrap z-10`}
-                style={style}
+                className={`absolute top-1 bottom-1 ${isGroupRes ? '' : colorClass} rounded-md flex items-center px-2 text-xs font-medium shadow-sm hover:shadow-md hover:brightness-110 transition cursor-pointer overflow-hidden whitespace-nowrap z-10`}
+                style={combinedStyle}
+                draggable={true}
+                onDragStart={(e) => {
+                  e.dataTransfer.setData('text/plain', JSON.stringify({ id: res.id, room_id: res.habitacion_id }));
+                  e.dataTransfer.effectAllowed = 'move';
+                }}
                 onMouseEnter={(e) => onReservaMouseEnter(e, res)}
                 onMouseLeave={onReservaMouseLeave}
                 onContextMenu={(e) => {
                   onReservaContextMenu(e, res);
                 }}
               >
-                <span className="truncate">
-                  {res.cliente} {res.plan_nombre ? `• ${res.plan_nombre}` : ''}
+                <span className="truncate flex items-center gap-1">
+                  {isGroupRes && <span className="flex-shrink-0" title={`Grupo: ${res.grupo_codigo}`}>👥</span>}
+                  <span>{res.cliente} {res.plan_nombre ? `• ${res.plan_nombre}` : ''}</span>
                 </span>
               </Link>
               {coStyle && (
                 <div
-                  className={`absolute top-1 bottom-1 ${isPending ? 'bg-amber-500/20 border border-dashed border-amber-500' : colorClass} opacity-40 rounded-r-md z-[9]`}
-                  style={coStyle}
+                  className={`absolute top-1 bottom-1 ${isPending ? 'bg-amber-500/20 border border-dashed border-amber-500' : (isGroupRes ? '' : colorClass)} opacity-40 rounded-r-md z-[9]`}
+                  style={{
+                    ...coStyle,
+                    ...(isGroupRes && pastelColors ? {
+                      backgroundColor: pastelColors.bg,
+                      borderColor: isHoveredGroup ? '#ec4899' : pastelColors.border,
+                      borderWidth: '1px',
+                      borderStyle: 'solid',
+                    } : {})
+                  }}
                   title={`Check-out: ${res.check_out}`}
                 />
               )}
@@ -159,6 +228,9 @@ const RoomRow = memo(({
     </div>
   );
 }, (prevProps, nextProps) => {
+  // Compare activeGroupCode
+  if (prevProps.activeGroupCode !== nextProps.activeGroupCode) return false;
+
   // 1. Compare rooms
   if (
     prevProps.room.id !== nextProps.room.id ||
@@ -188,7 +260,8 @@ const RoomRow = memo(({
       pRes.cliente !== nRes.cliente ||
       pRes.check_in !== nRes.check_in ||
       pRes.check_out !== nRes.check_out ||
-      pRes.plan_nombre !== nRes.plan_nombre
+      pRes.plan_nombre !== nRes.plan_nombre ||
+      pRes.grupo_codigo !== nRes.grupo_codigo
     ) {
       return false;
     }
@@ -200,7 +273,8 @@ const RoomRow = memo(({
     prevProps.onCellContextMenu === nextProps.onCellContextMenu &&
     prevProps.onReservaMouseEnter === nextProps.onReservaMouseEnter &&
     prevProps.onReservaMouseLeave === nextProps.onReservaMouseLeave &&
-    prevProps.onReservaContextMenu === nextProps.onReservaContextMenu
+    prevProps.onReservaContextMenu === nextProps.onReservaContextMenu &&
+    prevProps.onReassignRoom === nextProps.onReassignRoom
   );
 });
 

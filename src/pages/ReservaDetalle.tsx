@@ -19,6 +19,7 @@ export default function ReservaDetalle() {
   const navigate = useNavigate();
   const isAdmin = JSON.parse(localStorage.getItem('pms_user') || '{}')?.rol === 'admin';
   const [reserva, setReserva] = useState<any>(null);
+  const [groupReservations, setGroupReservations] = useState<any[]>([]);
 
   // Double approval workflow states
   const [showEditReservaModal, setShowEditReservaModal] = useState(false);
@@ -68,7 +69,25 @@ export default function ReservaDetalle() {
     }
   }, [pagoFile]);
 
-  const load = () => { api.get(`/hotel/reservas/${id}`).then(r => { setReserva(r.data); setLoading(false); }).catch(() => setLoading(false)); };
+  const load = () => {
+    setLoading(true);
+    api.get(`/hotel/reservas/${id}`)
+      .then(async (r) => {
+        setReserva(r.data);
+        if (r.data.grupo_codigo) {
+          try {
+            const gr = await api.get(`/hotel/reservas?grupo_codigo=${r.data.grupo_codigo}`);
+            setGroupReservations(gr.data);
+          } catch (e) {
+            console.error('Error loading group reservations:', e);
+          }
+        } else {
+          setGroupReservations([]);
+        }
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  };
   useEffect(() => { load(); }, [id]);
 
   const handleReversal = async (folioId: number, concepto: string) => {
@@ -92,6 +111,30 @@ export default function ReservaDetalle() {
       setConfirmCancel(null);
       load();
     } catch (err: any) { alert(err.message); }
+  };
+
+  const handleBatchStatusChange = async (targetEstado: 'Hospedado' | 'Check-Out') => {
+    const sourceEstado = targetEstado === 'Hospedado' ? 'Confirmada' : 'Hospedado';
+    const eligible = groupReservations.filter((r: any) => r.estado === sourceEstado);
+    
+    if (eligible.length === 0) {
+      alert(`No hay habitaciones elegibles en estado "${sourceEstado}" para realizar esta acción.`);
+      return;
+    }
+    
+    if (!confirm(`¿Confirmar Check-${targetEstado === 'Hospedado' ? 'In' : 'Out'} masivo para ${eligible.length} habitación(es) del grupo?`)) {
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      await Promise.all(eligible.map((res: any) => api.patch(`/hotel/reservas/${res.id}/status`, { estado: targetEstado })));
+      alert(`Check-${targetEstado === 'Hospedado' ? 'In' : 'Out'} masivo completado con éxito.`);
+      load();
+    } catch (err: any) {
+      alert(err?.response?.data?.error?.message || err.message || 'Error durante el cambio masivo de estado');
+      load();
+    }
   };
 
   const submitPago = async (e: React.FormEvent) => {
@@ -220,12 +263,174 @@ export default function ReservaDetalle() {
   if (loading) return <div className="animate-pulse text-gray-400 p-8">Cargando...</div>;
   if (!reserva) return <div className="p-8 text-red-500">Reserva no encontrada</div>;
 
-  const saldoPct = reserva.monto_total > 0 ? Math.min(100, (reserva.monto_pagado / reserva.monto_total) * 100) : 0;
-  const isClosed = ['Cancelada', 'No-Show'].includes(reserva.estado);
+  const isConsolidated = groupReservations.some((r: any) => r.facturacion_consolidada === 1);
+
+  let consolidatedTotal = 0;
+  let consolidatedPaid = 0;
+  let consolidatedPending = 0;
+
+  if (isConsolidated) {
+    const masterRes = groupReservations.find((r: any) => r.es_maestra === 1);
+    consolidatedTotal = masterRes ? (masterRes.monto_total || 0) : 0;
+    consolidatedPaid = masterRes ? (masterRes.monto_pagado || 0) : 0;
+    consolidatedPending = masterRes ? (masterRes.saldo_pendiente || 0) : 0;
+  } else {
+    consolidatedTotal = groupReservations.reduce((sum, r) => sum + (r.monto_total || 0), 0);
+    consolidatedPaid = groupReservations.reduce((sum, r) => sum + (r.monto_pagado || 0), 0);
+    consolidatedPending = groupReservations.reduce((sum, r) => sum + (r.saldo_pendiente || 0), 0);
+  }
 
   return (
     <div className="max-w-5xl mx-auto">
       <button onClick={() => navigate(-1)} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-4"><ArrowLeft size={16} /> Volver</button>
+
+      {reserva.grupo_codigo && (
+        <div className="bg-white rounded-xl p-5 shadow-sm mb-4 border border-mahana-200">
+          <div className="flex flex-wrap items-center justify-between border-b border-gray-100 pb-3 mb-4 gap-4">
+            <div className="flex items-center gap-2">
+              <span className="text-2xl">👥</span>
+              <div>
+                <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                  Panel de Grupo: <span className="text-mahana-600 font-mono">{reserva.grupo_codigo}</span>
+                </h2>
+                <div className="flex gap-2 mt-1">
+                  {reserva.es_maestra === 1 ? (
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-700 flex items-center gap-1">
+                      👑 Reserva Maestra
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700 flex items-center gap-1">
+                      🔗 Reserva Hija
+                    </span>
+                  )}
+                  {reserva.facturacion_consolidada === 1 ? (
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+                      🧾 Facturación Consolidada
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-600">
+                      Cuentas Separadas
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {reserva.es_maestra !== 1 && reserva.parent_reserva_id && (
+                <button
+                  onClick={() => navigate(`/reservas/${reserva.parent_reserva_id}`)}
+                  className="px-3 py-1.5 bg-purple-50 text-purple-700 text-xs font-bold rounded-lg border border-purple-200 hover:bg-purple-100 transition flex items-center gap-1"
+                >
+                  👑 Ir a Reserva Maestra
+                </button>
+              )}
+              {/* Batch Check-In */}
+              <button
+                onClick={() => handleBatchStatusChange('Hospedado')}
+                className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-bold rounded-lg transition"
+              >
+                📥 Check-In Grupo
+              </button>
+              {/* Batch Check-Out */}
+              <button
+                onClick={() => handleBatchStatusChange('Check-Out')}
+                className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg transition"
+              >
+                📤 Check-Out Grupo
+              </button>
+            </div>
+          </div>
+
+          {/* Consolidated accounting metrics */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 bg-gray-50 rounded-xl p-4">
+            <div className="text-center">
+              <span className="block text-xs font-medium text-gray-400 uppercase">Total Consolidado</span>
+              <span className="text-lg font-extrabold text-gray-800 mt-1 block">
+                ${consolidatedTotal.toFixed(2)}
+              </span>
+            </div>
+            <div className="text-center border-t md:border-t-0 md:border-x border-gray-200 py-2 md:py-0">
+              <span className="block text-xs font-medium text-gray-400 uppercase">Total Pagado</span>
+              <span className="text-lg font-extrabold text-green-600 mt-1 block">
+                ${consolidatedPaid.toFixed(2)}
+              </span>
+            </div>
+            <div className="text-center">
+              <span className="block text-xs font-medium text-gray-400 uppercase">Saldo Pendiente</span>
+              <span className={`text-lg font-extrabold mt-1 block ${consolidatedPending > 0 ? 'text-red-650' : 'text-green-600'}`}>
+                ${consolidatedPending.toFixed(2)}
+              </span>
+            </div>
+          </div>
+
+          {/* Rooms List */}
+          <div>
+            <h3 className="text-xs font-bold text-gray-400 uppercase mb-2 tracking-wider">Habitaciones del Grupo ({groupReservations.length})</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-gray-100 text-gray-600 uppercase text-[10px]">
+                  <tr>
+                    <th className="py-2 px-3 rounded-l-lg">Habitación</th>
+                    <th className="py-2 px-3">Cliente</th>
+                    <th className="py-2 px-3">Fechas</th>
+                    <th className="py-2 px-3 text-center">Huéspedes</th>
+                    <th className="py-2 px-3">Estado</th>
+                    <th className="py-2 px-3 text-right">Monto</th>
+                    <th className="py-2 px-3 text-right rounded-r-lg">Acción</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {groupReservations.map((r: any) => {
+                    const totalGuests = (r.adultos || 1) + (r.menores || 0) + (r.mascotas || 0);
+                    const isSelf = r.id === reserva.id;
+                    return (
+                      <tr key={r.id} className={`hover:bg-gray-50/50 ${isSelf ? 'bg-mahana-50/30 font-semibold' : ''}`}>
+                        <td className="py-2.5 px-3">
+                          {r.habitacion_nombre || (r.habitacion && r.habitacion.nombre) || r.tipo_habitacion}
+                        </td>
+                        <td className="py-2.5 px-3 truncate max-w-[120px]" title={`${r.cliente} ${r.apellido || ''}`}>
+                          {r.cliente} {r.apellido || ''}
+                        </td>
+                        <td className="py-2.5 px-3 text-gray-500">
+                          {r.check_in} a {r.check_out}
+                        </td>
+                        <td className="py-2.5 px-3 text-center text-gray-500">
+                          {r.adultos}A {r.menores > 0 ? `+ ${r.menores}M` : ''}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${estadoColor[r.estado] || 'bg-gray-100'}`}>
+                            {r.estado}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-right">
+                          {reserva.facturacion_consolidada === 1 && r.es_maestra === 0 ? (
+                            <span className="text-gray-400 italic text-[10px]">Consolidado</span>
+                          ) : (
+                            `$${(r.monto_total || 0).toFixed(2)}`
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-right">
+                          {isSelf ? (
+                            <span className="text-gray-400 italic text-[10px] pr-2">Actual</span>
+                          ) : (
+                            <button
+                              onClick={() => navigate(`/reservas/${r.id}`)}
+                              className="px-2 py-1 bg-ocean-50 text-ocean-700 hover:bg-ocean-100 font-bold rounded transition text-[10px]"
+                            >
+                              Ver Ficha
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {reserva.estado === 'Cambio Pendiente de Aprobación' && (
         <div className="bg-orange-50 border-l-4 border-orange-500 p-4 mb-4 rounded-xl flex items-center gap-3 shadow-sm">

@@ -107,10 +107,15 @@ CREATE TABLE IF NOT EXISTS reservas_hotel (
   estado TEXT DEFAULT 'Pendiente',
   fuente TEXT DEFAULT 'Teléfono',
   notas TEXT,
+  grupo_codigo TEXT,
+  es_maestra INTEGER DEFAULT 0,
+  parent_reserva_id INTEGER,
+  facturacion_consolidada INTEGER DEFAULT 1,
   created_by TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now')),
-  FOREIGN KEY (habitacion_id) REFERENCES habitaciones(id)
+  FOREIGN KEY (habitacion_id) REFERENCES habitaciones(id),
+  FOREIGN KEY (parent_reserva_id) REFERENCES reservas_hotel(id) ON DELETE SET NULL
 );
 
 -- ═══ FOLIO / MOVIMIENTOS ═══
@@ -247,6 +252,7 @@ CREATE INDEX IF NOT EXISTS idx_folio_reserva ON folio_hotel(reserva_id);
 CREATE INDEX IF NOT EXISTS idx_usuarios_email ON usuarios(email);
 CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
 CREATE INDEX IF NOT EXISTS idx_notif_reserva ON notificaciones_log(reserva_id);
+CREATE INDEX IF NOT EXISTS idx_reservas_grupo ON reservas_hotel(grupo_codigo);
 
 -- ═══ CONFIGURACIÓN DINÁMICA DEL SISTEMA ═══
 CREATE TABLE IF NOT EXISTS configuracion_sistema (

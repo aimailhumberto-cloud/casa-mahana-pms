@@ -48,6 +48,7 @@ export default function Calendario() {
   const [tooltip, setTooltip] = useState<{ reserva: any; x: number; y: number } | null>(null);
   const [catFilter, setCatFilter] = useState('');
   const [userRole, setUserRole] = useState('receptionist');
+  const [activeGroupCode, setActiveGroupCode] = useState<string | null>(null);
 
   // Quick Payment Modal States
   const [quickPayReservaId, setQuickPayReservaId] = useState<number | null>(null);
@@ -145,6 +146,9 @@ export default function Calendario() {
   const handleReservaMouseEnter = useCallback((e: React.MouseEvent, res: any) => {
     if (leaveTimeoutRef.current) clearTimeout(leaveTimeoutRef.current);
     if (enterTimeoutRef.current) clearTimeout(enterTimeoutRef.current);
+    if (res.grupo_codigo) {
+      setActiveGroupCode(res.grupo_codigo);
+    }
     const clientX = e.clientX;
     const clientY = e.clientY;
     enterTimeoutRef.current = setTimeout(() => {
@@ -154,6 +158,7 @@ export default function Calendario() {
 
   const handleReservaMouseLeave = useCallback(() => {
     if (enterTimeoutRef.current) clearTimeout(enterTimeoutRef.current);
+    setActiveGroupCode(null);
     leaveTimeoutRef.current = setTimeout(() => {
       setTooltip(null);
     }, 200);
@@ -163,6 +168,15 @@ export default function Calendario() {
     setTooltip(null);
     handleContextMenu(e, { type: 'reserva', reserva: res });
   }, [handleContextMenu]);
+
+  const handleReassignRoom = useCallback(async (reservaId: number, roomId: number) => {
+    try {
+      await api.put(`/hotel/reservas/${reservaId}`, { habitacion_id: roomId });
+      load();
+    } catch (err: any) {
+      alert(err?.response?.data?.error?.message || 'Error al reasignar habitación');
+    }
+  }, []);
 
   const isToday = (d: Date) => formatDate(d) === formatDate(new Date());
   const isWeekend = (d: Date) => d.getDay() === 0 || d.getDay() === 6;
@@ -409,6 +423,8 @@ export default function Calendario() {
                       onReservaMouseEnter={handleReservaMouseEnter}
                       onReservaMouseLeave={handleReservaMouseLeave}
                       onReservaContextMenu={handleReservaContextMenu}
+                      activeGroupCode={activeGroupCode}
+                      onReassignRoom={handleReassignRoom}
                     />
                   );
                 })}

@@ -39,6 +39,22 @@ export default function NuevaReserva() {
   );
   const isPasadia = categoria === 'Pasadía';
 
+  // Group Booking state
+  const [isGroup, setIsGroup] = useState(false);
+  const [selectedGroupRooms, setSelectedGroupRooms] = useState<number[]>([]);
+  const [facturacionConsolidada, setFacturacionConsolidada] = useState(1);
+  const [roomConfigs, setRoomConfigs] = useState<Record<number, {
+    cliente: string;
+    apellido: string;
+    adultos: number;
+    menores: number;
+    mascotas: number;
+    plan_codigo: string;
+    email?: string;
+    whatsapp?: string;
+    nacionalidad?: string;
+  }>>({});
+
   // Step 4: Deposit
   const [showDeposit, setShowDeposit] = useState(false);
   const [depositAmount, setDepositAmount] = useState('');
@@ -72,6 +88,8 @@ export default function NuevaReserva() {
   useEffect(() => {
     setForm(f => ({ ...f, habitacion_id: '', plan_codigo: '' }));
     setSelectedUnits([]);
+    setSelectedGroupRooms([]);
+    setRoomConfigs({});
     setCotizacion(null);
   }, [categoria]);
 
@@ -155,27 +173,98 @@ export default function NuevaReserva() {
     }
   }, [selectedPlan, rooms]);
 
+  // Synchronize leader room's config with the primary form when it changes
+  useEffect(() => {
+    if (isGroup && selectedGroupRooms.length > 0) {
+      const leaderId = selectedGroupRooms[0];
+      setRoomConfigs(curr => {
+        if (!curr[leaderId]) return curr;
+        return {
+          ...curr,
+          [leaderId]: {
+            ...curr[leaderId],
+            cliente: form.cliente,
+            apellido: form.apellido,
+            adultos: form.adultos,
+            menores: form.menores,
+            mascotas: form.mascotas,
+            plan_codigo: form.plan_codigo
+          }
+        };
+      });
+    }
+  }, [form.cliente, form.apellido, form.adultos, form.menores, form.mascotas, form.plan_codigo, isGroup, selectedGroupRooms]);
+
   // Auto-cotizar
   useEffect(() => {
-    if (form.plan_codigo && form.check_in && form.check_out && form.check_out > form.check_in) {
-      const mainHab = isPasadia ? (selectedUnits[0] || form.habitacion_id) : form.habitacion_id;
-      const guests = isPasadia ? form.adultos : form.adultos;
-      api.get(`/hotel/cotizar?plan=${form.plan_codigo}&adultos=${guests}&menores=${form.menores}&mascotas=${form.mascotas}&check_in=${form.check_in}&check_out=${form.check_out}`)
-        .then(r => {
-          // For Pasadía multi-unit, multiply by number of units
-          if (isPasadia && selectedUnits.length > 1) {
-            r.data.subtotal *= selectedUnits.length;
-            r.data.impuesto_monto *= selectedUnits.length;
-            r.data.monto_total *= selectedUnits.length;
-            r.data.deposito_sugerido *= selectedUnits.length;
+    if (isGroup) {
+      if (selectedGroupRooms.length > 0 && form.check_in && form.check_out && form.check_out > form.check_in) {
+        const promises = selectedGroupRooms.map(roomId => {
+          const config = roomConfigs[roomId] || {};
+          const plan = config.plan_codigo || form.plan_codigo;
+          const adults = config.adultos !== undefined ? config.adultos : form.adultos;
+          const minors = config.menores !== undefined ? config.menores : form.menores;
+          const pets = config.mascotas !== undefined ? config.mascotas : form.mascotas;
+          if (!plan) return Promise.resolve(null);
+          return api.get(`/hotel/cotizar?plan=${plan}&adultos=${adults}&menores=${minors}&mascotas=${pets}&check_in=${form.check_in}&check_out=${form.check_out}`)
+            .then(res => res.data)
+            .catch(() => null);
+        });
+
+        Promise.all(promises).then(results => {
+          const validResults = results.filter(x => x !== null);
+          if (validResults.length === 0) {
+            setCotizacion(null);
+            return;
           }
-          setCotizacion(r.data);
-          if (r.data.deposito_sugerido && !depositAmount) {
-            setDepositAmount(r.data.deposito_sugerido.toFixed(2));
+          const aggregate = {
+            plan: { nombre: 'Cotización Grupal 👥' },
+            noches: validResults[0].noches,
+            subtotal: validResults.reduce((acc, curr) => acc + curr.subtotal, 0),
+            impuesto_pct: validResults[0].impuesto_pct,
+            impuesto_monto: validResults.reduce((acc, curr) => acc + curr.impuesto_monto, 0),
+            monto_total: validResults.reduce((acc, curr) => acc + curr.monto_total, 0),
+            deposito_sugerido: validResults.reduce((acc, curr) => acc + curr.deposito_sugerido, 0),
+          };
+          setCotizacion(aggregate);
+          if (aggregate.deposito_sugerido && !depositAmount) {
+            setDepositAmount(aggregate.deposito_sugerido.toFixed(2));
           }
-        }).catch(() => setCotizacion(null));
-    } else { setCotizacion(null); }
-  }, [form.plan_codigo, form.adultos, form.menores, form.mascotas, form.check_in, form.check_out, selectedUnits.length]);
+        });
+      } else {
+        setCotizacion(null);
+      }
+    } else {
+      if (form.plan_codigo && form.check_in && form.check_out && form.check_out > form.check_in) {
+        const mainHab = isPasadia ? (selectedUnits[0] || form.habitacion_id) : form.habitacion_id;
+        const guests = isPasadia ? form.adultos : form.adultos;
+        api.get(`/hotel/cotizar?plan=${form.plan_codigo}&adultos=${guests}&menores=${form.menores}&mascotas=${form.mascotas}&check_in=${form.check_in}&check_out=${form.check_out}`)
+          .then(r => {
+            if (isPasadia && selectedUnits.length > 1) {
+              r.data.subtotal *= selectedUnits.length;
+              r.data.impuesto_monto *= selectedUnits.length;
+              r.data.monto_total *= selectedUnits.length;
+              r.data.deposito_sugerido *= selectedUnits.length;
+            }
+            setCotizacion(r.data);
+            if (r.data.deposito_sugerido && !depositAmount) {
+              setDepositAmount(r.data.deposito_sugerido.toFixed(2));
+            }
+          }).catch(() => setCotizacion(null));
+      } else { setCotizacion(null); }
+    }
+  }, [
+    isGroup,
+    selectedGroupRooms,
+    roomConfigs,
+    form.plan_codigo,
+    form.adultos,
+    form.menores,
+    form.mascotas,
+    form.check_in,
+    form.check_out,
+    selectedUnits.length
+  ]);
 
   const set = (field: string, value: any) => setForm(f => ({ ...f, [field]: value }));
 
@@ -191,6 +280,36 @@ export default function NuevaReserva() {
       const remaining = selectedUnits.filter(x => x !== id);
       set('habitacion_id', remaining[0] || '');
     }
+  };
+
+  // Toggle group room selection
+  const toggleGroupRoom = (id: number) => {
+    setSelectedGroupRooms(prev => {
+      const exists = prev.includes(id);
+      if (exists) {
+        const next = prev.filter(x => x !== id);
+        setRoomConfigs(curr => {
+          const updated = { ...curr };
+          delete updated[id];
+          return updated;
+        });
+        return next;
+      } else {
+        const next = [...prev, id];
+        setRoomConfigs(curr => ({
+          ...curr,
+          [id]: {
+            cliente: curr[id]?.cliente || (prev.length === 0 ? form.cliente : ''),
+            apellido: curr[id]?.apellido || (prev.length === 0 ? form.apellido : ''),
+            adultos: curr[id]?.adultos || form.adultos || 1,
+            menores: curr[id]?.menores || form.menores || 0,
+            mascotas: curr[id]?.mascotas || form.mascotas || 0,
+            plan_codigo: curr[id]?.plan_codigo || form.plan_codigo || ''
+          }
+        }));
+        return next;
+      }
+    });
   };
 
   // Validations
@@ -209,9 +328,12 @@ export default function NuevaReserva() {
         : '')
     : '';
 
-  const hasUnit = isPasadia ? selectedUnits.length > 0 : !!form.habitacion_id;
+  const hasUnit = isGroup
+    ? selectedGroupRooms.length > 0
+    : (isPasadia ? selectedUnits.length > 0 : !!form.habitacion_id);
+
   const canSubmit = form.cliente && form.apellido && form.whatsapp && form.check_in && form.check_out && !dateError && !pastDateError
-    && form.plan_codigo && hasUnit && selectedRoomAvailable && !capacityError;
+    && (isGroup ? selectedGroupRooms.length > 0 : (form.plan_codigo && hasUnit && selectedRoomAvailable && !capacityError));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -219,11 +341,11 @@ export default function NuevaReserva() {
 
     if (!form.cliente || !form.apellido) { setError('Nombre y apellido son requeridos'); return; }
     if (!form.whatsapp) { setError('WhatsApp es requerido'); return; }
-    if (!hasUnit) { setError(isPasadia ? 'Debe seleccionar al menos una unidad' : 'Debe seleccionar una habitación'); return; }
-    if (!form.plan_codigo) { setError('Debe seleccionar un plan'); return; }
+    if (!hasUnit) { setError(isGroup ? 'Debe seleccionar al menos una habitación' : (isPasadia ? 'Debe seleccionar al menos una unidad' : 'Debe seleccionar una habitación')); return; }
+    if (!isGroup && !form.plan_codigo) { setError('Debe seleccionar un plan'); return; }
     if (pastDateError) { setError(pastDateError); return; }
     if (dateError) { setError(dateError); return; }
-    if (capacityError) { setError(capacityError); return; }
+    if (!isGroup && capacityError) { setError(capacityError); return; }
 
     // Check deposit step
     if (!showDeposit && cotizacion) {
@@ -233,7 +355,63 @@ export default function NuevaReserva() {
 
     setLoading(true);
     try {
-      if (isPasadia && selectedUnits.length > 1) {
+      if (isGroup) {
+        // Group booking submission
+        const reservasPayload = selectedGroupRooms.map((roomId, idx) => {
+          const config = roomConfigs[roomId] || {};
+          const room = rooms.find(rm => rm.id === roomId);
+          return {
+            cliente: config.cliente || form.cliente,
+            apellido: config.apellido || form.apellido,
+            email: idx === 0 ? form.email : (config.email || form.email || ''),
+            whatsapp: idx === 0 ? form.whatsapp : (config.whatsapp || form.whatsapp || ''),
+            nacionalidad: idx === 0 ? form.nacionalidad : (config.nacionalidad || form.nacionalidad || ''),
+            habitacion_id: roomId,
+            tipo_habitacion: room ? room.tipo : '',
+            check_in: form.check_in,
+            check_out: form.check_out,
+            hora_llegada: form.hora_llegada || null,
+            adultos: config.adultos !== undefined ? Number(config.adultos) : Number(form.adultos),
+            menores: config.menores !== undefined ? Number(config.menores) : Number(form.menores),
+            mascotas: config.mascotas !== undefined ? Number(config.mascotas) : Number(form.mascotas),
+            plan_codigo: config.plan_codigo || form.plan_codigo,
+            fuente: form.fuente || 'Teléfono',
+            notas: form.notas || '',
+            estado: 'Confirmada'
+          };
+        });
+
+        const payload = {
+          facturacion_consolidada: facturacionConsolidada,
+          reservas: reservasPayload
+        };
+
+        const r = await api.post('/hotel/reservas/grupo', payload);
+        const master = r.data.reservas.find((res: any) => res.es_maestra === 1) || r.data.reservas[0];
+        const masterId = master.id;
+
+        if (depositAmount && parseFloat(depositAmount) > 0) {
+          await api.post(`/hotel/reservas/${masterId}/folio`, {
+            monto: parseFloat(depositAmount),
+            concepto: 'Depósito inicial (Grupo)',
+            tipo: 'credito',
+            metodo_pago: depositMetodo,
+            referencia: depositRef
+          });
+          // Sequential receipt upload
+          if (receiptFile) {
+            const formData = new FormData();
+            formData.append('archivo', receiptFile);
+            formData.append('tipo', 'recibo');
+            formData.append('notas', `Comprobante de abono inicial registrado en la creación de la reserva por $${parseFloat(depositAmount).toFixed(2)}.`);
+            await api.post(`/hotel/reservas/${masterId}/documentos`, formData, {
+              headers: { 'Content-Type': 'multipart/form-data' }
+            });
+          }
+        }
+
+        navigate(`/reservas/${masterId}`);
+      } else if (isPasadia && selectedUnits.length > 1) {
         // Create one reservation per selected unit
         let firstId: number | null = null;
         for (const unitId of selectedUnits) {
@@ -330,6 +508,32 @@ export default function NuevaReserva() {
           </button>
         </div>
 
+        {/* Group Booking Toggle Switch */}
+        <div className="bg-white rounded-xl p-5 shadow-sm flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">👥</span>
+            <div>
+              <div className="font-bold text-gray-700">¿Es una reserva de grupo? 👥</div>
+              <div className="text-sm text-gray-400">Permite reservar múltiples habitaciones en la misma transacción.</div>
+            </div>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isGroup}
+              onChange={(e) => {
+                setIsGroup(e.target.checked);
+                setForm(f => ({ ...f, habitacion_id: '' }));
+                setSelectedGroupRooms([]);
+                setRoomConfigs({});
+                setCotizacion(null);
+              }}
+              className="sr-only peer"
+            />
+            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-mahana-500"></div>
+          </label>
+        </div>
+
         {/* Step 1: Date & Availability */}
         <Section title={isPasadia ? '1. Fecha del Pasadía' : '1. Disponibilidad'} active={!showDeposit}>
           <div className={`grid grid-cols-1 ${isPasadia ? 'md:grid-cols-3' : 'md:grid-cols-4'} gap-4`}>
@@ -365,10 +569,11 @@ export default function NuevaReserva() {
           {categoryRooms.length > 0 && (
             <div className="mt-4">
               <label className="block text-sm font-medium text-gray-600 mb-2">
-                {isPasadia ? 'Unidades *' : 'Habitación *'}
+                {isGroup ? 'Habitaciones del Grupo *' : (isPasadia ? 'Unidades *' : 'Habitación *')}
                 <span className="text-gray-400 font-normal ml-1">
                   ({availableRooms.length} disponibles)
-                  {isPasadia && selectedUnits.length > 0 && <span className="text-amber-600 ml-1">• {selectedUnits.length} seleccionada{selectedUnits.length > 1 ? 's' : ''}</span>}
+                  {isGroup && selectedGroupRooms.length > 0 && <span className="text-ocean-600 ml-1">• {selectedGroupRooms.length} seleccionada{selectedGroupRooms.length > 1 ? 's' : ''}</span>}
+                  {!isGroup && isPasadia && selectedUnits.length > 0 && <span className="text-amber-600 ml-1">• {selectedUnits.length} seleccionada{selectedUnits.length > 1 ? 's' : ''}</span>}
                 </span>
               </label>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
@@ -376,13 +581,16 @@ export default function NuevaReserva() {
                   const maxCap = r.capacidad_max || r.capacidad || 4;
                   const minCap = r.capacidad_min || 1;
                   const fitsGuests = totalGuests >= minCap && totalGuests <= maxCap;
-                  const isSelected = isPasadia ? selectedUnits.includes(r.id) : form.habitacion_id == r.id;
-                  const accentColor = isPasadia ? 'amber' : 'ocean';
+                  const isSelected = isGroup
+                    ? selectedGroupRooms.includes(r.id)
+                    : (isPasadia ? selectedUnits.includes(r.id) : form.habitacion_id == r.id);
+                  const accentColor = isGroup ? 'ocean' : (isPasadia ? 'amber' : 'ocean');
                   return (
                     <button key={r.id} type="button"
                       onClick={() => {
                         if (!r.disponible) return;
-                        if (isPasadia) { toggleUnit(r.id); }
+                        if (isGroup) { toggleGroupRoom(r.id); }
+                        else if (isPasadia) { toggleUnit(r.id); }
                         else { set('habitacion_id', r.id); }
                       }}
                       disabled={!r.disponible}
@@ -396,7 +604,7 @@ export default function NuevaReserva() {
                       {r.descripcion_camas && <div className="text-xs text-gray-400">🛏️ {r.descripcion_camas}</div>}
                       {!r.disponible && <div className="text-xs text-red-300 mt-1">Ocupada</div>}
                       {r.disponible && isSelected && <div className="text-xs text-green-500 mt-1">✓ Seleccionada</div>}
-                      {r.disponible && !isSelected && <div className="text-xs text-gray-300 mt-1">{isPasadia ? 'Click para agregar' : '✓ Disponible'}</div>}
+                      {r.disponible && !isSelected && <div className="text-xs text-gray-300 mt-1">{(isPasadia || isGroup) ? 'Click para agregar' : '✓ Disponible'}</div>}
                     </button>
                   );
                 })}
@@ -406,22 +614,27 @@ export default function NuevaReserva() {
                   📋 Se crearán <strong>{selectedUnits.length} reservas</strong> separadas (una por unidad) vinculadas a este grupo.
                 </div>
               )}
-              {capacityError && (
+              {isGroup && selectedGroupRooms.length > 0 && (
+                <div className="mt-2 text-sm text-ocean-700 bg-ocean-50 px-3 py-2 rounded-lg">
+                  👥 Se crearán <strong>{selectedGroupRooms.length} habitaciones</strong> bajo un mismo código de grupo.
+                </div>
+              )}
+              {!isGroup && capacityError && (
                 <div className="text-red-500 text-xs mt-2 flex items-center gap-1">
                   <AlertTriangle size={12} /> {capacityError}
                 </div>
               )}
               {!hasUnit && categoryRooms.length > 0 && !capacityError && (
                 <div className="text-amber-600 text-xs mt-2 flex items-center gap-1">
-                  <AlertTriangle size={12} /> {isPasadia ? 'Seleccione una o más unidades' : 'Seleccione una habitación para continuar'}
+                  <AlertTriangle size={12} /> {isGroup ? 'Seleccione al menos una habitación' : (isPasadia ? 'Seleccione una o más unidades' : 'Seleccione una habitación para continuar')}
                 </div>
               )}
             </div>
           )}
 
-          {/* Plan & Guests */}
+          {/* Plan & Guests (Primary details) */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mt-4">
-            <Field label="Plan *" className="md:col-span-2">
+            <Field label={isGroup ? "Plan Principal *" : "Plan *"} className="md:col-span-2">
               <select value={form.plan_codigo} onChange={e => set('plan_codigo', e.target.value)} required className="input">
                 <option value="">Seleccionar plan</option>
                 {filteredPlanes.map((p: any) => (
@@ -431,21 +644,158 @@ export default function NuevaReserva() {
                 ))}
               </select>
             </Field>
-            <Field label={isPasadia ? 'Personas' : 'Adultos'}>
+            <Field label={isGroup ? 'Adultos Líd.' : (isPasadia ? 'Personas' : 'Adultos')}>
               <input type="number" min={1} max={50} value={form.adultos} onChange={e => set('adultos', +e.target.value)} className="input" />
             </Field>
             {!isPasadia && (
-              <Field label="Menores">
+              <Field label={isGroup ? 'Menores Líd.' : "Menores"}>
                 <input type="number" min={0} max={10} value={form.menores} onChange={e => set('menores', +e.target.value)} className="input" />
               </Field>
             )}
             {!isPasadia && (
-              <Field label="Mascotas">
+              <Field label={isGroup ? 'Mascotas Líd.' : "Mascotas"}>
                 <input type="number" min={0} max={5} value={form.mascotas} onChange={e => set('mascotas', +e.target.value)} className="input" />
               </Field>
             )}
           </div>
         </Section>
+
+        {/* Group Configuration Section */}
+        {isGroup && selectedGroupRooms.length > 0 && (
+          <Section title="Configuración de Habitaciones del Grupo 👥" active={true}>
+            {/* Billing Scheme Dropdown */}
+            <div className="mb-6 max-w-md">
+              <Field label="Esquema de Facturación del Grupo">
+                <select
+                  value={facturacionConsolidada}
+                  onChange={e => setFacturacionConsolidada(Number(e.target.value))}
+                  className="input"
+                >
+                  <option value={1}>Facturación Consolidada (Cuentas a la Habitación Principal)</option>
+                  <option value={0}>Cuentas Separadas (Cada habitación paga lo suyo)</option>
+                </select>
+              </Field>
+            </div>
+
+            {/* Room cards list */}
+            <div className="space-y-4">
+              {selectedGroupRooms.map((roomId, index) => {
+                const room = rooms.find(rm => rm.id === roomId);
+                const config = roomConfigs[roomId] || {
+                  cliente: form.cliente,
+                  apellido: form.apellido,
+                  adultos: form.adultos || 1,
+                  menores: form.menores || 0,
+                  mascotas: form.mascotas || 0,
+                  plan_codigo: form.plan_codigo || ''
+                };
+
+                const updateConfig = (field: string, val: any) => {
+                  setRoomConfigs(curr => ({
+                    ...curr,
+                    [roomId]: {
+                      ...config,
+                      [field]: val
+                    }
+                  }));
+                };
+
+                return (
+                  <div key={roomId} className="border border-gray-200 rounded-xl p-4 bg-gray-50/50 space-y-4 transition hover:shadow-sm">
+                    <div className="flex justify-between items-center border-b pb-2">
+                      <span className="font-bold text-gray-700 flex items-center gap-2">
+                        <span className="bg-ocean-100 text-ocean-700 px-2 py-0.5 rounded text-xs font-mono">
+                          Habitación #{index + 1}
+                        </span>
+                        {room?.nombre} <span className="font-normal text-gray-400">({room?.tipo})</span>
+                      </span>
+                      {index === 0 ? (
+                        <span className="text-xs font-semibold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-full flex items-center gap-1 border border-amber-200">
+                          👑 Líder del Grupo (Maestra)
+                        </span>
+                      ) : (
+                        <span className="text-xs font-semibold text-gray-500 bg-gray-100 px-2.5 py-1 rounded-full">
+                          Habitación Adicional
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <Field label="Nombre del Huésped *">
+                        <input
+                          type="text"
+                          value={config.cliente}
+                          onChange={e => updateConfig('cliente', e.target.value)}
+                          className="input bg-white"
+                          required
+                          placeholder="Nombre"
+                        />
+                      </Field>
+                      <Field label="Apellido *">
+                        <input
+                          type="text"
+                          value={config.apellido}
+                          onChange={e => updateConfig('apellido', e.target.value)}
+                          className="input bg-white"
+                          required
+                          placeholder="Apellido"
+                        />
+                      </Field>
+                      <Field label="Plan de Tarifa *">
+                        <select
+                          value={config.plan_codigo}
+                          onChange={e => updateConfig('plan_codigo', e.target.value)}
+                          className="input bg-white"
+                          required
+                        >
+                          <option value="">Seleccionar plan</option>
+                          {filteredPlanes.map((p: any) => (
+                            <option key={p.codigo} value={p.codigo}>
+                              {p.nombre} — ${p.precio_adulto_noche}/{isPasadia ? 'persona' : 'noche'}
+                            </option>
+                          ))}
+                        </select>
+                      </Field>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-4 max-w-md">
+                      <Field label="Adultos">
+                        <input
+                          type="number"
+                          min={1}
+                          max={10}
+                          value={config.adultos}
+                          onChange={e => updateConfig('adultos', parseInt(e.target.value) || 1)}
+                          className="input bg-white"
+                        />
+                      </Field>
+                      <Field label="Menores">
+                        <input
+                          type="number"
+                          min={0}
+                          max={10}
+                          value={config.menores}
+                          onChange={e => updateConfig('menores', parseInt(e.target.value) || 0)}
+                          className="input bg-white"
+                        />
+                      </Field>
+                      <Field label="Mascotas">
+                        <input
+                          type="number"
+                          min={0}
+                          max={5}
+                          value={config.mascotas}
+                          onChange={e => updateConfig('mascotas', parseInt(e.target.value) || 0)}
+                          className="input bg-white"
+                        />
+                      </Field>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Section>
+        )}
 
         {/* Cotización */}
         {cotizacion && (

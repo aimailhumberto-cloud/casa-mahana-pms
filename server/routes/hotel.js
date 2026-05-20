@@ -274,7 +274,7 @@ router.get('/hotel/calendario', requireAuth, (req, res) => {
 
 router.get('/hotel/reservas', requireAuth, (req, res) => {
   try {
-    const { estado, tipo_habitacion, cliente, check_in_desde, check_in_hasta, page = 1, limit = 50 } = req.query;
+    const { estado, tipo_habitacion, cliente, check_in_desde, check_in_hasta, grupo_codigo, page = 1, limit = 50 } = req.query;
     const db = getDb();
     
     // Manual pagination and filtering to match what server.js did
@@ -285,6 +285,7 @@ router.get('/hotel/reservas', requireAuth, (req, res) => {
     if (cliente) { conditions.push('(cliente LIKE ? OR apellido LIKE ?)'); params.push(`%${cliente}%`, `%${cliente}%`); }
     if (check_in_desde) { conditions.push('check_in >= ?'); params.push(check_in_desde); }
     if (check_in_hasta) { conditions.push('check_in <= ?'); params.push(check_in_hasta); }
+    if (grupo_codigo) { conditions.push('grupo_codigo = ?'); params.push(grupo_codigo); }
     
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const offset = (Number(page) - 1) * Number(limit);
@@ -327,6 +328,305 @@ router.get('/hotel/reservas/:id', requireAuth, (req, res) => {
     reserva.documentos = db.prepare('SELECT * FROM documentos_reserva WHERE reserva_id = ? ORDER BY created_at DESC').all(req.params.id);
     ok(res, reserva);
   } catch (e) { err(res, 'SERVER_ERROR', 'Error obteniendo reserva', 500); }
+});
+
+router.post('/hotel/reservas/grupo', requireAuth, (req, res) => {
+  try {
+    const { reservas, facturacion_consolidada = 1 } = req.body;
+    if (!Array.isArray(reservas) || reservas.length === 0) {
+      return err(res, 'VALIDATION_ERROR', 'Se requiere un array de reservas no vacío');
+    }
+
+    const db = getDb();
+    const factConsolidadaVal = (facturacion_consolidada === 0 || facturacion_consolidada === false) ? 0 : 1;
+
+    // Generate unique group code
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    const dateStr = `${yyyy}${mm}${dd}`;
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let grupo_codigo = '';
+    let isUnique = false;
+    while (!isUnique) {
+      let rand = '';
+      for (let i = 0; i < 4; i++) {
+        rand += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      grupo_codigo = `GRP-${dateStr}-${rand}`;
+      const exists = db.prepare('SELECT id FROM reservas_hotel WHERE grupo_codigo = ?').get(grupo_codigo);
+      if (!exists) isUnique = true;
+    }
+
+    // Single SQLite Transaction block
+    let createdReservations = [];
+    const txn = db.transaction(() => {
+      // 1. First, check availability and capacity for ALL rooms in the group.
+      for (const [index, r] of reservas.entries()) {
+        const { check_in, check_out, habitacion_id, cliente } = r;
+        if (!cliente || !check_in || !check_out || !habitacion_id) {
+          throw new Error(`Campos requeridos faltantes para la habitación en índice ${index}`);
+        }
+        if (check_out <= check_in) {
+          throw new Error(`Check-out debe ser posterior al check-in para ${cliente}`);
+        }
+
+        // Overlap Check in DB
+        const conflict = db.prepare(`
+          SELECT id, cliente, check_in, check_out FROM reservas_hotel
+          WHERE habitacion_id = ? AND estado NOT IN ('Cancelada', 'No-Show', 'Check-Out')
+            AND check_in < ? AND check_out > ?
+        `).get(habitacion_id, check_out, check_in);
+
+        if (conflict) {
+          throw new Error(`Habitación ocupada del ${conflict.check_in} al ${conflict.check_out} por ${conflict.cliente}`);
+        }
+
+        // In-memory Overlap check within the payload
+        for (const [otherIndex, otherR] of reservas.entries()) {
+          if (index !== otherIndex && otherR.habitacion_id === habitacion_id) {
+            if (check_in < otherR.check_out && check_out > otherR.check_in) {
+              throw new Error(`Conflicto interno: La habitación ID ${habitacion_id} está duplicada en fechas coincidentes dentro del mismo grupo.`);
+            }
+          }
+        }
+      }
+
+      // 2. Process and insert each reservation
+      let masterId = null;
+      let masterReserva = null;
+      const childDataList = [];
+
+      for (const [index, r] of reservas.entries()) {
+        const {
+          cliente, apellido = '', email = '', whatsapp = '', telefono = '', nacionalidad = '',
+          habitacion_id, tipo_habitacion, check_in, check_out, hora_llegada = null,
+          adultos = 1, menores = 0, mascotas = 0, plan_codigo = null, plan_nombre = '',
+          precio_adulto_noche = 0, precio_menor_noche = 0, precio_mascota_noche = 0,
+          fuente = 'Teléfono', notas = '', estado = 'Confirmada'
+        } = r;
+
+        const room = findById('habitaciones', habitacion_id);
+        if (!room) throw new Error(`Habitación ID ${habitacion_id} no encontrada`);
+
+        const noches = calcNoches(check_in, check_out);
+
+        const data = {
+          cliente: sanitize(cliente),
+          apellido: sanitize(apellido),
+          email: sanitize(email),
+          whatsapp: sanitize(whatsapp),
+          telefono: sanitize(telefono),
+          nacionalidad: sanitize(nacionalidad),
+          habitacion_id,
+          tipo_habitacion: sanitize(tipo_habitacion || room.tipo),
+          check_in,
+          check_out,
+          noches,
+          hora_llegada,
+          adultos: parseInt(adultos) || 1,
+          menores: parseInt(menores) || 0,
+          mascotas: parseInt(mascotas) || 0,
+          plan_codigo,
+          plan_nombre: sanitize(plan_nombre),
+          precio_adulto_noche: parseFloat(precio_adulto_noche) || 0,
+          precio_menor_noche: parseFloat(precio_menor_noche) || 0,
+          precio_mascota_noche: parseFloat(precio_mascota_noche) || 0,
+          estado,
+          fuente: sanitize(fuente),
+          notas: sanitize(notas),
+          grupo_codigo,
+          es_maestra: index === 0 ? 1 : 0,
+          facturacion_consolidada: factConsolidadaVal,
+          created_by: req.user.nombre || req.user.email
+        };
+
+        if (data.plan_codigo && (!data.precio_adulto_noche || data.precio_adulto_noche === 0)) {
+          const plan = db.prepare('SELECT * FROM planes_tarifa WHERE codigo = ? AND activo = 1').get(data.plan_codigo);
+          if (plan) {
+            data.plan_nombre = plan.nombre;
+            data.precio_adulto_noche = plan.precio_adulto_noche;
+            data.precio_menor_noche = plan.precio_menor_noche;
+            data.precio_mascota_noche = plan.precio_mascota_noche;
+          }
+        }
+
+        let totals;
+        if (data.plan_codigo) {
+          const plan = db.prepare('SELECT * FROM planes_tarifa WHERE codigo = ? AND activo = 1').get(data.plan_codigo);
+          if (plan) {
+            totals = calcReservationWithRates(plan.id, check_in, check_out, data.adultos, data.menores, data.mascotas);
+            data.plan_nombre = plan.nombre;
+          } else {
+            totals = calcReservation({ ...data, noches });
+          }
+        } else {
+          totals = calcReservation({ ...data, noches });
+        }
+
+        data._realTotals = {
+          subtotal: totals.subtotal,
+          impuesto_pct: totals.impuesto_pct,
+          impuesto_monto: totals.impuesto_monto,
+          monto_total: totals.monto_total,
+          deposito_sugerido: totals.deposito_sugerido
+        };
+
+        if (index === 0) {
+          masterReserva = data;
+        } else {
+          childDataList.push(data);
+        }
+      }
+
+      if (factConsolidadaVal === 1) {
+        let aggregateSubtotal = masterReserva._realTotals.subtotal;
+        let aggregateImpuestoMonto = masterReserva._realTotals.impuesto_monto;
+        let aggregateMontoTotal = masterReserva._realTotals.monto_total;
+        let aggregateDepositoSugerido = masterReserva._realTotals.deposito_sugerido;
+
+        for (const child of childDataList) {
+          aggregateSubtotal += child._realTotals.subtotal;
+          aggregateImpuestoMonto += child._realTotals.impuesto_monto;
+          aggregateMontoTotal += child._realTotals.monto_total;
+          aggregateDepositoSugerido += child._realTotals.deposito_sugerido;
+        }
+
+        masterReserva.subtotal = Math.round(aggregateSubtotal * 100) / 100;
+        masterReserva.impuesto_pct = masterReserva._realTotals.impuesto_pct;
+        masterReserva.impuesto_monto = Math.round(aggregateImpuestoMonto * 100) / 100;
+        masterReserva.monto_total = Math.round(aggregateMontoTotal * 100) / 100;
+        masterReserva.deposito_sugerido = Math.round(aggregateDepositoSugerido * 100) / 100;
+        masterReserva.monto_pagado = 0;
+        masterReserva.saldo_pendiente = masterReserva.monto_total;
+
+        const masterRealSub = masterReserva._realTotals.subtotal;
+        const masterRealTax = masterReserva._realTotals.impuesto_monto;
+        const masterRealTaxPct = masterReserva._realTotals.impuesto_pct;
+        delete masterReserva._realTotals;
+
+        const masterRes = create('reservas_hotel', masterReserva);
+        masterId = masterRes.id;
+        createdReservations.push(masterRes);
+
+        if (masterRealSub > 0) {
+          const room = findById('habitaciones', masterRes.habitacion_id);
+          const roomName = room ? room.nombre : masterRes.habitacion_id;
+          db.prepare('INSERT INTO folio_hotel (reserva_id, tipo, concepto, monto, registrado_por) VALUES (?, ?, ?, ?, ?)').run(
+            masterId, 'debito', `Habitación: ${masterRes.plan_nombre || 'Tarifa base'} (${masterRes.noches} noches) - Habitación ${roomName} (Huésped: ${masterRes.cliente} ${masterRes.apellido})`, masterRealSub, req.user.nombre
+          );
+        }
+        if (masterRealTax > 0) {
+          const room = findById('habitaciones', masterRes.habitacion_id);
+          const roomName = room ? room.nombre : masterRes.habitacion_id;
+          db.prepare('INSERT INTO folio_hotel (reserva_id, tipo, concepto, monto, registrado_por) VALUES (?, ?, ?, ?, ?)').run(
+            masterId, 'debito', `Impuesto Turismo ${masterRealTaxPct}% - Habitación ${roomName} (Huésped: ${masterRes.cliente} ${masterRes.apellido})`, masterRealTax, req.user.nombre
+          );
+        }
+
+        for (const child of childDataList) {
+          child.parent_reserva_id = masterId;
+          child.subtotal = 0;
+          child.impuesto_monto = 0;
+          child.monto_total = 0;
+          child.saldo_pendiente = 0;
+          child.deposito_sugerido = 0;
+          child.productos_adicionales = 0;
+          child.monto_pagado = 0;
+
+          const childRealSubtotal = child._realTotals.subtotal;
+          const childRealTaxMonto = child._realTotals.impuesto_monto;
+          const childRealTaxPct = child._realTotals.impuesto_pct;
+          delete child._realTotals;
+
+          const childRes = create('reservas_hotel', child);
+          createdReservations.push(childRes);
+
+          const childRoom = findById('habitaciones', childRes.habitacion_id);
+          const childRoomName = childRoom ? childRoom.nombre : childRes.habitacion_id;
+          const childGuestName = `${childRes.cliente} ${childRes.apellido || ''}`.trim();
+
+          if (childRealSubtotal > 0) {
+            db.prepare('INSERT INTO folio_hotel (reserva_id, tipo, concepto, monto, registrado_por) VALUES (?, ?, ?, ?, ?)').run(
+              masterId,
+              'debito',
+              `Habitación: ${childRes.plan_nombre || 'Tarifa base'} (${childRes.noches} noches) - Habitación ${childRoomName} (Huésped: ${childGuestName})`,
+              childRealSubtotal,
+              req.user.nombre
+            );
+          }
+          if (childRealTaxMonto > 0) {
+            db.prepare('INSERT INTO folio_hotel (reserva_id, tipo, concepto, monto, registrado_por) VALUES (?, ?, ?, ?, ?)').run(
+              masterId,
+              'debito',
+              `Impuesto Turismo ${childRealTaxPct}% - Habitación ${childRoomName} (Huésped: ${childGuestName})`,
+              childRealTaxMonto,
+              req.user.nombre
+            );
+          }
+        }
+      } else {
+        masterReserva.subtotal = masterReserva._realTotals.subtotal;
+        masterReserva.impuesto_pct = masterReserva._realTotals.impuesto_pct;
+        masterReserva.impuesto_monto = masterReserva._realTotals.impuesto_monto;
+        masterReserva.monto_total = masterReserva._realTotals.monto_total;
+        masterReserva.deposito_sugerido = masterReserva._realTotals.deposito_sugerido;
+        masterReserva.monto_pagado = 0;
+        masterReserva.saldo_pendiente = masterReserva.monto_total;
+
+        delete masterReserva._realTotals;
+
+        const masterRes = create('reservas_hotel', masterReserva);
+        masterId = masterRes.id;
+        createdReservations.push(masterRes);
+
+        if (masterRes.subtotal > 0) {
+          db.prepare('INSERT INTO folio_hotel (reserva_id, tipo, concepto, monto, registrado_por) VALUES (?, ?, ?, ?, ?)').run(
+            masterId, 'debito', `Habitación: ${masterRes.plan_nombre || 'Tarifa base'} (${masterRes.noches} noches)`, masterRes.subtotal, req.user.nombre
+          );
+        }
+        if (masterRes.impuesto_monto > 0) {
+          db.prepare('INSERT INTO folio_hotel (reserva_id, tipo, concepto, monto, registrado_por) VALUES (?, ?, ?, ?, ?)').run(
+            masterId, 'debito', `Impuesto Turismo ${masterRes.impuesto_pct}%`, masterRes.impuesto_monto, req.user.nombre
+          );
+        }
+
+        for (const child of childDataList) {
+          child.parent_reserva_id = masterId;
+          child.subtotal = child._realTotals.subtotal;
+          child.impuesto_pct = child._realTotals.impuesto_pct;
+          child.impuesto_monto = child._realTotals.impuesto_monto;
+          child.monto_total = child._realTotals.monto_total;
+          child.deposito_sugerido = child._realTotals.deposito_sugerido;
+          child.monto_pagado = 0;
+          child.saldo_pendiente = child.monto_total;
+
+          delete child._realTotals;
+
+          const childRes = create('reservas_hotel', child);
+          createdReservations.push(childRes);
+
+          if (childRes.subtotal > 0) {
+            db.prepare('INSERT INTO folio_hotel (reserva_id, tipo, concepto, monto, registrado_por) VALUES (?, ?, ?, ?, ?)').run(
+              childRes.id, 'debito', `Habitación: ${childRes.plan_nombre || 'Tarifa base'} (${childRes.noches} noches)`, childRes.subtotal, req.user.nombre
+            );
+          }
+          if (childRes.impuesto_monto > 0) {
+            db.prepare('INSERT INTO folio_hotel (reserva_id, tipo, concepto, monto, registrado_por) VALUES (?, ?, ?, ?, ?)').run(
+              childRes.id, 'debito', `Impuesto Turismo ${childRes.impuesto_pct}%`, childRes.impuesto_monto, req.user.nombre
+            );
+          }
+        }
+      }
+    });
+
+    txn();
+    ok(res, { grupo_codigo, reservas: createdReservations }, null, 201);
+  } catch (e) {
+    console.error('Error creating group booking:', e);
+    err(res, 'SERVER_ERROR', e.message || 'Error creando reserva grupal', 500);
+  }
 });
 
 router.post('/hotel/reservas', requireAuth, (req, res) => {
@@ -666,29 +966,61 @@ router.post('/hotel/reservas/:id/folio', requireAuth, (req, res) => {
     if (!monto || !concepto) return err(res, 'VALIDATION_ERROR', 'monto y concepto requeridos');
 
     const db = getDb();
-    db.prepare('INSERT INTO folio_hotel (reserva_id, tipo, concepto, monto, metodo_pago, referencia, registrado_por) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
-      req.params.id, tipo, sanitize(concepto), parseFloat(monto), sanitize(metodo_pago || ''), sanitize(referencia || ''), req.user.nombre
-    );
 
-    // Recalculate balance
-    if (tipo === 'credito') {
-      const newPagado = Math.round((parseFloat(reserva.monto_pagado) + parseFloat(monto)) * 100) / 100;
-      const newSaldo = Math.round((parseFloat(reserva.monto_total) - newPagado) * 100) / 100;
-      update('reservas_hotel', req.params.id, { monto_pagado: newPagado, saldo_pendiente: newSaldo });
-    } else if (tipo === 'debito') {
-      // Extra charge — recalculate total
-      const newExtras = Math.round((parseFloat(reserva.productos_adicionales) + parseFloat(monto)) * 100) / 100;
-      const recalc = calcReservation({ ...reserva, productos_adicionales: newExtras });
-      update('reservas_hotel', req.params.id, { productos_adicionales: newExtras, ...recalc });
+    // Redirect if child and consolidated billing is enabled
+    let targetReservaId = req.params.id;
+    let targetReserva = reserva;
+    let conceptStr = concepto;
+
+    if (reserva.parent_reserva_id && reserva.facturacion_consolidada === 1) {
+      const master = findById('reservas_hotel', reserva.parent_reserva_id);
+      if (master) {
+        let roomName = '';
+        if (reserva.habitacion_id) {
+          const room = findById('habitaciones', reserva.habitacion_id);
+          if (room) roomName = room.nombre;
+        }
+        const guestName = `${reserva.cliente} ${reserva.apellido || ''}`.trim();
+        conceptStr = `${concepto} (Ref: Hab ${roomName || reserva.habitacion_id} - ${guestName})`;
+        targetReservaId = master.id;
+        targetReserva = master;
+      }
     }
 
-    const updated = findById('reservas_hotel', req.params.id);
+    db.prepare('INSERT INTO folio_hotel (reserva_id, tipo, concepto, monto, metodo_pago, referencia, registrado_por) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+      targetReservaId, tipo, sanitize(conceptStr), parseFloat(monto), sanitize(metodo_pago || ''), sanitize(referencia || ''), req.user.nombre
+    );
+
+    // Recalculate balance for targetReserva
+    if (tipo === 'credito') {
+      const newPagado = Math.round((parseFloat(targetReserva.monto_pagado) + parseFloat(monto)) * 100) / 100;
+      const newSaldo = Math.round((parseFloat(targetReserva.monto_total) - newPagado) * 100) / 100;
+      update('reservas_hotel', targetReservaId, { monto_pagado: newPagado, saldo_pendiente: newSaldo });
+    } else if (tipo === 'debito') {
+      // Extra charge — recalculate total preserving existing subtotal
+      const newExtras = Math.round((parseFloat(targetReserva.productos_adicionales) + parseFloat(monto)) * 100) / 100;
+      const subtotal = parseFloat(targetReserva.subtotal) || 0;
+      const impuestoPct = parseFloat(targetReserva.impuesto_pct) || 10;
+      const impuestoMonto = Math.round((subtotal + newExtras) * (impuestoPct / 100) * 100) / 100;
+      const montoTotal = Math.round((subtotal + newExtras + impuestoMonto) * 100) / 100;
+      const pagado = parseFloat(targetReserva.monto_pagado) || 0;
+      const saldoPendiente = Math.round((montoTotal - pagado) * 100) / 100;
+      
+      update('reservas_hotel', targetReservaId, { 
+        productos_adicionales: newExtras,
+        impuesto_monto: impuestoMonto,
+        monto_total: montoTotal,
+        saldo_pendiente: saldoPendiente
+      });
+    }
+
+    const updated = findById('reservas_hotel', targetReservaId);
     ok(res, updated, null, 200);
 
     // Fire payment notification (async)
     if (tipo === 'credito') {
       const hab = updated.habitacion_id ? findById('habitaciones', updated.habitacion_id) : null;
-      notifications.notifyPaymentReceived(updated, { monto: parseFloat(monto), concepto, metodo_pago }, hab).catch(e => console.log('Notif error:', e.message));
+      notifications.notifyPaymentReceived(updated, { monto: parseFloat(monto), concepto: conceptStr, metodo_pago }, hab).catch(e => console.log('Notif error:', e.message));
     }
   } catch (e) { console.error(e); err(res, 'SERVER_ERROR', 'Error registrando movimiento', 500); }
 });
