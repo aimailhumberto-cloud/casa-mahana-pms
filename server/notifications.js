@@ -19,6 +19,8 @@
 const nodemailer = require('nodemailer');
 const https = require('https');
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 const { getDb } = require('./db/database');
 
 // ── Configuration ──
@@ -505,8 +507,16 @@ async function sendEmail(to, subject, html) {
     if (!t) return { sent: false, reason: 'not_configured' };
     
     const from = process.env.SMTP_FROM || `${HOTEL_NAME} <${process.env.SMTP_USER}>`;
+    const adminEmail = process.env.ADMIN_EMAIL;
     
-    const info = await t.sendMail({ from, to, subject, html });
+    // Configura copia oculta (BCC) a la organización si la variable está definida
+    // y el correo actual no es el correo del administrador (para evitar duplicados)
+    const mailOptions = { from, to, subject, html };
+    if (adminEmail && to !== adminEmail) {
+      mailOptions.bcc = adminEmail;
+    }
+    
+    const info = await t.sendMail(mailOptions);
     console.log(`📧 Email sent to ${to}: ${info.messageId}`);
     return { sent: true, messageId: info.messageId };
   } catch (err) {
@@ -515,12 +525,45 @@ async function sendEmail(to, subject, html) {
   }
 }
 
-// ── Notification Log (optional DB logging) ──
+// ── Permanent File Logger ──
+function logNotificationToFile(reservaId, tipo, canal, destinatario, resultado) {
+  try {
+    const logDir = fs.existsSync('/data') 
+      ? '/data/logs' 
+      : path.join(__dirname, '../data/logs');
+      
+    if (!fs.existsSync(logDir)) {
+      fs.mkdirSync(logDir, { recursive: true });
+    }
+    
+    const logFilePath = path.join(logDir, 'notifications.log');
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      reserva_id: reservaId,
+      tipo,
+      canal,
+      destinatario,
+      resultado
+    };
+    
+    fs.appendFileSync(logFilePath, JSON.stringify(logEntry) + '\n', 'utf-8');
+  } catch (err) {
+    console.error('⚠️ File logging failed for notifications.log:', err.message);
+  }
+}
+
+// ── Notification Log (Database & File) ──
 function logNotification(db, reservaId, tipo, canal, destinatario, resultado) {
+  // 1. Guardar en SQLite
   try {
     db.prepare(`INSERT INTO notificaciones_log (reserva_id, tipo, canal, destinatario, resultado, created_at) 
       VALUES (?, ?, ?, ?, ?, datetime('now'))`).run(reservaId, tipo, canal, destinatario, JSON.stringify(resultado));
-  } catch { /* table may not exist yet */ }
+  } catch (err) {
+    console.error('⚠️ DB log failed for notifications:', err.message);
+  }
+  
+  // 2. Guardar en archivo permanente notifications.log
+  logNotificationToFile(reservaId, tipo, canal, destinatario, resultado);
 }
 
 module.exports = {
