@@ -24,42 +24,57 @@ const path = require('path');
 const { getDb } = require('./db/database');
 
 // ── Configuration ──
-const ENABLED = process.env.NOTIFICATIONS_ENABLED === 'true';
 const HOTEL_NAME = process.env.HOTEL_NAME || 'Casa Mahana';
 const HOTEL_URL = process.env.HOTEL_URL || 'https://casamahana.com';
 const HOTEL_PHONE = process.env.HOTEL_PHONE || '+507 6000-0000';
 const HOTEL_EMAIL_DISPLAY = process.env.HOTEL_EMAIL_DISPLAY || 'reservas@casamahana.com';
 
-// ── SMTP Transporter (lazy init) ──
+function getSystemConfig(dbInstance) {
+  const d = dbInstance || getDb();
+  try {
+    return d.prepare('SELECT * FROM configuracion_sistema WHERE id = 1').get() || {};
+  } catch (err) {
+    console.error('⚠️ Failed to get system config from DB:', err.message);
+    return {};
+  }
+}
+
+// ── SMTP Transporter (dynamic dynamic init) ──
 let transporter = null;
 
 function getTransporter() {
-  if (transporter) return transporter;
-  
-  const host = process.env.SMTP_HOST;
-  const port = parseInt(process.env.SMTP_PORT || '587');
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
+  const config = getSystemConfig();
+  const host = config.smtp_host;
+  const port = parseInt(config.smtp_port || '587');
+  const user = config.smtp_user;
+  const pass = config.smtp_pass;
   
   if (!host || !user || !pass) {
     console.log('📧 Email not configured (set SMTP_HOST, SMTP_USER, SMTP_PASS)');
     return null;
   }
   
-  transporter = nodemailer.createTransport({
-    host,
-    port,
-    secure: port === 465,
-    auth: { user, pass },
-  });
-  
-  // Verify connection
-  transporter.verify().then(() => {
-    console.log('📧 SMTP connected successfully');
-  }).catch(err => {
-    console.log('📧 SMTP connection failed:', err.message);
-    transporter = null;
-  });
+  // If credentials changed or transporter doesn't exist, create a new one
+  if (!transporter || 
+      transporter.options.host !== host || 
+      transporter.options.port !== port || 
+      transporter.options.auth.user !== user || 
+      transporter.options.auth.pass !== pass) {
+    
+    transporter = nodemailer.createTransport({
+      host,
+      port,
+      secure: port === 465,
+      auth: { user, pass },
+    });
+    
+    transporter.verify().then(() => {
+      console.log('📧 SMTP connected successfully (dynamic)');
+    }).catch(err => {
+      console.log('📧 SMTP connection failed:', err.message);
+      transporter = null;
+    });
+  }
   
   return transporter;
 }
@@ -67,9 +82,15 @@ function getTransporter() {
 // ── WhatsApp Helper ──
 function sendWhatsApp(phone, message) {
   return new Promise((resolve, reject) => {
-    const apiUrl = process.env.WA_API_URL;
-    const token = process.env.WA_API_TOKEN;
-    const fromNumber = process.env.WA_FROM_NUMBER;
+    const config = getSystemConfig();
+    const apiUrl = config.wa_api_url;
+    const token = config.wa_api_token;
+    const fromNumber = config.wa_from_number;
+    const waEnabled = config.wa_enabled === 1;
+    
+    if (!waEnabled) {
+      return resolve({ sent: false, reason: 'disabled' });
+    }
     
     if (!apiUrl || !token) {
       console.log('📱 WhatsApp not configured (set WA_API_URL, WA_API_TOKEN)');
@@ -177,7 +198,10 @@ function formatMoney(amount) {
  * 1. RESERVATION CONFIRMED — sent when a new reservation is created or confirmed
  */
 async function notifyReservationConfirmed(reserva, habitacion) {
-  if (!ENABLED) return { email: false, whatsapp: false };
+  const config = getSystemConfig();
+  const emailEnabled = config.notifications_enabled === 1;
+  const waEnabled = config.wa_enabled === 1;
+  if (!emailEnabled && !waEnabled) return { email: false, whatsapp: false };
   const results = { email: false, whatsapp: false };
   
   const guestName = `${reserva.cliente} ${reserva.apellido || ''}`.trim();
@@ -187,7 +211,7 @@ async function notifyReservationConfirmed(reserva, habitacion) {
   const tipo = reserva.estado === 'Pendiente' ? 'recibida' : 'confirmacion';
 
   // EMAIL
-  if (reserva.email) {
+  if (reserva.email && emailEnabled) {
     const html = baseTemplate(`
       <h2>✅ ¡Reserva Confirmada!</h2>
       <p style="color:#4a5568;">Hola <strong>${guestName}</strong>, tu reserva ha sido confirmada. ¡Te esperamos!</p>
@@ -226,7 +250,7 @@ async function notifyReservationConfirmed(reserva, habitacion) {
   }
   
   // WHATSAPP
-  if (reserva.whatsapp || reserva.telefono) {
+  if ((reserva.whatsapp || reserva.telefono) && waEnabled) {
     const msg = `✅ *Reserva Confirmada* — ${HOTEL_NAME}\n\n` +
       `Hola ${guestName} 👋\n\n` +
       `Tu reserva ha sido confirmada:\n` +
@@ -248,7 +272,10 @@ async function notifyReservationConfirmed(reserva, habitacion) {
  * 2. STATUS CHANGE — sent when reservation status changes
  */
 async function notifyStatusChange(reserva, oldStatus, newStatus, habitacion) {
-  if (!ENABLED) return { email: false, whatsapp: false };
+  const config = getSystemConfig();
+  const emailEnabled = config.notifications_enabled === 1;
+  const waEnabled = config.wa_enabled === 1;
+  if (!emailEnabled && !waEnabled) return { email: false, whatsapp: false };
   const results = { email: false, whatsapp: false };
   
   const guestName = `${reserva.cliente} ${reserva.apellido || ''}`.trim();
@@ -262,7 +289,7 @@ async function notifyStatusChange(reserva, oldStatus, newStatus, habitacion) {
     'No-Show': { emoji: '⚠️', badge: 'badge-amber', label: 'No-Show', msg: 'Tu reserva fue marcada como No-Show.' },
   };
   
-  const config = statusConfig[newStatus] || { emoji: '📋', badge: 'badge-blue', label: newStatus, msg: `Tu reserva cambió a ${newStatus}.` };
+  const configObj = statusConfig[newStatus] || { emoji: '📋', badge: 'badge-blue', label: newStatus, msg: `Tu reserva cambió a ${newStatus}.` };
   
   let tipo = 'estado';
   if (newStatus === 'Confirmada') tipo = 'confirmacion';
@@ -272,7 +299,7 @@ async function notifyStatusChange(reserva, oldStatus, newStatus, habitacion) {
   const db = getDb();
 
   // EMAIL
-  if (reserva.email) {
+  if (reserva.email && emailEnabled) {
     let extraContent = '';
     
     if (newStatus === 'Check-Out') {
@@ -300,26 +327,26 @@ async function notifyStatusChange(reserva, oldStatus, newStatus, habitacion) {
     }
     
     const html = baseTemplate(`
-      <h2>${config.emoji} Reserva ${config.label}</h2>
-      <p style="color:#4a5568;">Hola <strong>${guestName}</strong>, ${config.msg}</p>
+      <h2>${configObj.emoji} Reserva ${configObj.label}</h2>
+      <p style="color:#4a5568;">Hola <strong>${guestName}</strong>, ${configObj.msg}</p>
       
       <table class="detail-table">
         <tr><td>📋 Reserva</td><td>#${reserva.id}</td></tr>
-        <tr><td>📊 Estado</td><td><span class="badge ${config.badge}">${config.emoji} ${config.label}</span></td></tr>
+        <tr><td>📊 Estado</td><td><span class="badge ${configObj.badge}">${configObj.emoji} ${configObj.label}</span></td></tr>
         <tr><td>📅 Check-in</td><td>${formatDate(reserva.check_in)}</td></tr>
         <tr><td>📅 Check-out</td><td>${formatDate(reserva.check_out)}</td></tr>
         <tr><td>🏠 Habitación</td><td>${roomName}</td></tr>
       </table>
       ${extraContent}
-    `, `${config.emoji} Reserva ${config.label} #${reserva.id} — ${HOTEL_NAME}`);
+    `, `${configObj.emoji} Reserva ${configObj.label} #${reserva.id} — ${HOTEL_NAME}`);
     
-    results.email = await sendEmail(reserva.email, `${config.emoji} ${config.label} — Reserva #${reserva.id} — ${HOTEL_NAME}`, html);
+    results.email = await sendEmail(reserva.email, `${configObj.emoji} ${configObj.label} — Reserva #${reserva.id} — ${HOTEL_NAME}`, html);
     logNotification(db, reserva.id, tipo, 'email', reserva.email, results.email);
   }
   
   // WHATSAPP
-  if (reserva.whatsapp || reserva.telefono) {
-    let msg = `${config.emoji} *${config.label}* — ${HOTEL_NAME}\n\nHola ${guestName}, ${config.msg}\n\n📋 Reserva #${reserva.id}\n📅 ${reserva.check_in} → ${reserva.check_out}\n🏠 ${roomName}`;
+  if ((reserva.whatsapp || reserva.telefono) && waEnabled) {
+    let msg = `${configObj.emoji} *${configObj.label}* — ${HOTEL_NAME}\n\nHola ${guestName}, ${configObj.msg}\n\n📋 Reserva #${reserva.id}\n📅 ${reserva.check_in} → ${reserva.check_out}\n🏠 ${roomName}`;
     
     if (newStatus === 'Check-Out' && reserva.saldo_pendiente > 0) {
       msg += `\n\n💰 Saldo pendiente: ${formatMoney(reserva.saldo_pendiente)}\nPor favor contáctanos para saldar tu cuenta.`;
@@ -342,7 +369,10 @@ async function notifyStatusChange(reserva, oldStatus, newStatus, habitacion) {
  * 3. PAYMENT RECEIVED — sent when a payment is registered
  */
 async function notifyPaymentReceived(reserva, payment, habitacion) {
-  if (!ENABLED) return { email: false, whatsapp: false };
+  const config = getSystemConfig();
+  const emailEnabled = config.notifications_enabled === 1;
+  const waEnabled = config.wa_enabled === 1;
+  if (!emailEnabled && !waEnabled) return { email: false, whatsapp: false };
   const results = { email: false, whatsapp: false };
   
   const guestName = `${reserva.cliente} ${reserva.apellido || ''}`.trim();
@@ -351,7 +381,7 @@ async function notifyPaymentReceived(reserva, payment, habitacion) {
   const db = getDb();
 
   // EMAIL
-  if (reserva.email) {
+  if (reserva.email && emailEnabled) {
     const html = baseTemplate(`
       <h2>💳 Pago Registrado</h2>
       <p style="color:#4a5568;">Hola <strong>${guestName}</strong>, hemos recibido tu pago. ¡Gracias!</p>
@@ -377,7 +407,7 @@ async function notifyPaymentReceived(reserva, payment, habitacion) {
   }
   
   // WHATSAPP
-  if (reserva.whatsapp || reserva.telefono) {
+  if ((reserva.whatsapp || reserva.telefono) && waEnabled) {
     const msg = `💳 *Pago Registrado* — ${HOTEL_NAME}\n\n` +
       `Hola ${guestName}, recibimos tu pago:\n\n` +
       `✅ Monto: ${formatMoney(payment.monto)}\n` +
@@ -398,9 +428,11 @@ async function notifyPaymentReceived(reserva, payment, habitacion) {
  * 4. ADMIN NOTIFICATION — notify hotel staff of new booking
  */
 async function notifyAdminNewBooking(reserva, habitacion) {
-  if (!ENABLED) return { email: false };
+  const config = getSystemConfig();
+  const emailEnabled = config.notifications_enabled === 1;
+  if (!emailEnabled) return { email: false };
   
-  const adminEmail = process.env.ADMIN_EMAIL;
+  const adminEmail = config.admin_email || process.env.ADMIN_EMAIL;
   if (!adminEmail) return { email: false };
   
   const guestName = `${reserva.cliente} ${reserva.apellido || ''}`.trim();
@@ -440,7 +472,10 @@ async function notifyAdminNewBooking(reserva, habitacion) {
  * 5. REMINDER — pre-arrival reminder (X days before check-in)
  */
 async function notifyReminder(reserva, habitacion, daysUntil) {
-  if (!ENABLED) return { email: false, whatsapp: false };
+  const config = getSystemConfig();
+  const emailEnabled = config.notifications_enabled === 1;
+  const waEnabled = config.wa_enabled === 1;
+  if (!emailEnabled && !waEnabled) return { email: false, whatsapp: false };
   const results = { email: false, whatsapp: false };
   
   const guestName = `${reserva.cliente} ${reserva.apellido || ''}`.trim();
@@ -451,7 +486,7 @@ async function notifyReminder(reserva, habitacion, daysUntil) {
   const db = getDb();
 
   // EMAIL
-  if (reserva.email) {
+  if (reserva.email && emailEnabled) {
     const html = baseTemplate(`
       <h2>📅 Tu estadía es ${dayLabel}</h2>
       <p style="color:#4a5568;">Hola <strong>${guestName}</strong>, te recordamos que tu reserva en ${HOTEL_NAME} es ${dayLabel}.</p>
@@ -484,7 +519,7 @@ async function notifyReminder(reserva, habitacion, daysUntil) {
   }
   
   // WHATSAPP
-  if (reserva.whatsapp || reserva.telefono) {
+  if ((reserva.whatsapp || reserva.telefono) && waEnabled) {
     const msg = `📅 *Recordatorio* — ${HOTEL_NAME}\n\n` +
       `Hola ${guestName} 👋\n\n` +
       `Te recordamos que tu estadía es *${dayLabel}*:\n\n` +
@@ -503,11 +538,15 @@ async function notifyReminder(reserva, habitacion, daysUntil) {
 // ── Core send email function ──
 async function sendEmail(to, subject, html) {
   try {
+    const config = getSystemConfig();
+    if (config.notifications_enabled !== 1) {
+      return { sent: false, reason: 'disabled' };
+    }
     const t = getTransporter();
     if (!t) return { sent: false, reason: 'not_configured' };
     
-    const from = process.env.SMTP_FROM || `${HOTEL_NAME} <${process.env.SMTP_USER}>`;
-    const adminEmail = process.env.ADMIN_EMAIL;
+    const from = config.smtp_from || process.env.SMTP_FROM || `${HOTEL_NAME} <${config.smtp_user || process.env.SMTP_USER}>`;
+    const adminEmail = config.admin_email || process.env.ADMIN_EMAIL;
     
     // Configura copia oculta (BCC) a la organización si la variable está definida
     // y el correo actual no es el correo del administrador (para evitar duplicados)
@@ -575,5 +614,12 @@ module.exports = {
   sendEmail,
   sendWhatsApp,
   logNotification,
-  ENABLED
+  get ENABLED() {
+    try {
+      const config = getSystemConfig();
+      return config.notifications_enabled === 1 || config.wa_enabled === 1;
+    } catch {
+      return false;
+    }
+  }
 };

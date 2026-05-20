@@ -113,8 +113,11 @@ function requireAuth(req, res, next) {
   if (getDb) {
     const db = getDb();
     const userRow = db.prepare('SELECT activo FROM usuarios WHERE id = ?').get(decoded.id);
-    if (!userRow || userRow.activo !== 1) {
-      return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Usuario desactivado o inexistente' } });
+    if (!userRow) {
+      return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Usuario inexistente' } });
+    }
+    if (userRow.activo !== 1) {
+      return res.status(403).json({ success: false, error: { code: 'USER_DEACTIVATED', message: 'Usuario desactivado' } });
     }
   }
   req.user = decoded;

@@ -235,13 +235,43 @@ function getDb() {
       console.log('✅ Seeded admin user: admin@casamahana.com / admin123');
     }
 
+    // ── Seed configuracion_sistema ──
+    const configSysCount = db.prepare('SELECT COUNT(*) as c FROM configuracion_sistema').get();
+    if (configSysCount.c === 0) {
+      db.prepare(`
+        INSERT INTO configuracion_sistema (
+          id, smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, admin_email, notifications_enabled,
+          wa_api_url, wa_api_token, wa_from_number, wa_enabled
+        ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        process.env.SMTP_HOST || 'smtp.mailtrap.io',
+        parseInt(process.env.SMTP_PORT || '587'),
+        process.env.SMTP_USER || '',
+        process.env.SMTP_PASS || '',
+        process.env.SMTP_FROM || 'reservas@casamahana.com',
+        process.env.ADMIN_EMAIL || 'admin@casamahana.com',
+        process.env.NOTIFICATIONS_ENABLED === 'true' ? 1 : 0,
+        process.env.WA_API_URL || 'https://api.twilio.com',
+        process.env.WA_API_TOKEN || '',
+        process.env.WA_FROM_NUMBER || '',
+        process.env.WA_ENABLED === 'true' ? 1 : 0
+      );
+      console.log('✅ Seeded configuracion_sistema dynamically from environment variables');
+    }
+
+
     console.log('✅ Database initialized at', DB_PATH);
   }
   return db;
 }
 
 // ── Table whitelist ──
-const VALID_TABLES = ['habitaciones', 'planes_tarifa', 'reservas_hotel', 'folio_hotel', 'huespedes_reserva', 'huespedes', 'usuarios', 'config_hotel'];
+const VALID_TABLES = [
+  'habitaciones', 'planes_tarifa', 'reservas_hotel', 'folio_hotel', 
+  'huespedes_reserva', 'huespedes', 'usuarios', 'config_hotel',
+  'configuracion_sistema', 'reversiones_log'
+];
+
 
 function validateTable(table) {
   if (!VALID_TABLES.includes(table)) throw new Error(`Invalid table: ${table}`);

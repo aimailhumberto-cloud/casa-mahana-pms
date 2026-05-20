@@ -248,3 +248,34 @@ CREATE INDEX IF NOT EXISTS idx_usuarios_email ON usuarios(email);
 CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
 CREATE INDEX IF NOT EXISTS idx_notif_reserva ON notificaciones_log(reserva_id);
 
+-- ═══ CONFIGURACIÓN DINÁMICA DEL SISTEMA ═══
+CREATE TABLE IF NOT EXISTS configuracion_sistema (
+  id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  smtp_host TEXT,
+  smtp_port INTEGER DEFAULT 587,
+  smtp_user TEXT,
+  smtp_pass TEXT,
+  smtp_from TEXT,
+  admin_email TEXT,
+  notifications_enabled INTEGER DEFAULT 0,
+  wa_api_url TEXT,
+  wa_api_token TEXT,
+  wa_from_number TEXT,
+  wa_enabled INTEGER DEFAULT 0
+);
+
+-- ═══ AUDITORÍA DE REVERSIONES CONTABLES ═══
+CREATE TABLE IF NOT EXISTS reversiones_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  reserva_id INTEGER,
+  folio_id INTEGER,
+  monto REAL,
+  concepto_original TEXT,
+  motivo TEXT,
+  reversado_por TEXT,
+  fecha TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (reserva_id) REFERENCES reservas_hotel(id),
+  FOREIGN KEY (folio_id) REFERENCES folio_hotel(id)
+);
+
+

@@ -371,4 +371,266 @@ router.post('/import/guests/execute', requireAuth, requireRole('admin'), importU
   }
 });
 
+const { hashPassword } = require('../auth');
+
+// ══════════════════════════════════════
+// USER MANAGEMENT CRUD
+// ══════════════════════════════════════
+
+router.get('/usuarios', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const { page = 1, limit = 50, search } = req.query;
+    const db = getDb();
+    const conditions = [];
+    const params = [];
+    if (search) {
+      conditions.push('(nombre LIKE ? OR email LIKE ?)');
+      params.push(`%${search}%`, `%${search}%`);
+    }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const offset = (Number(page) - 1) * Number(limit);
+    
+    const total = db.prepare(`SELECT COUNT(*) as c FROM usuarios ${where}`).get(...params).c;
+    const users = db.prepare(`SELECT id, email, nombre, rol, activo, created_at FROM usuarios ${where} ORDER BY nombre ASC LIMIT ? OFFSET ?`).all(...params, Number(limit), offset);
+    
+    ok(res, users, { total, page: Number(page), limit: Number(limit), pages: Math.ceil(total / Number(limit)) });
+  } catch (e) {
+    console.error(e);
+    err(res, 'SERVER_ERROR', 'Error listando usuarios', 500);
+  }
+});
+
+router.post('/usuarios', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const { email, nombre, rol, password } = req.body;
+    if (!email || !nombre || !rol || !password) {
+      return err(res, 'VALIDATION_ERROR', 'email, nombre, rol y password son requeridos');
+    }
+    const validRoles = ['admin', 'receptionist', 'cleaning'];
+    if (!validRoles.includes(rol)) {
+      return err(res, 'VALIDATION_ERROR', 'rol no es válido (admin, receptionist, cleaning)');
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return err(res, 'VALIDATION_ERROR', 'Formato de email inválido');
+    }
+    
+    const db = getDb();
+    const existing = db.prepare('SELECT id FROM usuarios WHERE email = ?').get(email.toLowerCase().trim());
+    if (existing) {
+      return err(res, 'DUPLICATE', 'El usuario con ese email ya existe');
+    }
+    
+    const password_hash = hashPassword(password);
+    const stmt = db.prepare('INSERT INTO usuarios (email, nombre, rol, password_hash, activo) VALUES (?, ?, ?, ?, 1)');
+    const result = stmt.run(email.toLowerCase().trim(), sanitize(nombre), rol, password_hash);
+    
+    ok(res, { id: result.lastInsertRowid, email: email.toLowerCase().trim(), nombre: sanitize(nombre), rol, activo: 1 }, null, 201);
+  } catch (e) {
+    console.error(e);
+    err(res, 'SERVER_ERROR', 'Error al crear usuario', 500);
+  }
+});
+
+router.put('/usuarios/:id', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const db = getDb();
+    const existing = db.prepare('SELECT * FROM usuarios WHERE id = ?').get(req.params.id);
+    if (!existing) {
+      return err(res, 'NOT_FOUND', 'Usuario no encontrado', 404);
+    }
+    
+    const { email, nombre, rol, password, activo } = req.body;
+    const updates = [];
+    const params = [];
+    
+    if (email !== undefined) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return err(res, 'VALIDATION_ERROR', 'Formato de email inválido');
+      }
+      const dup = db.prepare('SELECT id FROM usuarios WHERE email = ? AND id != ?').get(email.toLowerCase().trim(), req.params.id);
+      if (dup) {
+        return err(res, 'DUPLICATE', 'El usuario con ese email ya existe');
+      }
+      updates.push('email = ?');
+      params.push(email.toLowerCase().trim());
+    }
+    
+    if (nombre !== undefined) {
+      updates.push('nombre = ?');
+      params.push(sanitize(nombre));
+    }
+    
+    if (rol !== undefined) {
+      const validRoles = ['admin', 'receptionist', 'cleaning'];
+      if (!validRoles.includes(rol)) {
+        return err(res, 'VALIDATION_ERROR', 'rol no es válido (admin, receptionist, cleaning)');
+      }
+      updates.push('rol = ?');
+      params.push(rol);
+    }
+    
+    if (password !== undefined) {
+      updates.push('password_hash = ?');
+      params.push(hashPassword(password));
+    }
+    
+    if (activo !== undefined) {
+      updates.push('activo = ?');
+      params.push(activo ? 1 : 0);
+    }
+    
+    if (updates.length === 0) {
+      return err(res, 'VALIDATION_ERROR', 'Nada que actualizar');
+    }
+    
+    const query = `UPDATE usuarios SET ${updates.join(', ')} WHERE id = ?`;
+    params.push(req.params.id);
+    
+    db.prepare(query).run(...params);
+    const updated = db.prepare('SELECT id, email, nombre, rol, activo, created_at FROM usuarios WHERE id = ?').get(req.params.id);
+    ok(res, updated);
+  } catch (e) {
+    console.error(e);
+    err(res, 'SERVER_ERROR', 'Error al actualizar usuario', 500);
+  }
+});
+
+router.delete('/usuarios/:id', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const db = getDb();
+    const existing = db.prepare('SELECT id FROM usuarios WHERE id = ?').get(req.params.id);
+    if (!existing) {
+      return err(res, 'NOT_FOUND', 'Usuario no encontrado', 404);
+    }
+    db.prepare('UPDATE usuarios SET activo = 0 WHERE id = ?').run(req.params.id);
+    ok(res, { message: 'Usuario desactivado con éxito' });
+  } catch (e) {
+    console.error(e);
+    err(res, 'SERVER_ERROR', 'Error al desactivar usuario', 500);
+  }
+});
+
+// ══════════════════════════════════════
+// SYSTEM CONFIG CRUD
+// ══════════════════════════════════════
+
+router.get('/configuracion/sistema', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const db = getDb();
+    const config = db.prepare('SELECT * FROM configuracion_sistema WHERE id = 1').get();
+    if (!config) {
+      return err(res, 'NOT_FOUND', 'Configuración de sistema no encontrada', 404);
+    }
+    ok(res, config);
+  } catch (e) {
+    console.error(e);
+    err(res, 'SERVER_ERROR', 'Error al obtener configuración', 500);
+  }
+});
+
+router.put('/configuracion/sistema', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const db = getDb();
+    const config = db.prepare('SELECT * FROM configuracion_sistema WHERE id = 1').get();
+    if (!config) {
+      return err(res, 'NOT_FOUND', 'Configuración de sistema no encontrada', 404);
+    }
+    
+    const allowed = [
+      'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'smtp_from',
+      'admin_email', 'notifications_enabled', 'wa_api_url', 'wa_api_token',
+      'wa_from_number', 'wa_enabled'
+    ];
+    const updates = [];
+    const params = [];
+    
+    for (const field of allowed) {
+      if (req.body[field] !== undefined) {
+        let val = req.body[field];
+        
+        // Validations
+        if (field === 'smtp_port' && val !== null) {
+          const port = parseInt(val);
+          if (isNaN(port) || port < 1 || port > 65535) {
+            return err(res, 'VALIDATION_ERROR', 'Puerto SMTP inválido');
+          }
+        }
+        if ((field === 'admin_email' || field === 'smtp_from') && val !== null) {
+          const emailStr = String(val);
+          if (field === 'admin_email') {
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(emailStr)) {
+              return err(res, 'VALIDATION_ERROR', 'Formato de admin_email inválido');
+            }
+          }
+        }
+        if ((field === 'notifications_enabled' || field === 'wa_enabled') && val !== null) {
+          val = val ? 1 : 0;
+        }
+        
+        updates.push(`${field} = ?`);
+        params.push(val);
+      }
+    }
+    
+    if (updates.length === 0) {
+      return err(res, 'VALIDATION_ERROR', 'Nada que actualizar');
+    }
+    
+    const query = `UPDATE configuracion_sistema SET ${updates.join(', ')} WHERE id = 1`;
+    db.prepare(query).run(...params);
+    
+    const updated = db.prepare('SELECT * FROM configuracion_sistema WHERE id = 1').get();
+    ok(res, updated);
+  } catch (e) {
+    console.error(e);
+    err(res, 'SERVER_ERROR', 'Error al actualizar configuración', 500);
+  }
+});
+
+// ══════════════════════════════════════
+// LOGS QUERY ENDPOINTS
+// ══════════════════════════════════════
+
+router.get('/configuracion/logs', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const { page = 1, limit = 50, search } = req.query;
+    const db = getDb();
+    const conditions = [];
+    const params = [];
+    if (search) {
+      conditions.push('(tipo LIKE ? OR canal LIKE ? OR destinatario LIKE ?)');
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const offset = (Number(page) - 1) * Number(limit);
+    
+    const total = db.prepare(`SELECT COUNT(*) as c FROM notificaciones_log ${where}`).get(...params).c;
+    const logs = db.prepare(`SELECT * FROM notificaciones_log ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`).all(...params, Number(limit), offset);
+    
+    ok(res, logs, { total, page: Number(page), limit: Number(limit), pages: Math.ceil(total / Number(limit)) });
+  } catch (e) {
+    console.error(e);
+    err(res, 'SERVER_ERROR', 'Error al listar logs de notificaciones', 500);
+  }
+});
+
+router.get('/configuracion/reversiones', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const { page = 1, limit = 50 } = req.query;
+    const db = getDb();
+    const offset = (Number(page) - 1) * Number(limit);
+    
+    const total = db.prepare(`SELECT COUNT(*) as c FROM reversiones_log`).get().c;
+    const logs = db.prepare(`SELECT * FROM reversiones_log ORDER BY fecha DESC LIMIT ? OFFSET ?`).all(Number(limit), offset);
+    
+    ok(res, logs, { total, page: Number(page), limit: Number(limit), pages: Math.ceil(total / Number(limit)) });
+  } catch (e) {
+    console.error(e);
+    err(res, 'SERVER_ERROR', 'Error al listar logs de reversiones', 500);
+  }
+});
+
 module.exports = router;

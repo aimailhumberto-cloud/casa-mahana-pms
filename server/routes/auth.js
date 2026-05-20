@@ -18,8 +18,14 @@ router.post('/login', (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) return err(res, 'VALIDATION_ERROR', 'Email y contraseña requeridos');
     const db = getDb();
-    const user = db.prepare('SELECT * FROM usuarios WHERE email = ? AND activo = 1').get(email.toLowerCase().trim());
-    if (!user || !verifyPassword(password, user.password_hash)) {
+    const user = db.prepare('SELECT * FROM usuarios WHERE email = ?').get(email.toLowerCase().trim());
+    if (!user) {
+      return err(res, 'AUTH_FAILED', 'Credenciales inválidas', 401);
+    }
+    if (user.activo === 0) {
+      return err(res, 'USER_DEACTIVATED', 'Usuario desactivado', 403);
+    }
+    if (!verifyPassword(password, user.password_hash)) {
       return err(res, 'AUTH_FAILED', 'Credenciales inválidas', 401);
     }
     ok(res, { token: generateToken(user), user: { id: user.id, email: user.email, nombre: user.nombre, rol: user.rol } });

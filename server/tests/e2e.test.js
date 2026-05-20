@@ -396,13 +396,15 @@ describe('Casa Mahana PMS — Opaque-box E2E Test Suite', () => {
       expect(data.error.code).toBe('VALIDATION_ERROR');
     });
 
-    it('TC-2.4.4: Deactivated Staff Member Block fails immediately with HTTP 401', async () => {
-      const { status } = await apiRequest('/hotel/dashboard', {
+    it('TC-2.4.4: Deactivated Staff Member Block fails immediately with HTTP 403', async () => {
+      const { status, data } = await apiRequest('/hotel/dashboard', {
         method: 'GET',
         token: deactivatedToken
       });
 
-      expect(status).toBe(401);
+      expect(status).toBe(403);
+      expect(data.success).toBe(false);
+      expect(data.error.code).toBe('USER_DEACTIVATED');
     });
 
   });

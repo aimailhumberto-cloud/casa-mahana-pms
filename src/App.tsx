@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, Link, useNavigate, useLocation } from 'react-router-dom';
 import { api, setToken, clearToken, isLoggedIn } from './api/client';
-import { Hotel, CalendarDays, BedDouble, DollarSign, LogOut, Menu, X, LayoutGrid, Settings, Package, ExternalLink, BarChart3, Upload, Users, Bell } from 'lucide-react';
+import { Hotel, CalendarDays, BedDouble, DollarSign, LogOut, Menu, X, LayoutGrid, Settings, Package, ExternalLink, BarChart3, Upload, Users, Bell, ShieldCheck, Wrench } from 'lucide-react';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Reservas from './pages/Reservas';
@@ -17,6 +17,8 @@ import BookingWidget from './pages/BookingWidget';
 import ImportarDatos from './pages/ImportarDatos';
 import Huespedes from './pages/Huespedes';
 import Aprobaciones from './pages/Aprobaciones';
+import Usuarios from './pages/Usuarios';
+import Configuracion from './pages/Configuracion';
 
 function App() {
   const [user, setUser] = useState<any>(null);
@@ -66,6 +68,7 @@ function App() {
   if (!user) return <Login onLogin={handleLogin} />;
 
   const isCleaning = user?.rol === 'cleaning';
+  const isAdmin = user?.rol === 'admin';
 
   const fullNav = [
     { path: '/', label: 'Dashboard', icon: Hotel },
@@ -79,6 +82,11 @@ function App() {
     { path: '/huespedes', label: 'Huéspedes', icon: Users },
     { path: '/reportes', label: 'Reportes', icon: BarChart3 },
     { path: '/admin/importar', label: 'Importar', icon: Upload },
+  ];
+
+  const adminNav = [
+    { path: '/usuarios', label: 'Personal', icon: ShieldCheck },
+    { path: '/configuracion', label: 'Configuración', icon: Wrench },
   ];
 
   const nav = isCleaning
@@ -123,6 +131,21 @@ function App() {
                 )}
               </Link>
             ))}
+            {/* Admin-only section */}
+            {isAdmin && (
+              <div className="border-t border-gray-100 mt-3 pt-3">
+                <span className="px-3 text-[10px] font-bold text-gray-300 uppercase tracking-widest">Administración</span>
+                <div className="mt-1.5 space-y-1">
+                  {adminNav.map(n => (
+                    <Link key={n.path} to={n.path} onClick={() => setSidebarOpen(false)}
+                      className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition ${isActive(n.path) ? 'bg-mahana-50 text-mahana-700' : 'text-gray-600 hover:bg-gray-50'}`}>
+                      <n.icon size={18} />
+                      <span>{n.label}</span>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
             {/* Vista Cliente separator + link */}
             <div className="border-t border-gray-100 mt-3 pt-3">
               <a href="/reservar" target="_blank" rel="noopener"
@@ -156,6 +179,12 @@ function App() {
                 <Route path="/reportes" element={<Reportes />} />
                 <Route path="/huespedes" element={<Huespedes />} />
                 <Route path="/admin/importar" element={<ImportarDatos />} />
+                {isAdmin && (
+                  <>
+                    <Route path="/usuarios" element={<Usuarios />} />
+                    <Route path="/configuracion" element={<Configuracion user={user} />} />
+                  </>
+                )}
               </>
             )}
 

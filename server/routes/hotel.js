@@ -659,6 +659,12 @@ router.post('/hotel/reservas/:id/folio/:folioId/reversar', requireAuth, requireR
     let concept = '';
 
     const txn = db.transaction(() => {
+      const motivo = (req.body && (req.body.motivo || req.body.reason)) || 'No especificado';
+      db.prepare(`
+        INSERT INTO reversiones_log (reserva_id, folio_id, monto, concepto_original, motivo, reversado_por)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(reserva.id, original.id, original.monto, original.concepto, sanitize(motivo), req.user.nombre || req.user.email);
+
       if (original.tipo === 'credito') {
         // Reversión de pago -> Genera un débito
         concept = `Reversión de pago [ID ${original.id}]: ${original.concepto}`;
