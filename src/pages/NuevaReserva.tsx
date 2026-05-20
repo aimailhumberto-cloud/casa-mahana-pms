@@ -100,11 +100,60 @@ export default function NuevaReserva() {
     } else { setRooms([]); }
   }, [form.check_in, form.check_out]);
 
-  // Filter rooms by category
+  const selectedPlan = useMemo(() => {
+    return planes.find(p => p.codigo === form.plan_codigo);
+  }, [planes, form.plan_codigo]);
+
+  // Filter rooms by category and selected plan's applicable room types
   const categoryRooms = useMemo(() => {
-    return rooms.filter(r => r.categoria === categoria);
-  }, [rooms, categoria]);
+    const catFiltered = rooms.filter(r => r.categoria === categoria);
+    if (selectedPlan && selectedPlan.tipos_aplicables) {
+      try {
+        const applicableTypes = typeof selectedPlan.tipos_aplicables === 'string'
+          ? JSON.parse(selectedPlan.tipos_aplicables)
+          : selectedPlan.tipos_aplicables;
+        if (Array.isArray(applicableTypes) && applicableTypes.length > 0) {
+          return catFiltered.filter(r => applicableTypes.includes(r.tipo));
+        }
+      } catch (e) {
+        console.error('Error parsing selectedPlan.tipos_aplicables:', e);
+      }
+    }
+    return catFiltered;
+  }, [rooms, categoria, selectedPlan]);
+
   const availableRooms = categoryRooms.filter(r => r.disponible);
+
+  // Auto-deselect room/units if they are incompatible with the selected plan
+  useEffect(() => {
+    if (selectedPlan && selectedPlan.tipos_aplicables) {
+      try {
+        const applicableTypes = typeof selectedPlan.tipos_aplicables === 'string'
+          ? JSON.parse(selectedPlan.tipos_aplicables)
+          : selectedPlan.tipos_aplicables;
+        if (Array.isArray(applicableTypes) && applicableTypes.length > 0) {
+          if (form.habitacion_id) {
+            const currentRoom = rooms.find(r => r.id == form.habitacion_id);
+            if (currentRoom && !applicableTypes.includes(currentRoom.tipo)) {
+              set('habitacion_id', '');
+            }
+          }
+          if (isPasadia && selectedUnits.length > 0) {
+            const validUnits = selectedUnits.filter(uid => {
+              const u = rooms.find(r => r.id == uid);
+              return u && applicableTypes.includes(u.tipo);
+            });
+            if (validUnits.length !== selectedUnits.length) {
+              setSelectedUnits(validUnits);
+              set('habitacion_id', validUnits[0] || '');
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Error in compatibility effect:', e);
+      }
+    }
+  }, [selectedPlan, rooms]);
 
   // Auto-cotizar
   useEffect(() => {
@@ -487,6 +536,9 @@ export default function NuevaReserva() {
                     <option value="yappy">Yappy</option>
                     <option value="tarjeta">Tarjeta (POS)</option>
                     <option value="paypal">PayPal</option>
+                    <option value="al_cobro">Al Cobro (CXC)</option>
+                    <option value="cuponera_oferta_simple">Oferta Simple (Cupón)</option>
+                    <option value="cuponera_pahoy">PaHoy (Cupón)</option>
                   </select>
                 </Field>
                 <Field label="Referencia">
@@ -495,7 +547,7 @@ export default function NuevaReserva() {
               </div>
 
               {/* Upload receipt container */}
-              {(depositMetodo === 'transferencia' || depositMetodo === 'yappy' || depositMetodo === 'efectivo') && parseFloat(depositAmount) > 0 && (
+              {(depositMetodo === 'transferencia' || depositMetodo === 'yappy' || depositMetodo === 'efectivo' || depositMetodo.startsWith('cuponera_') || depositMetodo === 'al_cobro') && parseFloat(depositAmount) > 0 && (
                 <div className="md:col-span-4 mt-2">
                   <label className="block text-sm font-medium text-gray-500 mb-2">📸 Comprobante de Pago (Yappy, Recibo o Transferencia)</label>
                   <div

@@ -196,6 +196,20 @@ router.post('/reservar', (req, res) => {
     const plan = db.prepare('SELECT * FROM planes_tarifa WHERE codigo = ? AND activo = 1 AND visible_web = 1').get(plan_codigo);
     if (!plan) return err(res, 'NOT_FOUND', 'Plan no disponible');
 
+    // Validate plan room type applicability
+    if (plan.tipos_aplicables) {
+      try {
+        const applicableTypes = JSON.parse(plan.tipos_aplicables);
+        if (Array.isArray(applicableTypes) && applicableTypes.length > 0) {
+          if (!applicableTypes.includes(tipo_habitacion)) {
+            return err(res, 'VALIDATION_ERROR', `El plan ${plan.nombre} no se puede aplicar a habitaciones de tipo ${tipo_habitacion}. Tipos válidos: ${applicableTypes.join(', ')}`);
+          }
+        }
+      } catch (e) {
+        console.error('Error parsing plan.tipos_aplicables in public:', e);
+      }
+    }
+
     // Find an available room of the requested type
     const rooms = db.prepare("SELECT id FROM habitaciones WHERE tipo = ? AND activa = 1 AND categoria = 'Estadía'").all(tipo_habitacion);
     const conflicts = db.prepare(`

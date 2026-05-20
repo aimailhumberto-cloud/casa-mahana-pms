@@ -82,7 +82,7 @@ export default function BookingWidget() {
   const [receiptFile, setReceiptFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [dragActive, setDragActive] = useState(false)
-  const [paymentMethod, setPaymentMethod] = useState<'paypal' | 'transferencia' | 'yappy'>('paypal')
+  const [paymentMethod, setPaymentMethod] = useState<string>('paypal')
   const [reference, setReference] = useState('')
 
   useEffect(() => {
@@ -522,7 +522,7 @@ export default function BookingWidget() {
                   }`}
                 >
                   <Upload className="w-4 h-4" />
-                  <span>Transferencia / Yappy</span>
+                  <span>Transferencia / Yappy / Cupón</span>
                 </button>
               </div>
 
@@ -550,7 +550,7 @@ export default function BookingWidget() {
                   )}
                 </div>
               ) : (
-                /* Offline Payment (Transfer/Yappy) Tab */
+                /* Offline Payment (Transfer/Yappy/Cupón) Tab */
                 <div className="space-y-4 text-left">
                   {/* Account Type Toggle */}
                   <div className="grid grid-cols-2 gap-2 mb-4">
@@ -576,10 +576,32 @@ export default function BookingWidget() {
                     >
                       📱 Yappy (Banco General)
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod('cuponera_oferta_simple')}
+                      className={`py-2 px-3 text-xs font-semibold rounded-xl border transition ${
+                        paymentMethod === 'cuponera_oferta_simple'
+                          ? 'border-amber-500 bg-amber-50 text-amber-800 ring-1 ring-amber-400 font-bold'
+                          : 'border-gray-200 hover:border-amber-300 text-gray-500 bg-white'
+                      }`}
+                    >
+                      🎟️ Oferta Simple (Cupón)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod('cuponera_pahoy')}
+                      className={`py-2 px-3 text-xs font-semibold rounded-xl border transition ${
+                        paymentMethod === 'cuponera_pahoy'
+                          ? 'border-amber-500 bg-amber-50 text-amber-800 ring-1 ring-amber-400 font-bold'
+                          : 'border-gray-200 hover:border-amber-300 text-gray-500 bg-white'
+                      }`}
+                    >
+                      🎟️ PaHoy (Cupón)
+                    </button>
                   </div>
 
                   {/* Payment Info Card */}
-                  {paymentMethod === 'transferencia' ? (
+                  {paymentMethod === 'transferencia' && (
                     <div className="bg-amber-50/40 border border-amber-100 rounded-2xl p-4 text-sm mb-5 space-y-2">
                       <p className="font-bold text-amber-900 text-base mb-1">Datos de Transferencia</p>
                       <div className="grid grid-cols-2 gap-y-2 text-gray-700 text-xs sm:text-sm">
@@ -590,7 +612,8 @@ export default function BookingWidget() {
                       </div>
                       <p className="text-[10px] text-amber-700/80 italic pt-2 border-t border-amber-200/30">Por favor, transfiera el monto indicado arriba y adjunte el comprobante.</p>
                     </div>
-                  ) : (
+                  )}
+                  {paymentMethod === 'yappy' && (
                     <div className="bg-amber-50/40 border border-amber-100 rounded-2xl p-4 text-sm mb-5 space-y-2">
                       <p className="font-bold text-amber-900 text-base mb-1">Pagar con Yappy</p>
                       <div className="grid grid-cols-2 gap-y-2 text-gray-700 text-xs sm:text-sm">
@@ -598,6 +621,24 @@ export default function BookingWidget() {
                         <div><span className="text-gray-400 text-[10px] block uppercase font-medium">Banco</span><strong>Banco General</strong></div>
                       </div>
                       <p className="text-[10px] text-amber-700/80 italic pt-2 border-t border-amber-200/30">Envíe el pago en Yappy a @casamahana y adjunte la captura de pantalla del recibo.</p>
+                    </div>
+                  )}
+                  {paymentMethod === 'cuponera_oferta_simple' && (
+                    <div className="bg-amber-50/40 border border-amber-100 rounded-2xl p-4 text-sm mb-5 space-y-2">
+                      <p className="font-bold text-amber-900 text-base mb-1">Cupón de Oferta Simple</p>
+                      <p className="text-xs text-amber-700/90 leading-relaxed">
+                        Por favor, ingrese el <strong>código o número de cupón</strong> en el campo de abajo y adjunte el archivo o captura del cupón (QR visible).
+                      </p>
+                      <p className="text-[10px] text-amber-700/80 italic pt-2 border-t border-amber-200/30">El personal de Casa Mahana validará el cupón y confirmará su reserva.</p>
+                    </div>
+                  )}
+                  {paymentMethod === 'cuponera_pahoy' && (
+                    <div className="bg-amber-50/40 border border-amber-100 rounded-2xl p-4 text-sm mb-5 space-y-2">
+                      <p className="font-bold text-amber-900 text-base mb-1">Cupón de PaHoy</p>
+                      <p className="text-xs text-amber-700/90 leading-relaxed">
+                        Por favor, ingrese el <strong>código o número de cupón</strong> en el campo de abajo y adjunte el archivo o captura del cupón (QR visible).
+                      </p>
+                      <p className="text-[10px] text-amber-700/80 italic pt-2 border-t border-amber-200/30">El personal de Casa Mahana validará el cupón y confirmará su reserva.</p>
                     </div>
                   )}
 

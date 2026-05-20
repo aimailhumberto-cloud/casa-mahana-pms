@@ -77,6 +77,8 @@ router.post('/hotel/planes', requireAuth, requireRole('admin'), (req, res) => {
       extras_disponibles: req.body.extras_disponibles ? JSON.stringify(req.body.extras_disponibles) : null,
       tipos_aplicables: req.body.tipos_aplicables ? JSON.stringify(req.body.tipos_aplicables) : null,
       imagen: req.body.imagen || null,
+      lleva_impuesto: req.body.lleva_impuesto !== undefined ? parseInt(req.body.lleva_impuesto) : 1,
+      impuesto_pct: req.body.impuesto_pct !== undefined ? parseFloat(req.body.impuesto_pct) : 10,
     });
     ok(res, plan, null, 201);
   } catch (e) { console.error(e); err(res, 'SERVER_ERROR', 'Error creando producto', 500); }
@@ -87,7 +89,7 @@ router.put('/hotel/planes/:id', requireAuth, requireRole('admin'), (req, res) =>
     const existing = findById('planes_tarifa', req.params.id);
     if (!existing) return err(res, 'NOT_FOUND', 'Producto no encontrado', 404);
     const data = {};
-    const allowed = ['nombre', 'descripcion', 'categoria', 'precio_adulto_noche', 'precio_menor_noche', 'precio_mascota_noche', 'horario', 'imagen', 'activo', 'visible_web'];
+    const allowed = ['nombre', 'descripcion', 'categoria', 'precio_adulto_noche', 'precio_menor_noche', 'precio_mascota_noche', 'horario', 'imagen', 'activo', 'visible_web', 'lleva_impuesto', 'impuesto_pct'];
     for (const f of allowed) { if (req.body[f] !== undefined) data[f] = req.body[f]; }
     // JSON array fields
     if (req.body.incluye !== undefined) data.incluye = JSON.stringify(req.body.incluye);
@@ -366,6 +368,23 @@ router.post('/hotel/reservas', requireAuth, (req, res) => {
       if (totalGuests < minCap || totalGuests > maxCap) {
         return err(res, 'CAPACITY_ERROR', `${room.nombre} (${room.tipo}) admite de ${minCap} a ${maxCap} personas${room.descripcion_camas ? ` (${room.descripcion_camas})` : ''}. Seleccionaste ${totalGuests} huéspedes.`);
       }
+
+      // ── Validate plan room type applicability ──
+      if (req.body.plan_codigo) {
+        const plan = db.prepare('SELECT * FROM planes_tarifa WHERE codigo = ? AND activo = 1').get(req.body.plan_codigo);
+        if (plan && plan.tipos_aplicables) {
+          try {
+            const applicableTypes = JSON.parse(plan.tipos_aplicables);
+            if (Array.isArray(applicableTypes) && applicableTypes.length > 0) {
+              if (!applicableTypes.includes(room.tipo)) {
+                return err(res, 'VALIDATION_ERROR', `El plan ${plan.nombre} no se puede aplicar a habitaciones de tipo ${room.tipo}. Tipos válidos: ${applicableTypes.join(', ')}`);
+              }
+            }
+          } catch (e) {
+            console.error('Error parsing plan.tipos_aplicables:', e);
+          }
+        }
+      }
     }
 
     // ── Duplicate detection ──
@@ -620,6 +639,61 @@ router.post('/hotel/reservas/:id/folio', requireAuth, (req, res) => {
   } catch (e) { console.error(e); err(res, 'SERVER_ERROR', 'Error registrando movimiento', 500); }
 });
 
+// Reversar un movimiento de folio (crédito o débito)
+router.post('/hotel/reservas/:id/folio/:folioId/reversar', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const db = getDb();
+    const reserva = findById('reservas_hotel', req.params.id);
+    if (!reserva) return err(res, 'NOT_FOUND', 'Reserva no encontrada', 404);
+
+    const original = db.prepare('SELECT * FROM folio_hotel WHERE id = ? AND reserva_id = ?').get(req.params.folioId, req.params.id);
+    if (!original) return err(res, 'NOT_FOUND', 'Movimiento de folio no encontrado', 404);
+
+    // Verificar si ya fue reversado (buscando concepto que contenga "[ID {original.id}]")
+    const searchPattern = `%[ID ${original.id}]%`;
+    const reversed = db.prepare('SELECT id FROM folio_hotel WHERE reserva_id = ? AND concepto LIKE ?').get(req.params.id, searchPattern);
+    if (reversed) {
+      return err(res, 'VALIDATION_ERROR', 'Este movimiento ya ha sido reversado', 400);
+    }
+
+    let concept = '';
+
+    const txn = db.transaction(() => {
+      if (original.tipo === 'credito') {
+        // Reversión de pago -> Genera un débito
+        concept = `Reversión de pago [ID ${original.id}]: ${original.concepto}`;
+        db.prepare('INSERT INTO folio_hotel (reserva_id, tipo, concepto, monto, registrado_por) VALUES (?, ?, ?, ?, ?)').run(
+          req.params.id, 'debito', concept, original.monto, req.user.nombre
+        );
+
+        // Ajustar monto_pagado y saldo_pendiente
+        const newPagado = Math.round((parseFloat(reserva.monto_pagado) - parseFloat(original.monto)) * 100) / 100;
+        const newSaldo = Math.round((parseFloat(reserva.monto_total) - newPagado) * 100) / 100;
+        update('reservas_hotel', req.params.id, { monto_pagado: newPagado, saldo_pendiente: newSaldo });
+      } else if (original.tipo === 'debito') {
+        // Reversión de cargo -> Genera un crédito
+        concept = `Reversión de cargo [ID ${original.id}]: ${original.concepto}`;
+        db.prepare('INSERT INTO folio_hotel (reserva_id, tipo, concepto, monto, registrado_por) VALUES (?, ?, ?, ?, ?)').run(
+          req.params.id, 'credito', concept, original.monto, req.user.nombre
+        );
+
+        // Ajustar productos_adicionales y recalcular total
+        const newExtras = Math.max(0, Math.round((parseFloat(reserva.productos_adicionales) - parseFloat(original.monto)) * 100) / 100);
+        const recalc = calcReservation({ ...reserva, productos_adicionales: newExtras });
+        update('reservas_hotel', req.params.id, { productos_adicionales: newExtras, ...recalc });
+      }
+    });
+
+    txn();
+
+    const updatedReserva = findById('reservas_hotel', req.params.id);
+    ok(res, updatedReserva, null, 200);
+  } catch (e) {
+    console.error(e);
+    err(res, 'SERVER_ERROR', 'Error al reversar movimiento', 500);
+  }
+});
+
 // Saldos pendientes
 router.get('/hotel/saldos', requireAuth, (req, res) => {
   try {
@@ -633,6 +707,55 @@ router.get('/hotel/saldos', requireAuth, (req, res) => {
     `).all();
     ok(res, pending);
   } catch (e) { err(res, 'SERVER_ERROR', 'Error obteniendo saldos', 500); }
+});
+
+// Cuentas por Cobrar de Terceros y Cuponeras (Oferta Simple, PaHoy, Al Cobro)
+router.get('/hotel/saldos/terceros', requireAuth, (req, res) => {
+  try {
+    const db = getDb();
+    const entries = db.prepare(`
+      SELECT f.*, r.cliente, r.apellido, r.check_in, r.check_out, r.estado as reserva_estado,
+             h.nombre as habitacion_nombre
+      FROM folio_hotel f
+      JOIN reservas_hotel r ON f.reserva_id = r.id
+      LEFT JOIN habitaciones h ON r.habitacion_id = h.id
+      WHERE f.tipo = 'credito'
+        AND f.metodo_pago IN ('al_cobro', 'cuponera_oferta_simple', 'cuponera_pahoy')
+        AND f.reconciliado = 0
+      ORDER BY f.created_at ASC
+    `).all();
+    ok(res, entries);
+  } catch (e) {
+    console.error(e);
+    err(res, 'SERVER_ERROR', 'Error obteniendo saldos de terceros', 500);
+  }
+});
+
+// Reconciliación en lote de CxC Terceros y Cuponeras
+router.post('/hotel/saldos/reconciliar', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return err(res, 'VALIDATION_ERROR', 'Se requiere una lista de ids de folio para reconciliar');
+    }
+    const db = getDb();
+    const stmt = db.prepare(`
+      UPDATE folio_hotel
+      SET reconciliado = 1, fecha_reconciliacion = ?
+      WHERE id = ? AND tipo = 'credito' AND metodo_pago IN ('al_cobro', 'cuponera_oferta_simple', 'cuponera_pahoy')
+    `);
+    const today = new Date().toISOString().split('T')[0];
+    const txn = db.transaction(() => {
+      for (const id of ids) {
+        stmt.run(today, id);
+      }
+    });
+    txn();
+    ok(res, { message: `${ids.length} movimientos reconciliados con éxito` });
+  } catch (e) {
+    console.error(e);
+    err(res, 'SERVER_ERROR', 'Error reconciliando saldos de terceros', 500);
+  }
 });
 
 // ══════════════════════════════════════

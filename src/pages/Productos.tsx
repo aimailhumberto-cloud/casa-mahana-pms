@@ -20,7 +20,8 @@ const emptyForm = {
   codigo: '', nombre: '', descripcion: '', categoria: 'Estadía',
   precio_adulto_noche: 0, precio_menor_noche: 0, precio_mascota_noche: 0,
   incluye: [] as string[], horario: '', extras_disponibles: [] as string[],
-  tipos_aplicables: [] as string[], imagen: '', activo: 1, visible_web: 0
+  tipos_aplicables: [] as string[], imagen: '', activo: 1, visible_web: 0,
+  lleva_impuesto: 1, impuesto_pct: 10
 };
 
 const emptyReglas = [
@@ -92,7 +93,9 @@ export default function Productos() {
       incluye: plan.incluye || [], horario: plan.horario || '',
       extras_disponibles: plan.extras_disponibles || [],
       tipos_aplicables: plan.tipos_aplicables || [],
-      imagen: plan.imagen || '', activo: plan.activo, visible_web: plan.visible_web || 0
+      imagen: plan.imagen || '', activo: plan.activo, visible_web: plan.visible_web || 0,
+      lleva_impuesto: plan.lleva_impuesto !== undefined ? plan.lleva_impuesto : 1,
+      impuesto_pct: plan.impuesto_pct !== undefined ? plan.impuesto_pct : 10
     });
     // Load existing rate rules
     const existingReglas = reglasMap[plan.id] || [];
@@ -116,6 +119,8 @@ export default function Productos() {
         precio_adulto_noche: Number(form.precio_adulto_noche),
         precio_menor_noche: Number(form.precio_menor_noche),
         precio_mascota_noche: Number(form.precio_mascota_noche),
+        lleva_impuesto: Number(form.lleva_impuesto),
+        impuesto_pct: Number(form.impuesto_pct)
       };
       let planId = editingId;
       if (editingId) {
@@ -267,10 +272,17 @@ export default function Productos() {
                 <div className="flex items-start justify-between mb-3">
                   <div>
                     <h3 className="font-bold text-gray-800 text-lg">{plan.nombre}</h3>
-                    <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold mt-1 ${colors.badge}`}>
-                      {plan.categoria === 'Pasadía' ? '☀️' : '🏨'} {plan.categoria}
-                    </span>
-                    {!plan.activo && <span className="ml-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-600">INACTIVO</span>}
+                    <div className="flex flex-wrap gap-1 items-center mt-1">
+                      <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${colors.badge}`}>
+                        {plan.categoria === 'Pasadía' ? '☀️' : '🏨'} {plan.categoria}
+                      </span>
+                      {plan.lleva_impuesto === 0 ? (
+                        <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-[10px] font-bold">Exento</span>
+                      ) : (
+                        <span className="px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-full text-[10px] font-bold">Tasa: {plan.impuesto_pct}%</span>
+                      )}
+                    </div>
+                    {!plan.activo && <span className="inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-600">INACTIVO</span>}
                   </div>
                   <div className="text-right">
                     <div className="text-2xl font-bold text-gray-800">${plan.precio_adulto_noche}</div>
@@ -482,6 +494,26 @@ export default function Productos() {
                           setReglas(prev => prev.map(r => r.tipo_dia === 'entre_semana' ? { ...r, precio_mascota: v } : r));
                         }} className="input" />
                       </div>
+                    </div>
+                  </div>
+
+                  {/* Impuestos */}
+                  <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
+                    <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-1">🏦 Impuestos de la Tarifa</label>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">¿Aplica Impuesto?</label>
+                        <select value={form.lleva_impuesto} onChange={e => set('lleva_impuesto', parseInt(e.target.value))} className="input">
+                          <option value={1}>Sí (Lleva impuesto)</option>
+                          <option value={0}>No (Tarifa exenta)</option>
+                        </select>
+                      </div>
+                      {form.lleva_impuesto === 1 && (
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">Porcentaje de Impuesto (%)</label>
+                          <input type="number" step="0.1" min="0" max="100" value={form.impuesto_pct} onChange={e => set('impuesto_pct', parseFloat(e.target.value))} className="input" />
+                        </div>
+                      )}
                     </div>
                   </div>
 

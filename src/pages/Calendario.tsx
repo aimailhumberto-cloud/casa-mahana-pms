@@ -53,6 +53,9 @@ export default function Calendario() {
   const [quickPayReservaId, setQuickPayReservaId] = useState<number | null>(null);
   const [quickPayForm, setQuickPayForm] = useState({ monto: '', concepto: '', metodo_pago: 'efectivo', referencia: '' });
   const [quickPayLoading, setQuickPayLoading] = useState(false);
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const [posConfirmed, setPosConfirmed] = useState(false);
 
   // Hover references to prevent high-frequency re-renders & flickering
   const leaveTimeoutRef = useRef<any>(null);
@@ -204,6 +207,9 @@ export default function Calendario() {
       }
     } else if (actionType === 'register_payment') {
       setQuickPayReservaId(reservaId);
+      setReceiptFile(null);
+      setDragActive(false);
+      setPosConfirmed(false);
       const resObj = data?.reservas?.find((r: any) => r.id === reservaId);
       if (resObj) {
         setQuickPayForm({
@@ -252,6 +258,9 @@ export default function Calendario() {
       }
     } else if (actionType === 'register_payment') {
       setQuickPayReservaId(payload.reserva.id);
+      setReceiptFile(null);
+      setDragActive(false);
+      setPosConfirmed(false);
       setQuickPayForm({
         monto: payload.reserva.saldo_pendiente ? String(payload.reserva.saldo_pendiente) : '',
         concepto: 'Abono rápido desde Calendario',
@@ -284,6 +293,10 @@ export default function Calendario() {
   const submitQuickPay = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!quickPayReservaId || !quickPayForm.monto || parseFloat(quickPayForm.monto) <= 0) return;
+    if (quickPayForm.metodo_pago === 'tarjeta' && !posConfirmed) {
+      alert('Por favor, confirme que la transacción en la máquina POS fue exitosa.');
+      return;
+    }
     setQuickPayLoading(true);
     try {
       await api.post(`/hotel/reservas/${quickPayReservaId}/folio`, {
@@ -291,7 +304,20 @@ export default function Calendario() {
         monto: parseFloat(quickPayForm.monto),
         tipo: 'credito',
       });
+
+      if (receiptFile) {
+        const formData = new FormData();
+        formData.append('archivo', receiptFile);
+        formData.append('tipo', 'recibo');
+        formData.append('notas', `Comprobante de abono rápido desde Calendario por $${parseFloat(quickPayForm.monto).toFixed(2)}.`);
+        await api.post(`/hotel/reservas/${quickPayReservaId}/documentos`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+      }
+
       setQuickPayReservaId(null);
+      setReceiptFile(null);
+      setPosConfirmed(false);
       load();
     } catch (err: any) {
       alert(err?.response?.data?.error?.message || 'Error al registrar pago');
@@ -462,23 +488,46 @@ export default function Calendario() {
                     { id: 'efectivo', label: '💵 Efectivo' },
                     { id: 'transferencia', label: '🏦 Transfer' },
                     { id: 'yappy', label: '📱 Yappy' },
-                    { id: 'tarjeta', label: '💳 Tarjeta' },
+                    { id: 'tarjeta', label: '💳 Tarjeta POS' },
+                    { id: 'al_cobro', label: '📝 Al Cobro (CXC)' },
+                    { id: 'cuponera_oferta_simple', label: '🏷️ Oferta Simple' },
+                    { id: 'cuponera_pahoy', label: '⚡ PaHoy' },
                   ].map(method => (
                     <button
                       key={method.id}
                       type="button"
-                      onClick={() => setQuickPayForm(f => ({ ...f, metodo_pago: method.id }))}
-                      className={`py-2 rounded-xl text-xs font-semibold border transition ${
+                      onClick={() => {
+                        setQuickPayForm(f => ({ ...f, metodo_pago: method.id }));
+                        setPosConfirmed(false);
+                      }}
+                      className={`py-2 px-3 rounded-xl text-xs font-semibold border transition text-left flex items-center justify-between ${
                         quickPayForm.metodo_pago === method.id
                           ? 'border-green-500 bg-green-50 text-green-700 font-bold ring-2 ring-green-100'
                           : 'border-gray-200 hover:bg-gray-50 text-gray-600'
                       }`}
                     >
-                      {method.label}
+                      <span>{method.label}</span>
+                      {quickPayForm.metodo_pago === method.id && <span className="text-green-500 text-xs">✓</span>}
                     </button>
                   ))}
                 </div>
               </div>
+
+              {quickPayForm.metodo_pago === 'tarjeta' && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800 space-y-2">
+                  <p className="font-semibold">⚠️ Advertencia de POS</p>
+                  <p>Confirme que la transacción en la máquina POS fue exitosa antes de registrar el pago en el sistema.</p>
+                  <label className="flex items-center gap-2 cursor-pointer mt-1 font-semibold">
+                    <input
+                      type="checkbox"
+                      checked={posConfirmed}
+                      onChange={e => setPosConfirmed(e.target.checked)}
+                      className="rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                    />
+                    <span>Confirmar transacción exitosa</span>
+                  </label>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Referencia</label>
@@ -489,6 +538,54 @@ export default function Calendario() {
                   className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 outline-none text-sm"
                   placeholder="Número de control o comprobante"
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                  📄 Adjuntar Comprobante (Opcional)
+                </label>
+                <div
+                  onDragOver={e => { e.preventDefault(); setDragActive(true); }}
+                  onDragLeave={() => setDragActive(false)}
+                  onDrop={e => {
+                    e.preventDefault();
+                    setDragActive(false);
+                    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                      setReceiptFile(e.dataTransfer.files[0]);
+                    }
+                  }}
+                  className={`border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition ${
+                    dragActive
+                      ? 'border-green-500 bg-green-50 text-green-700 font-semibold border-solid'
+                      : receiptFile
+                      ? 'border-green-300 bg-green-50 text-green-700 font-semibold border-solid'
+                      : 'border-gray-200 hover:border-gray-300 text-gray-500 bg-gray-50'
+                  }`}
+                  onClick={() => document.getElementById('quick-pay-file')?.click()}
+                >
+                  <input
+                    id="quick-pay-file"
+                    type="file"
+                    accept="image/*,application/pdf"
+                    onChange={e => {
+                      if (e.target.files && e.target.files[0]) {
+                        setReceiptFile(e.target.files[0]);
+                      }
+                    }}
+                    className="hidden"
+                  />
+                  {receiptFile ? (
+                    <div className="space-y-1">
+                      <p className="text-xs font-bold truncate">✓ {receiptFile.name}</p>
+                      <p className="text-[10px] text-green-600">{(receiptFile.size / 1024).toFixed(1)} KB - Click para cambiar</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold">Arrastre el comprobante aquí o haga clic</p>
+                      <p className="text-[10px] text-gray-400">PDF, JPG, PNG (máx. 5MB)</p>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 

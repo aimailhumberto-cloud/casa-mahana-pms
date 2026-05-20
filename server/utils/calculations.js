@@ -36,7 +36,34 @@ function calcReservation(data) {
   const precioMenor = parseFloat(data.precio_menor_noche) || 0;
   const precioMascota = parseFloat(data.precio_mascota_noche) || 0;
   const extras = parseFloat(data.productos_adicionales) || 0;
-  const impuestoPct = parseFloat(data.impuesto_pct) || parseFloat(getConfig('impuesto_turismo_pct')) || 10;
+
+  let impuestoPct = parseFloat(getConfig('impuesto_turismo_pct')) || 10;
+  
+  // If plan information is provided, fetch it
+  let plan = null;
+  if (data.plan_id) {
+    plan = findById('planes_tarifa', data.plan_id);
+  } else if (data.plan_codigo) {
+    const db = getDb();
+    plan = db.prepare('SELECT * FROM planes_tarifa WHERE codigo = ?').get(data.plan_codigo);
+  }
+
+  if (plan) {
+    if (plan.lleva_impuesto === 0) {
+      impuestoPct = 0;
+    } else if (plan.impuesto_pct !== undefined && plan.impuesto_pct !== null) {
+      impuestoPct = plan.impuesto_pct;
+    }
+  }
+
+  // Explicit override in data (if defined)
+  if (data.impuesto_pct !== undefined && data.impuesto_pct !== null && data.impuesto_pct !== '') {
+    impuestoPct = parseFloat(data.impuesto_pct);
+  }
+  if (data.lleva_impuesto === 0 || data.lleva_impuesto === '0' || data.lleva_impuesto === false) {
+    impuestoPct = 0;
+  }
+
   const depositoPct = parseFloat(getConfig('deposito_sugerido_pct')) || 50;
 
   const subtotal = Math.round(((adultos * precioAdulto) + (menores * precioMenor) + (mascotas * precioMascota)) * noches * 100) / 100;
@@ -62,7 +89,17 @@ function calcReservation(data) {
 function calcReservationWithRates(planId, checkIn, checkOut, adultos, menores, mascotas) {
   const db = getDb();
   const noches = calcNoches(checkIn, checkOut);
-  const impuestoPct = parseFloat(getConfig('impuesto_turismo_pct')) || 10;
+  const plan = findById('planes_tarifa', planId);
+
+  let impuestoPct = parseFloat(getConfig('impuesto_turismo_pct')) || 10;
+  if (plan) {
+    if (plan.lleva_impuesto === 0) {
+      impuestoPct = 0;
+    } else if (plan.impuesto_pct !== undefined && plan.impuesto_pct !== null) {
+      impuestoPct = plan.impuesto_pct;
+    }
+  }
+
   const depositoPct = parseFloat(getConfig('deposito_sugerido_pct')) || 50;
 
   const desglose = []; // per-night breakdown
@@ -82,10 +119,9 @@ function calcReservationWithRates(planId, checkIn, checkOut, adultos, menores, m
       pMascota = rate.precio_mascota;
     } else {
       // Fallback to plan base price
-      const plan = findById('planes_tarifa', planId);
-      pAdulto = plan.precio_adulto_noche;
-      pMenor = plan.precio_menor_noche;
-      pMascota = plan.precio_mascota_noche;
+      pAdulto = plan ? plan.precio_adulto_noche : 0;
+      pMenor = plan ? plan.precio_menor_noche : 0;
+      pMascota = plan ? plan.precio_mascota_noche : 0;
     }
 
     const nightTotal = Math.round(((adultos * pAdulto) + (menores * pMenor) + (mascotas * pMascota)) * 100) / 100;

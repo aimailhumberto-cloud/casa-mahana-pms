@@ -11,7 +11,7 @@ let db;
 
 function getDb() {
   if (!db) {
-    const dbName = process.env.NODE_ENV === 'test' ? 'casa-mahana-test.db' : 'casa-mahana.db';
+    const dbName = process.env.NODE_ENV === 'test' ? (process.env.TEST_DB_NAME || 'casa-mahana-test.db') : 'casa-mahana.db';
     const DB_PATH = path.join(DB_DIR, dbName);
     db = new Database(DB_PATH);
     db.pragma('journal_mode = WAL');
@@ -147,6 +147,21 @@ function getDb() {
         const insertPlan = db.prepare('INSERT INTO planes_tarifa (codigo, nombre, descripcion, categoria, precio_adulto_noche, precio_menor_noche, precio_mascota_noche) VALUES (?, ?, ?, ?, ?, ?, ?)');
         insertPlan.run('pasadia_entrada', 'Pasadía Entrada', 'Solo entrada al día', 'Pasadía', 5.50, 3, 0);
         insertPlan.run('pasadia_comidas', 'Pasadía Comidas + Semi Open Bar', 'Entrada + comidas + semi open bar', 'Pasadía', 35, 20, 0);
+      }
+
+      // Migration: add tax columns to planes_tarifa if missing
+      if (!planCols.includes('lleva_impuesto')) {
+        db.exec("ALTER TABLE planes_tarifa ADD COLUMN lleva_impuesto INTEGER DEFAULT 1");
+        db.exec("ALTER TABLE planes_tarifa ADD COLUMN impuesto_pct REAL DEFAULT 10");
+        console.log('✅ Migrated planes_tarifa: lleva_impuesto + impuesto_pct');
+      }
+
+      // Migration: add reconciliation columns to folio_hotel if missing
+      const folioCols = db.prepare('PRAGMA table_info(folio_hotel)').all().map(c => c.name);
+      if (!folioCols.includes('reconciliado')) {
+        db.exec("ALTER TABLE folio_hotel ADD COLUMN reconciliado INTEGER DEFAULT 0");
+        db.exec("ALTER TABLE folio_hotel ADD COLUMN fecha_reconciliacion TEXT");
+        console.log('✅ Migrated folio_hotel: reconciliado + fecha_reconciliacion');
       }
     }
 

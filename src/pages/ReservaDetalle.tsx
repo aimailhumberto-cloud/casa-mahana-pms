@@ -16,6 +16,7 @@ const estadoColor: Record<string, string> = {
 export default function ReservaDetalle() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const isAdmin = JSON.parse(localStorage.getItem('pms_user') || '{}')?.rol === 'admin';
   const [reserva, setReserva] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [showPago, setShowPago] = useState(false);
@@ -30,6 +31,7 @@ export default function ReservaDetalle() {
   const [uploadNotas, setUploadNotas] = useState('');
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [reversalLoading, setReversalLoading] = useState<number | null>(null);
 
   // Voucher upload state inside "Registrar Pago" form
   const [pagoFile, setPagoFile] = useState<File | null>(null);
@@ -54,6 +56,21 @@ export default function ReservaDetalle() {
 
   const load = () => { api.get(`/hotel/reservas/${id}`).then(r => { setReserva(r.data); setLoading(false); }).catch(() => setLoading(false)); };
   useEffect(() => { load(); }, [id]);
+
+  const handleReversal = async (folioId: number, concepto: string) => {
+    if (!confirm(`¿Está seguro de que desea reversar el movimiento "${concepto}"? Esta acción creará una contrapartida y es irreversible.`)) {
+      return;
+    }
+    setReversalLoading(folioId);
+    try {
+      await api.post(`/hotel/reservas/${id}/folio/${folioId}/reversar`);
+      load();
+    } catch (err: any) {
+      alert(err?.response?.data?.error?.message || 'Error al reversar el movimiento');
+    } finally {
+      setReversalLoading(null);
+    }
+  };
 
   const changeStatus = async (estado: string) => {
     try {
@@ -261,6 +278,9 @@ export default function ReservaDetalle() {
                       <option value="transferencia">Transferencia</option>
                       <option value="yappy">Yappy</option>
                       <option value="tarjeta">Tarjeta (POS)</option>
+                      <option value="al_cobro">Al Cobro (CXC)</option>
+                      <option value="cuponera_oferta_simple">Oferta Simple (Cupón)</option>
+                      <option value="cuponera_pahoy">PaHoy (Cupón)</option>
                     </select>
                   </div>
                   <div>
@@ -269,7 +289,7 @@ export default function ReservaDetalle() {
                   </div>
 
                   {/* Upload receipt container inside Registrar Pago form */}
-                  {(pago.metodo_pago === 'transferencia' || pago.metodo_pago === 'yappy' || pago.metodo_pago === 'efectivo') && parseFloat(pago.monto) > 0 && (
+                  {(pago.metodo_pago === 'transferencia' || pago.metodo_pago === 'yappy' || pago.metodo_pago === 'efectivo' || pago.metodo_pago.startsWith('cuponera_') || pago.metodo_pago === 'al_cobro') && parseFloat(pago.monto) > 0 && (
                     <div className="col-span-2 md:col-span-4 mt-1">
                       <label className="block text-xs font-medium text-gray-500 mb-1.5">📸 Adjuntar Comprobante de Pago (Opcional)</label>
                       <div
@@ -362,18 +382,43 @@ export default function ReservaDetalle() {
                     <th className="py-2 text-left">Método</th>
                     <th className="py-2 text-right">Débito</th>
                     <th className="py-2 text-right">Crédito</th>
+                    {isAdmin && <th className="py-2 text-center w-24">Acciones</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {[...(reserva.folio || [])].sort((a: any, b: any) => a.id - b.id).map((f: any) => (
-                    <tr key={f.id} className={f.tipo === 'credito' ? 'bg-green-50/30' : ''}>
-                      <td className="py-2 text-gray-400">{f.fecha}</td>
-                      <td className="py-2">{f.concepto}</td>
-                      <td className="py-2 text-gray-400">{f.metodo_pago || '-'}</td>
-                      <td className="py-2 text-right text-red-500 font-medium">{f.tipo === 'debito' ? `$${f.monto.toFixed(2)}` : ''}</td>
-                      <td className="py-2 text-right text-green-600 font-medium">{f.tipo === 'credito' ? `$${f.monto.toFixed(2)}` : ''}</td>
-                    </tr>
-                  ))}
+                  {[...(reserva.folio || [])].sort((a: any, b: any) => a.id - b.id).map((f: any) => {
+                    const isReversal = f.concepto.startsWith('Reversión de pago [ID ') || f.concepto.startsWith('Reversión de cargo [ID ');
+                    const alreadyReversed = (reserva.folio || []).some((other: any) => other.concepto.includes(`[ID ${f.id}]`));
+                    return (
+                      <tr key={f.id} className={f.tipo === 'credito' ? 'bg-green-50/30' : ''}>
+                        <td className="py-2 text-gray-400">{f.fecha}</td>
+                        <td className="py-2">
+                          <span className={isReversal ? 'text-gray-400 italic' : ''}>{f.concepto}</span>
+                        </td>
+                        <td className="py-2 text-gray-400">{f.metodo_pago || '-'}</td>
+                        <td className="py-2 text-right text-red-500 font-medium">{f.tipo === 'debito' ? `$${f.monto.toFixed(2)}` : ''}</td>
+                        <td className="py-2 text-right text-green-600 font-medium">{f.tipo === 'credito' ? `$${f.monto.toFixed(2)}` : ''}</td>
+                        {isAdmin && (
+                          <td className="py-2 text-center">
+                            {!isReversal && !alreadyReversed ? (
+                              <button
+                                type="button"
+                                onClick={() => handleReversal(f.id, f.concepto)}
+                                disabled={reversalLoading !== null}
+                                className="px-2 py-1 text-[11px] font-bold bg-red-100 hover:bg-red-200 text-red-700 rounded-lg transition disabled:opacity-50"
+                              >
+                                {reversalLoading === f.id ? '...' : 'Reversar'}
+                              </button>
+                            ) : alreadyReversed ? (
+                              <span className="text-[10px] text-gray-400 font-semibold italic">Reversado</span>
+                            ) : (
+                              <span className="text-[10px] text-gray-400 italic">-</span>
+                            )}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
                 </tbody>
                 <tfoot className="border-t-2 border-gray-300">
                   <tr className="font-bold">
@@ -384,6 +429,7 @@ export default function ReservaDetalle() {
                     <td className="py-2 text-right text-green-600">
                       ${[...(reserva.folio || [])].filter((f: any) => f.tipo === 'credito').reduce((s: number, f: any) => s + f.monto, 0).toFixed(2)}
                     </td>
+                    {isAdmin && <td className="py-2" />}
                   </tr>
                 </tfoot>
               </table>
