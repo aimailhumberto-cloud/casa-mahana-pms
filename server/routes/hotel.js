@@ -535,6 +535,60 @@ router.put('/hotel/reservas/:id', requireAuth, (req, res) => {
   } catch (e) { console.error(e); err(res, 'SERVER_ERROR', 'Error actualizando reserva', 500); }
 });
 
+router.post('/hotel/reservas/:id/solicitar-cambio', requireAuth, (req, res) => {
+  try {
+    const { tipo_modificacion, transaccion_original_id, justificacion, snapshot_datos } = req.body;
+    if (!tipo_modificacion || !justificacion || !snapshot_datos) {
+      return err(res, 'VALIDATION_ERROR', 'tipo_modificacion, justificacion y snapshot_datos son requeridos');
+    }
+    if (!['editar_pago', 'editar_reserva'].includes(tipo_modificacion)) {
+      return err(res, 'VALIDATION_ERROR', 'tipo_modificacion debe ser editar_pago o editar_reserva');
+    }
+
+    const db = getDb();
+    // 1. Fetch current reservation
+    const reservation = db.prepare('SELECT * FROM reservas_hotel WHERE id = ?').get(req.params.id);
+    if (!reservation) return err(res, 'NOT_FOUND', 'Reserva no encontrada', 404);
+
+    if (reservation.estado === 'Cambio Pendiente de Aprobación') {
+      return err(res, 'ALREADY_PENDING', 'Ya existe una solicitud de cambio pendiente para esta reserva', 400);
+    }
+
+    let datosAnterioresObj = {};
+    if (tipo_modificacion === 'editar_reserva') {
+      datosAnterioresObj = { ...reservation };
+    } else {
+      if (!transaccion_original_id) {
+        return err(res, 'VALIDATION_ERROR', 'transaccion_original_id es requerido para editar_pago');
+      }
+      const payment = db.prepare('SELECT * FROM folio_hotel WHERE id = ? AND reserva_id = ?').get(transaccion_original_id, req.params.id);
+      if (!payment) return err(res, 'NOT_FOUND', 'Transacción de pago original no encontrada', 404);
+      datosAnterioresObj = { ...payment, reserva_estado_anterior: reservation.estado };
+    }
+
+    // 2. Set the reservation's estado to 'Cambio Pendiente de Aprobación'
+    db.prepare("UPDATE reservas_hotel SET estado = 'Cambio Pendiente de Aprobación' WHERE id = ?").run(req.params.id);
+
+    // 3. Create the solicitudes_modificacion record in DB
+    const requestData = {
+      reserva_id: parseInt(req.params.id),
+      tipo_modificacion,
+      transaccion_original_id: transaccion_original_id ? parseInt(transaccion_original_id) : null,
+      estado: 'Pendiente',
+      usuario_solicitante: req.user.nombre || req.user.email || 'staff',
+      justificacion: sanitize(justificacion),
+      snapshot_datos: typeof snapshot_datos === 'string' ? snapshot_datos : JSON.stringify(snapshot_datos),
+      datos_anteriores: JSON.stringify(datosAnterioresObj)
+    };
+
+    const newRequest = create('solicitudes_modificacion', requestData);
+    ok(res, newRequest, null, 201);
+  } catch (e) {
+    console.error('Error en solicitar-cambio:', e);
+    err(res, 'SERVER_ERROR', 'Error al procesar la solicitud de cambio', 500);
+  }
+});
+
 // Status change (Check-in / Check-out)
 router.patch('/hotel/reservas/:id/status', requireAuth, requireRole('admin', 'receptionist'), (req, res) => {
   try {

@@ -5,6 +5,7 @@ const { getDb } = require('../db/database');
 const { requireAuth, requireRole } = require('../auth');
 const { parseFile, detectColumns, runImport } = require('../import-cloudbeds');
 const { importUpload, validateImportSignature } = require('../utils/upload');
+const { calcNoches, calcReservation, calcReservationWithRates } = require('../utils/calculations');
 
 // ── Helpers ──
 function ok(res, data, meta, status = 200) {
@@ -630,6 +631,222 @@ router.get('/configuracion/reversiones', requireAuth, requireRole('admin'), (req
   } catch (e) {
     console.error(e);
     err(res, 'SERVER_ERROR', 'Error al listar logs de reversiones', 500);
+  }
+});
+
+router.get('/solicitudes-modificacion', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const { estado } = req.query;
+    const db = getDb();
+    let query = `
+      SELECT s.*, r.cliente, r.apellido, r.plan_nombre 
+      FROM solicitudes_modificacion s 
+      JOIN reservas_hotel r ON s.reserva_id = r.id
+    `;
+    const params = [];
+    if (estado) {
+      query += ' WHERE s.estado = ?';
+      params.push(estado);
+    }
+    query += ' ORDER BY s.id DESC';
+    const list = db.prepare(query).all(...params);
+    ok(res, list);
+  } catch (e) {
+    console.error('Error listando solicitudes:', e);
+    err(res, 'SERVER_ERROR', 'Error al listar solicitudes de modificación', 500);
+  }
+});
+
+router.post('/solicitudes-modificacion/:id/procesar', requireAuth, requireRole('admin'), (req, res) => {
+  const db = getDb();
+  
+  // Pre-transaction validation: Check if request is valid and pending
+  const request = db.prepare('SELECT * FROM solicitudes_modificacion WHERE id = ?').get(req.params.id);
+  if (!request) return err(res, 'NOT_FOUND', 'Solicitud no encontrada', 404);
+  if (request.estado !== 'Pendiente') return err(res, 'ALREADY_PROCESSED', 'Esta solicitud ya fue procesada', 400);
+
+  const { accion, comentarios_admin } = req.body;
+  if (!['aprobar', 'rechazar'].includes(accion)) {
+    return err(res, 'VALIDATION_ERROR', 'Acción inválida. Use aprobar o rechazar', 400);
+  }
+
+  // ACID transaction wrapper for Processing
+  const processTransaction = db.transaction((reqId, adminUser, act, comments) => {
+    // 1. Fetch Request
+    const reqRow = db.prepare('SELECT * FROM solicitudes_modificacion WHERE id = ?').get(reqId);
+    if (!reqRow) throw new Error('Solicitud no encontrada');
+    if (reqRow.estado !== 'Pendiente') throw new Error('Esta solicitud ya fue procesada');
+
+    const reservaId = reqRow.reserva_id;
+    const tipoModificacion = reqRow.tipo_modificacion;
+
+    // 2. Fetch current Reservation
+    const reservation = db.prepare('SELECT * FROM reservas_hotel WHERE id = ?').get(reservaId);
+    if (!reservation) throw new Error('Reserva vinculada no encontrada');
+
+    if (act === 'rechazar') {
+      // Restore original state
+      const prevData = JSON.parse(reqRow.datos_anteriores);
+      const originalEstado = prevData.reserva_estado_anterior || prevData.estado;
+      if (originalEstado) {
+        db.prepare("UPDATE reservas_hotel SET estado = ? WHERE id = ?").run(originalEstado, reservaId);
+      }
+
+      // Update request status to Rechazado
+      db.prepare(`
+        UPDATE solicitudes_modificacion 
+        SET estado = 'Rechazado', procesado_por = ?, fecha_procesamiento = datetime('now'), comentarios_admin = ?
+        WHERE id = ?
+      `).run(adminUser, comments || null, reqId);
+
+      return { success: true, message: 'Solicitud rechazada con éxito y reserva restaurada.' };
+    }
+
+    // act === 'aprobar'
+    const newFields = JSON.parse(reqRow.snapshot_datos);
+
+    if (tipoModificacion === 'editar_pago') {
+      const transaccionOriginalId = reqRow.transaccion_original_id;
+      if (!transaccionOriginalId) throw new Error('transaccion_original_id faltante en la solicitud de pago');
+
+      const payment = db.prepare('SELECT * FROM folio_hotel WHERE id = ? AND reserva_id = ?').get(transaccionOriginalId, reservaId);
+      if (!payment) throw new Error('Transacción de pago original no encontrada');
+
+      // Update payment fields in folio_hotel
+      const allowedPaymentFields = ['monto', 'metodo_pago', 'concepto', 'referencia', 'tipo', 'fecha'];
+      const paymentUpdates = [];
+      const paymentParams = [];
+      for (const field of allowedPaymentFields) {
+        if (newFields[field] !== undefined) {
+          paymentUpdates.push(`${field} = ?`);
+          paymentParams.push(newFields[field]);
+        }
+      }
+      if (paymentUpdates.length > 0) {
+        db.prepare(`UPDATE folio_hotel SET ${paymentUpdates.join(', ')} WHERE id = ?`).run(...paymentParams, transaccionOriginalId);
+      }
+
+      // Recalculate totals
+      const totalPaid = db.prepare("SELECT SUM(monto) as total FROM folio_hotel WHERE reserva_id = ? AND tipo = 'credito'").get(reservaId).total || 0;
+      const newMontoPagado = Math.round(totalPaid * 100) / 100;
+
+      const debits = db.prepare("SELECT * FROM folio_hotel WHERE reserva_id = ? AND tipo = 'debito'").all(reservaId);
+      let newProductosAdicionales = 0;
+      for (const d of debits) {
+        if (!d.concepto.startsWith('Habitación:') && !d.concepto.startsWith('Impuesto Turismo')) {
+          newProductosAdicionales += d.monto;
+        }
+      }
+      newProductosAdicionales = Math.round(newProductosAdicionales * 100) / 100;
+
+      // Recalculate with merged values
+      const merged = { ...reservation, monto_pagado: newMontoPagado, productos_adicionales: newProductosAdicionales };
+      const totals = calcReservation(merged);
+      Object.assign(merged, totals);
+
+      // Restore reservation state from original state (since it's approved, un-lock it!)
+      const prevData = JSON.parse(reqRow.datos_anteriores);
+      const originalEstado = prevData.reserva_estado_anterior || prevData.estado || 'Confirmada';
+      merged.estado = originalEstado;
+
+      // Update reservation
+      db.prepare(`
+        UPDATE reservas_hotel SET 
+          productos_adicionales = ?, subtotal = ?, impuesto_pct = ?, impuesto_monto = ?,
+          monto_total = ?, deposito_sugerido = ?, monto_pagado = ?, saldo_pendiente = ?,
+          estado = ?, updated_at = datetime('now')
+        WHERE id = ?
+      `).run(
+        merged.productos_adicionales, merged.subtotal, merged.impuesto_pct, merged.impuesto_monto,
+        merged.monto_total, merged.deposito_sugerido, merged.monto_pagado, merged.saldo_pendiente,
+        merged.estado, reservaId
+      );
+
+    } else if (tipoModificacion === 'editar_reserva') {
+      // Modify reservation details in reservas_hotel
+      const merged = { ...reservation, ...newFields };
+
+      // Validate room availability
+      if (newFields.habitacion_id || newFields.check_in || newFields.check_out) {
+        const roomId = merged.habitacion_id;
+        const ci = merged.check_in;
+        const co = merged.check_out;
+        if (roomId) {
+          const conflict = db.prepare(`
+            SELECT id, cliente FROM reservas_hotel
+            WHERE habitacion_id = ? AND id != ? AND estado NOT IN ('Cancelada', 'No-Show', 'Check-Out')
+              AND check_in < ? AND check_out > ?
+          `).get(roomId, reservaId, co, ci);
+          if (conflict) {
+            throw new Error(`La habitación ya está ocupada por ${conflict.cliente} del ${ci} al ${co}`);
+          }
+        }
+      }
+
+      // Recalculate nights
+      merged.noches = calcNoches(merged.check_in, merged.check_out);
+
+      // Recalculate totals
+      let totals;
+      if (merged.plan_codigo) {
+        const plan = db.prepare('SELECT * FROM planes_tarifa WHERE codigo = ? AND activo = 1').get(merged.plan_codigo);
+        if (plan) {
+          totals = calcReservationWithRates(plan.id, merged.check_in, merged.check_out, merged.adultos, merged.menores, merged.mascotas);
+          merged.plan_nombre = plan.nombre;
+          merged.precio_adulto_noche = plan.precio_adulto_noche;
+          merged.precio_menor_noche = plan.precio_menor_noche;
+          merged.precio_mascota_noche = plan.precio_mascota_noche;
+        } else {
+          totals = calcReservation(merged);
+        }
+      } else {
+        totals = calcReservation(merged);
+      }
+      Object.assign(merged, totals);
+
+      // Restore state from original reservation state (since it's approved, un-lock it!)
+      const prevData = JSON.parse(reqRow.datos_anteriores);
+      const originalEstado = prevData.estado || 'Confirmada';
+      merged.estado = originalEstado;
+
+      // Update reservas_hotel table
+      db.prepare(`
+        UPDATE reservas_hotel SET 
+          cliente = ?, apellido = ?, email = ?, whatsapp = ?, telefono = ?, nacionalidad = ?,
+          habitacion_id = ?, tipo_habitacion = ?, check_in = ?, check_out = ?, noches = ?, hora_llegada = ?,
+          adultos = ?, menores = ?, mascotas = ?, plan_codigo = ?, plan_nombre = ?,
+          precio_adulto_noche = ?, precio_menor_noche = ?, precio_mascota_noche = ?,
+          subtotal = ?, productos_adicionales = ?, impuesto_pct = ?, impuesto_monto = ?, monto_total = ?,
+          deposito_sugerido = ?, monto_pagado = ?, saldo_pendiente = ?, estado = ?, fuente = ?, notas = ?,
+          updated_at = datetime('now')
+        WHERE id = ?
+      `).run(
+        merged.cliente, merged.apellido, merged.email, merged.whatsapp, merged.telefono, merged.nacionalidad,
+        merged.habitacion_id, merged.tipo_habitacion, merged.check_in, merged.check_out, merged.noches, merged.hora_llegada,
+        merged.adultos, merged.menores, merged.mascotas, merged.plan_codigo, merged.plan_nombre,
+        merged.precio_adulto_noche, merged.precio_menor_noche, merged.precio_mascota_noche,
+        merged.subtotal, merged.productos_adicionales, merged.impuesto_pct, merged.impuesto_monto, merged.monto_total,
+        merged.deposito_sugerido, merged.monto_pagado, merged.saldo_pendiente, merged.estado, merged.fuente, merged.notas,
+        reservaId
+      );
+    }
+
+    // Update request status to Aprobado
+    db.prepare(`
+      UPDATE solicitudes_modificacion 
+      SET estado = 'Aprobado', procesado_por = ?, fecha_procesamiento = datetime('now'), comentarios_admin = ?
+      WHERE id = ?
+    `).run(adminUser, comments || null, reqId);
+
+    return { success: true, message: 'Solicitud aprobada y reserva/folios actualizados con éxito.' };
+  });
+
+  try {
+    const result = processTransaction(request.id, req.user.nombre || req.user.email, accion, comentarios_admin);
+    return ok(res, result);
+  } catch (error) {
+    console.error('Error procesando la solicitud:', error);
+    return err(res, 'TRANSACTION_FAILED', error.message, 500);
   }
 });
 

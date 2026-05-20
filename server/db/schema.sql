@@ -278,4 +278,27 @@ CREATE TABLE IF NOT EXISTS reversiones_log (
   FOREIGN KEY (folio_id) REFERENCES folio_hotel(id)
 );
 
+-- ═══ SOLICITUDES DE MODIFICACIÓN (DOUBLE APPROVAL / 4-EYES WORKFLOW) ═══
+CREATE TABLE IF NOT EXISTS solicitudes_modificacion (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  reserva_id INTEGER NOT NULL,
+  tipo_modificacion TEXT NOT NULL,
+  transaccion_original_id INTEGER,
+  estado TEXT DEFAULT 'Pendiente',
+  usuario_solicitante TEXT NOT NULL,
+  justificacion TEXT NOT NULL,
+  snapshot_datos TEXT NOT NULL,
+  datos_anteriores TEXT NOT NULL,
+  procesado_por TEXT,
+  fecha_procesamiento TEXT,
+  comentarios_admin TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (reserva_id) REFERENCES reservas_hotel(id) ON DELETE CASCADE,
+  FOREIGN KEY (transaccion_original_id) REFERENCES folio_hotel(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_solicitudes_reserva ON solicitudes_modificacion(reserva_id);
+CREATE INDEX IF NOT EXISTS idx_solicitudes_estado ON solicitudes_modificacion(estado);
+
+
 

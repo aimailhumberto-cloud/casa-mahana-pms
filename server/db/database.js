@@ -269,7 +269,7 @@ function getDb() {
 const VALID_TABLES = [
   'habitaciones', 'planes_tarifa', 'reservas_hotel', 'folio_hotel', 
   'huespedes_reserva', 'huespedes', 'usuarios', 'config_hotel',
-  'configuracion_sistema', 'reversiones_log'
+  'configuracion_sistema', 'reversiones_log', 'solicitudes_modificacion'
 ];
 
 

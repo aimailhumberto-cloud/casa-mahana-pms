@@ -11,6 +11,7 @@ const estadoColor: Record<string, string> = {
   'Pendiente': 'bg-yellow-100 text-yellow-700',
   'Cancelada': 'bg-red-100 text-red-700',
   'No-Show': 'bg-red-50 text-red-500',
+  'Cambio Pendiente de Aprobación': 'bg-orange-100 text-orange-700 font-bold',
 };
 
 export default function ReservaDetalle() {
@@ -18,6 +19,19 @@ export default function ReservaDetalle() {
   const navigate = useNavigate();
   const isAdmin = JSON.parse(localStorage.getItem('pms_user') || '{}')?.rol === 'admin';
   const [reserva, setReserva] = useState<any>(null);
+
+  // Double approval workflow states
+  const [showEditReservaModal, setShowEditReservaModal] = useState(false);
+  const [justificacionReserva, setJustificacionReserva] = useState('');
+
+  const [showEditPagoModal, setShowEditPagoModal] = useState(false);
+  const [selectedPago, setSelectedPago] = useState<any>(null);
+  const [newMonto, setNewMonto] = useState('');
+  const [newConcepto, setNewConcepto] = useState('');
+  const [newMetodoPago, setNewMetodoPago] = useState('');
+  const [newReferencia, setNewReferencia] = useState('');
+  const [justificacionPago, setJustificacionPago] = useState('');
+  const [editPagoLoading, setEditPagoLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showPago, setShowPago] = useState(false);
   const [pago, setPago] = useState({ monto: '', concepto: 'Abono', metodo_pago: 'efectivo', referencia: '' });
@@ -121,6 +135,10 @@ export default function ReservaDetalle() {
   };
 
   const saveEdit = async () => {
+    if (!isAdmin) {
+      setShowEditReservaModal(true);
+      return;
+    }
     setEditLoading(true);
     try {
       await api.put(`/hotel/reservas/${id}`, editForm);
@@ -128,6 +146,75 @@ export default function ReservaDetalle() {
       load();
     } catch (err: any) { alert(err.message); }
     finally { setEditLoading(false); }
+  };
+
+  const handleRequestEditReserva = async () => {
+    if (!justificacionReserva.trim()) {
+      alert('La justificación es obligatoria.');
+      return;
+    }
+    setEditLoading(true);
+    try {
+      await api.post(`/hotel/reservas/${id}/solicitar-cambio`, {
+        tipo_modificacion: 'editar_reserva',
+        justificacion: justificacionReserva,
+        snapshot_datos: editForm
+      });
+      setShowEditReservaModal(false);
+      setEditing(false);
+      setJustificacionReserva('');
+      load();
+      alert('Solicitud de cambio de reserva enviada exitosamente.');
+    } catch (err: any) {
+      alert(err?.response?.data?.error?.message || err.message || 'Error al solicitar el cambio');
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const startEditPago = (pagoItem: any) => {
+    setSelectedPago(pagoItem);
+    setNewMonto(pagoItem.monto.toString());
+    setNewConcepto(pagoItem.concepto || '');
+    setNewMetodoPago(pagoItem.metodo_pago || 'efectivo');
+    setNewReferencia(pagoItem.referencia || '');
+    setJustificacionPago('');
+    setShowEditPagoModal(true);
+  };
+
+  const handleRequestEditPago = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!justificacionPago.trim()) {
+      alert('La justificación es obligatoria.');
+      return;
+    }
+    if (!newMonto || parseFloat(newMonto) <= 0) {
+      alert('Monto inválido.');
+      return;
+    }
+    setEditPagoLoading(true);
+    try {
+      await api.post(`/hotel/reservas/${id}/solicitar-cambio`, {
+        tipo_modificacion: 'editar_pago',
+        transaccion_original_id: selectedPago.id,
+        justificacion: justificacionPago,
+        snapshot_datos: {
+          monto: parseFloat(newMonto),
+          concepto: newConcepto,
+          metodo_pago: newMetodoPago,
+          referencia: newReferencia
+        }
+      });
+      setShowEditPagoModal(false);
+      setSelectedPago(null);
+      setJustificacionPago('');
+      load();
+      alert('Solicitud de cambio de pago enviada exitosamente.');
+    } catch (err: any) {
+      alert(err?.response?.data?.error?.message || err.message || 'Error al solicitar el cambio de pago');
+    } finally {
+      setEditPagoLoading(false);
+    }
   };
 
   if (loading) return <div className="animate-pulse text-gray-400 p-8">Cargando...</div>;
@@ -139,6 +226,16 @@ export default function ReservaDetalle() {
   return (
     <div className="max-w-5xl mx-auto">
       <button onClick={() => navigate(-1)} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-4"><ArrowLeft size={16} /> Volver</button>
+
+      {reserva.estado === 'Cambio Pendiente de Aprobación' && (
+        <div className="bg-orange-50 border-l-4 border-orange-500 p-4 mb-4 rounded-xl flex items-center gap-3 shadow-sm">
+          <span className="text-orange-500 text-xl flex-shrink-0">⚠️</span>
+          <div>
+            <p className="font-bold text-orange-850 text-sm">Cambio Pendiente de Aprobación</p>
+            <p className="text-xs text-orange-700">Esta reserva tiene una solicitud de cambio registrada. La edición y transiciones de estado están inhabilitadas hasta que un administrador autorice o rechace la solicitud.</p>
+          </div>
+        </div>
+      )}
 
       {/* Header */}
       <div className="bg-white rounded-xl p-5 shadow-sm mb-4">
@@ -177,7 +274,7 @@ export default function ReservaDetalle() {
               <span className="text-xs text-gray-400 italic">Estado final</span>
             )}
             {/* Cancel/No-Show — only if not already closed and not checked-out */}
-            {!isClosed && reserva.estado !== 'Check-Out' && (
+            {!isClosed && reserva.estado !== 'Check-Out' && reserva.estado !== 'Cambio Pendiente de Aprobación' && (
               <div className="relative">
                 <button onClick={() => setConfirmCancel(confirmCancel ? null : 'menu')}
                   className="px-3 py-2 text-gray-400 hover:text-red-500 text-sm rounded-lg hover:bg-red-50 transition">⋯</button>
@@ -216,7 +313,7 @@ export default function ReservaDetalle() {
           <div className="bg-white rounded-xl p-5 shadow-sm">
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-semibold text-gray-700">Datos del Huésped</h3>
-              {!editing && !isClosed && (
+              {!editing && !isClosed && reserva.estado !== 'Cambio Pendiente de Aprobación' && (
                 <button onClick={startEdit} className="text-sm text-ocean-600 hover:text-ocean-700 flex items-center gap-1"><Edit2 size={14} /> Editar</button>
               )}
             </div>
@@ -382,7 +479,7 @@ export default function ReservaDetalle() {
                     <th className="py-2 text-left">Método</th>
                     <th className="py-2 text-right">Débito</th>
                     <th className="py-2 text-right">Crédito</th>
-                    {isAdmin && <th className="py-2 text-center w-24">Acciones</th>}
+                    <th className="py-2 text-center w-28">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -398,24 +495,42 @@ export default function ReservaDetalle() {
                         <td className="py-2 text-gray-400">{f.metodo_pago || '-'}</td>
                         <td className="py-2 text-right text-red-500 font-medium">{f.tipo === 'debito' ? `$${f.monto.toFixed(2)}` : ''}</td>
                         <td className="py-2 text-right text-green-600 font-medium">{f.tipo === 'credito' ? `$${f.monto.toFixed(2)}` : ''}</td>
-                        {isAdmin && (
-                          <td className="py-2 text-center">
-                            {!isReversal && !alreadyReversed ? (
-                              <button
-                                type="button"
-                                onClick={() => handleReversal(f.id, f.concepto)}
-                                disabled={reversalLoading !== null}
-                                className="px-2 py-1 text-[11px] font-bold bg-red-100 hover:bg-red-200 text-red-700 rounded-lg transition disabled:opacity-50"
-                              >
-                                {reversalLoading === f.id ? '...' : 'Reversar'}
-                              </button>
-                            ) : alreadyReversed ? (
-                              <span className="text-[10px] text-gray-400 font-semibold italic">Reversado</span>
-                            ) : (
-                              <span className="text-[10px] text-gray-400 italic">-</span>
-                            )}
-                          </td>
-                        )}
+                        <td className="py-2 text-center">
+                          {isAdmin ? (
+                            <>
+                              {!isReversal && !alreadyReversed ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleReversal(f.id, f.concepto)}
+                                  disabled={reversalLoading !== null}
+                                  className="px-2 py-1 text-[11px] font-bold bg-red-100 hover:bg-red-200 text-red-700 rounded-lg transition disabled:opacity-50"
+                                >
+                                  {reversalLoading === f.id ? '...' : 'Reversar'}
+                                </button>
+                              ) : alreadyReversed ? (
+                                <span className="text-[10px] text-gray-400 font-semibold italic">Reversado</span>
+                              ) : (
+                                <span className="text-[10px] text-gray-400 italic">-</span>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              {f.tipo === 'credito' && !isReversal && !alreadyReversed && reserva.estado !== 'Cambio Pendiente de Aprobación' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => startEditPago(f)}
+                                  className="px-2 py-1 text-[11px] font-bold bg-ocean-100 hover:bg-ocean-200 text-ocean-700 rounded-lg transition"
+                                >
+                                  Editar
+                                </button>
+                              ) : alreadyReversed ? (
+                                <span className="text-[10px] text-gray-400 font-semibold italic">Reversado</span>
+                              ) : (
+                                <span className="text-[10px] text-gray-400 italic">-</span>
+                              )}
+                            </>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
@@ -429,7 +544,7 @@ export default function ReservaDetalle() {
                     <td className="py-2 text-right text-green-600">
                       ${[...(reserva.folio || [])].filter((f: any) => f.tipo === 'credito').reduce((s: number, f: any) => s + f.monto, 0).toFixed(2)}
                     </td>
-                    {isAdmin && <td className="py-2" />}
+                    <td className="py-2" />
                   </tr>
                 </tfoot>
               </table>
@@ -577,6 +692,139 @@ export default function ReservaDetalle() {
           </div>
         </div>
       </div>
+
+      {/* Modal Solicitar Cambio de Reserva */}
+      {showEditReservaModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-55 p-4 animate-fadeIn">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 relative">
+            <h3 className="text-lg font-bold text-gray-800 mb-2">Solicitar Cambio de Reserva</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              Las modificaciones de reserva requieren justificación y aprobación de un administrador.
+            </p>
+            
+            <div className="mb-4">
+              <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Motivo / Justificación *</label>
+              <textarea
+                value={justificacionReserva}
+                onChange={e => setJustificacionReserva(e.target.value)}
+                className="input min-h-[100px] w-full"
+                placeholder="Indique la razón de la modificación..."
+                required
+              />
+            </div>
+            
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => { setShowEditReservaModal(false); setJustificacionReserva(''); }}
+                className="px-4 py-2 text-gray-500 text-sm font-medium hover:bg-gray-100 rounded-lg transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleRequestEditReserva}
+                disabled={editLoading}
+                className="px-4 py-2 bg-ocean-500 text-white text-sm font-medium rounded-lg hover:bg-ocean-600 transition disabled:opacity-50 flex items-center gap-1"
+              >
+                {editLoading ? 'Enviando...' : 'Enviar Solicitud'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Solicitar Cambio de Pago */}
+      {showEditPagoModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-55 p-4 animate-fadeIn">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 relative">
+            <h3 className="text-lg font-bold text-gray-800 mb-2">Solicitar Cambio de Pago</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              Los cambios en folios cerrados requieren la aprobación de un administrador.
+            </p>
+            
+            <form onSubmit={handleRequestEditPago} className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Monto *</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    value={newMonto}
+                    onChange={e => setNewMonto(e.target.value)}
+                    required
+                    className="input w-full"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Concepto</label>
+                  <input
+                    type="text"
+                    value={newConcepto}
+                    onChange={e => setNewConcepto(e.target.value)}
+                    className="input w-full"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Método de Pago</label>
+                  <select
+                    value={newMetodoPago}
+                    onChange={e => setNewMetodoPago(e.target.value)}
+                    className="input w-full"
+                  >
+                    <option value="efectivo">Efectivo</option>
+                    <option value="transferencia">Transferencia</option>
+                    <option value="yappy">Yappy</option>
+                    <option value="tarjeta">Tarjeta (POS)</option>
+                    <option value="al_cobro">Al Cobro (CXC)</option>
+                    <option value="cuponera_oferta_simple">Oferta Simple (Cupón)</option>
+                    <option value="cuponera_pahoy">PaHoy (Cupón)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Referencia</label>
+                  <input
+                    type="text"
+                    value={newReferencia}
+                    onChange={e => setNewReferencia(e.target.value)}
+                    className="input w-full"
+                    placeholder="#"
+                  />
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Justificación del Cambio *</label>
+                <textarea
+                  value={justificacionPago}
+                  onChange={e => setJustificacionPago(e.target.value)}
+                  className="input min-h-[80px] w-full"
+                  placeholder="Explique detalladamente la razón de este cambio..."
+                  required
+                />
+              </div>
+              
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => { setShowEditPagoModal(false); setSelectedPago(null); }}
+                  className="px-4 py-2 text-gray-500 text-sm font-medium hover:bg-gray-100 rounded-lg transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={editPagoLoading}
+                  className="px-4 py-2 bg-ocean-500 text-white text-sm font-medium rounded-lg hover:bg-ocean-600 transition disabled:opacity-50 flex items-center gap-1"
+                >
+                  {editPagoLoading ? 'Enviando...' : 'Enviar Solicitud'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
