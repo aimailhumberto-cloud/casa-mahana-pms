@@ -623,6 +623,14 @@ router.post('/hotel/reservas/grupo', requireAuth, (req, res) => {
 
     txn();
     ok(res, { grupo_codigo, reservas: createdReservations }, null, 201);
+
+    // Fire notifications for the master reservation of the group (async, non-blocking)
+    if (createdReservations.length > 0) {
+      const master = createdReservations[0];
+      const hab = master.habitacion_id ? findById('habitaciones', master.habitacion_id) : null;
+      notifications.notifyReservationConfirmed(master, hab).catch(e => console.log('Group master Notif error:', e.message));
+      notifications.notifyAdminNewBooking(master, hab).catch(e => console.log('Group master Admin notif error:', e.message));
+    }
   } catch (e) {
     console.error('Error creating group booking:', e);
     err(res, 'SERVER_ERROR', e.message || 'Error creando reserva grupal', 500);
@@ -1630,6 +1638,10 @@ router.post('/hotel/notificaciones/:logId/reenviar', requireAuth, async (req, re
     const log = db.prepare('SELECT * FROM notificaciones_log WHERE id = ?').get(req.params.logId);
     if (!log) {
       return err(res, 'NOT_FOUND', 'Log de notificación no encontrado', 404);
+    }
+
+    if (!log.contenido || log.contenido.trim() === '') {
+      return err(res, 'VALIDATION_ERROR', 'No se puede reenviar esta notificación porque su contenido está vacío (registro histórico previo a la actualización).', 400);
     }
 
     let result;

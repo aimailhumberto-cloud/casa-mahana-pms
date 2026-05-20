@@ -11,6 +11,7 @@ export default function NuevaReserva() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [cotizacion, setCotizacion] = useState<any>(null);
+  const [alternativeQuotes, setAlternativeQuotes] = useState<Record<string, number>>({});
 
   // Receipt upload state
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
@@ -185,15 +186,12 @@ export default function NuevaReserva() {
             ...curr[leaderId],
             cliente: form.cliente,
             apellido: form.apellido,
-            adultos: form.adultos,
-            menores: form.menores,
-            mascotas: form.mascotas,
             plan_codigo: form.plan_codigo
           }
         };
       });
     }
-  }, [form.cliente, form.apellido, form.adultos, form.menores, form.mascotas, form.plan_codigo, isGroup, selectedGroupRooms]);
+  }, [form.cliente, form.apellido, form.plan_codigo, isGroup, selectedGroupRooms]);
 
   // Auto-cotizar
   useEffect(() => {
@@ -231,8 +229,39 @@ export default function NuevaReserva() {
             setDepositAmount(aggregate.deposito_sugerido.toFixed(2));
           }
         });
+
+        // Fetch alternative quotes for other plans for group
+        const otherPlanes = filteredPlanes.filter(p => p.codigo !== form.plan_codigo);
+        const altGroupPromises = otherPlanes.map(p => {
+          const subPromises = selectedGroupRooms.map(roomId => {
+            const config = roomConfigs[roomId] || {};
+            // If the room has a custom plan that differs from the main selected plan, keep it; otherwise use alternative plan `p.codigo`
+            const plan = config.plan_codigo && config.plan_codigo !== form.plan_codigo ? config.plan_codigo : p.codigo;
+            const adults = config.adultos !== undefined ? config.adultos : form.adultos;
+            const minors = config.menores !== undefined ? config.menores : form.menores;
+            const pets = config.mascotas !== undefined ? config.mascotas : form.mascotas;
+            return api.get(`/hotel/cotizar?plan=${plan}&adultos=${adults}&menores=${minors}&mascotas=${pets}&check_in=${form.check_in}&check_out=${form.check_out}`)
+              .then(res => res.data)
+              .catch(() => null);
+          });
+          return Promise.all(subPromises).then(subResults => {
+            const validSubResults = subResults.filter(x => x !== null);
+            if (validSubResults.length === 0) return null;
+            const total = validSubResults.reduce((acc, curr) => acc + curr.monto_total, 0);
+            return { codigo: p.codigo, total };
+          });
+        });
+
+        Promise.all(altGroupPromises).then(results => {
+          const dict: Record<string, number> = {};
+          results.forEach(res => {
+            if (res) dict[res.codigo] = res.total;
+          });
+          setAlternativeQuotes(dict);
+        });
       } else {
         setCotizacion(null);
+        setAlternativeQuotes({});
       }
     } else {
       if (form.plan_codigo && form.check_in && form.check_out && form.check_out > form.check_in) {
@@ -251,7 +280,32 @@ export default function NuevaReserva() {
               setDepositAmount(r.data.deposito_sugerido.toFixed(2));
             }
           }).catch(() => setCotizacion(null));
-      } else { setCotizacion(null); }
+
+        // Fetch alternative quotes for other plans for single reservation
+        const otherPlanes = filteredPlanes.filter(p => p.codigo !== form.plan_codigo);
+        const altPromises = otherPlanes.map(p => {
+          return api.get(`/hotel/cotizar?plan=${p.codigo}&adultos=${guests}&menores=${form.menores}&mascotas=${form.mascotas}&check_in=${form.check_in}&check_out=${form.check_out}`)
+            .then(res => {
+              let total = res.data.monto_total;
+              if (isPasadia && selectedUnits.length > 1) {
+                total *= selectedUnits.length;
+              }
+              return { codigo: p.codigo, total };
+            })
+            .catch(() => null);
+        });
+
+        Promise.all(altPromises).then(results => {
+          const dict: Record<string, number> = {};
+          results.forEach(res => {
+            if (res) dict[res.codigo] = res.total;
+          });
+          setAlternativeQuotes(dict);
+        });
+      } else {
+        setCotizacion(null);
+        setAlternativeQuotes({});
+      }
     }
   }, [
     isGroup,
@@ -263,7 +317,8 @@ export default function NuevaReserva() {
     form.mascotas,
     form.check_in,
     form.check_out,
-    selectedUnits.length
+    selectedUnits.length,
+    filteredPlanes
   ]);
 
   const set = (field: string, value: any) => setForm(f => ({ ...f, [field]: value }));
@@ -301,14 +356,177 @@ export default function NuevaReserva() {
           [id]: {
             cliente: curr[id]?.cliente || (prev.length === 0 ? form.cliente : ''),
             apellido: curr[id]?.apellido || (prev.length === 0 ? form.apellido : ''),
-            adultos: curr[id]?.adultos || form.adultos || 1,
-            menores: curr[id]?.menores || form.menores || 0,
-            mascotas: curr[id]?.mascotas || form.mascotas || 0,
+            adultos: curr[id]?.adultos || (prev.length === 0 ? form.adultos : 0),
+            menores: curr[id]?.menores || (prev.length === 0 ? form.menores : 0),
+            mascotas: curr[id]?.mascotas || (prev.length === 0 ? form.mascotas : 0),
             plan_codigo: curr[id]?.plan_codigo || form.plan_codigo || ''
           }
         }));
         return next;
       }
+    });
+  };
+
+  // Assigned guest calculations for Group Tracker
+  const assignedAdults = useMemo(() => {
+    return selectedGroupRooms.reduce((acc, rid) => acc + (roomConfigs[rid]?.adultos || 0), 0);
+  }, [selectedGroupRooms, roomConfigs]);
+
+  const assignedMinors = useMemo(() => {
+    return selectedGroupRooms.reduce((acc, rid) => acc + (roomConfigs[rid]?.menores || 0), 0);
+  }, [selectedGroupRooms, roomConfigs]);
+
+  const assignedPets = useMemo(() => {
+    return selectedGroupRooms.reduce((acc, rid) => acc + (roomConfigs[rid]?.mascotas || 0), 0);
+  }, [selectedGroupRooms, roomConfigs]);
+
+  const pendingAdults = form.adultos - assignedAdults;
+  const pendingMinors = form.menores - assignedMinors;
+  const pendingPets = form.mascotas - assignedPets;
+
+  const allAssignedMatch = pendingAdults === 0 && pendingMinors === 0 && pendingPets === 0;
+
+  // Auto-distribute guests based on physical room capacities
+  const autoDistributeGuests = () => {
+    let pendingAdultsCount = form.adultos;
+    let pendingMinorsCount = form.menores;
+    let pendingPetsCount = form.mascotas;
+
+    const newConfigs = { ...roomConfigs };
+    
+    // Clear guests to 0 for all selected rooms
+    selectedGroupRooms.forEach(roomId => {
+      newConfigs[roomId] = {
+        ...newConfigs[roomId],
+        cliente: newConfigs[roomId]?.cliente || (roomId === selectedGroupRooms[0] ? form.cliente : ''),
+        apellido: newConfigs[roomId]?.apellido || (roomId === selectedGroupRooms[0] ? form.apellido : ''),
+        plan_codigo: newConfigs[roomId]?.plan_codigo || form.plan_codigo || '',
+        adultos: 0,
+        menores: 0,
+        mascotas: 0
+      };
+    });
+
+    // 1. Give 1 adult to each selected room (if we have adults available) to make it valid
+    selectedGroupRooms.forEach(roomId => {
+      if (pendingAdultsCount > 0) {
+        newConfigs[roomId].adultos = 1;
+        pendingAdultsCount--;
+      }
+    });
+
+    // 2. Fill remaining capacity for each room with adults then minors
+    selectedGroupRooms.forEach(roomId => {
+      const room = rooms.find(rm => rm.id === roomId);
+      const maxCap = room ? (room.capacidad_max || room.capacidad || 4) : 4;
+      
+      let currentGuests = newConfigs[roomId].adultos + newConfigs[roomId].menores;
+      let availableCap = maxCap - currentGuests;
+
+      if (pendingAdultsCount > 0 && availableCap > 0) {
+        const toAdd = Math.min(pendingAdultsCount, availableCap);
+        newConfigs[roomId].adultos += toAdd;
+        pendingAdultsCount -= toAdd;
+        availableCap -= toAdd;
+      }
+
+      if (pendingMinorsCount > 0 && availableCap > 0) {
+        const toAdd = Math.min(pendingMinorsCount, availableCap);
+        newConfigs[roomId].menores += toAdd;
+        pendingMinorsCount -= toAdd;
+        availableCap -= toAdd;
+      }
+    });
+
+    // 3. Fallback: If we still have adults or minors left over (e.g. overcapacity), assign to leader room
+    if (pendingAdultsCount > 0 && selectedGroupRooms.length > 0) {
+      newConfigs[selectedGroupRooms[0]].adultos += pendingAdultsCount;
+    }
+    if (pendingMinorsCount > 0 && selectedGroupRooms.length > 0) {
+      newConfigs[selectedGroupRooms[0]].menores += pendingMinorsCount;
+    }
+
+    // 4. Distribute pets: put them in rooms that have adults/guests, limit to 2 per room
+    selectedGroupRooms.forEach(roomId => {
+      if (pendingPetsCount > 0 && newConfigs[roomId].adultos > 0) {
+        const toAdd = Math.min(pendingPetsCount, 2);
+        newConfigs[roomId].mascotas += toAdd;
+        pendingPetsCount -= toAdd;
+      }
+    });
+
+    // 5. Fallback: put remaining pets in leader room
+    if (pendingPetsCount > 0 && selectedGroupRooms.length > 0) {
+      newConfigs[selectedGroupRooms[0]].mascotas += pendingPetsCount;
+    }
+
+    setRoomConfigs(newConfigs);
+  };
+
+  // State & handler for copying the quotation to clipboard
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyQuote = () => {
+    if (!cotizacion) return;
+
+    const checkInStr = form.check_in;
+    const checkOutStr = form.check_out;
+    const nochesStr = isPasadia ? '1 día (Pasadía)' : `${cotizacion.noches}`;
+    const clienteFull = `${form.cliente} ${form.apellido}`.trim() || 'Cliente';
+    
+    let habitacionesStr = '';
+    if (isGroup) {
+      habitacionesStr = selectedGroupRooms.map(roomId => {
+        const rm = rooms.find(r => r.id === roomId);
+        return rm ? `${rm.nombre} (${rm.tipo})` : '';
+      }).filter(Boolean).join(', ');
+    } else if (isPasadia) {
+      habitacionesStr = selectedUnits.map(uid => {
+        const rm = rooms.find(r => r.id === uid);
+        return rm ? `${rm.nombre}` : '';
+      }).filter(Boolean).join(', ');
+    } else {
+      habitacionesStr = selectedRoom ? `${selectedRoom.nombre} (${selectedRoom.tipo})` : '';
+    }
+
+    const planNombre = cotizacion.plan?.nombre || selectedPlan?.nombre || 'Plan Seleccionado';
+    
+    let huespedesStr = `${form.adultos} Adulto${form.adultos > 1 ? 's' : ''}`;
+    if (form.menores > 0) huespedesStr += `, ${form.menores} Menor${form.menores > 1 ? 'es' : ''}`;
+    if (form.mascotas > 0) huespedesStr += `, ${form.mascotas} Mascota${form.mascotas > 1 ? 's' : ''}`;
+
+    let altRatesStr = '';
+    const altPlanesList = filteredPlanes.filter(p => p.codigo !== form.plan_codigo);
+    if (altPlanesList.length > 0) {
+      altRatesStr = '\n✨ *Tarifas Alternativas:*\n' + altPlanesList.map(p => {
+        const rate = alternativeQuotes[p.codigo];
+        if (rate !== undefined) {
+          return `- En plan *${p.nombre}*: $${rate.toFixed(2)}`;
+        }
+        return '';
+      }).filter(Boolean).join('\n');
+    }
+
+    const text = `🌴 *COTIZACIÓN DE RESERVA - CASA MAHANA* 🌴
+
+👤 *Cliente:* ${clienteFull}
+📅 *Fechas:* ${checkInStr} al ${checkOutStr} (${nochesStr})
+👥 *Huéspedes:* ${huespedesStr}
+🏨 *Habitaciones:* ${habitacionesStr}
+🏷️ *Plan Cotizado:* ${planNombre}
+
+💰 *Resumen Económico:*
+• Subtotal: $${cotizacion.subtotal.toFixed(2)}
+• Impuestos (${cotizacion.impuesto_pct}%): $${cotizacion.impuesto_monto.toFixed(2)}
+• *Monto Total:* $${cotizacion.monto_total.toFixed(2)}
+• Depósito Sugerido (50%): $${cotizacion.deposito_sugerido.toFixed(2)}
+${altRatesStr}
+
+¡Esperamos tener el gusto de hospedarle pronto en Casa Mahana! 🌊🥥`;
+
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     });
   };
 
@@ -677,6 +895,93 @@ export default function NuevaReserva() {
               </Field>
             </div>
 
+            {/* Glassmorphic Guest Tracker */}
+            <div className="bg-white/40 backdrop-blur-md border border-white/60 rounded-2xl p-5 shadow-lg mb-6 relative overflow-hidden">
+              {/* Premium abstract background glow */}
+              <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-ocean-300/20 to-mahana-300/20 rounded-full blur-xl pointer-events-none" />
+              
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h4 className="font-bold text-gray-800 text-base mb-1 flex items-center gap-1.5">
+                    📊 Control de Huéspedes del Grupo
+                  </h4>
+                  <p className="text-xs text-gray-500">
+                    Distribuya la cantidad de huéspedes especificada en el formulario principal entre las habitaciones asignadas.
+                  </p>
+                </div>
+                
+                <button
+                  type="button"
+                  onClick={autoDistributeGuests}
+                  className="self-start md:self-center px-4 py-2 bg-gradient-to-r from-ocean-500 to-mahana-500 hover:from-ocean-600 hover:to-mahana-600 text-white font-semibold rounded-xl text-xs shadow-md shadow-ocean-100 hover:shadow-lg transition flex items-center gap-1.5"
+                >
+                  ✨ Auto-distribuir Huéspedes
+                </button>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3 mt-4">
+                <div className="bg-white/80 rounded-xl p-3 border border-gray-100 text-center">
+                  <div className="text-[10px] uppercase font-bold tracking-wider text-gray-400 mb-1">Adultos</div>
+                  <div className="flex justify-center items-baseline gap-1">
+                    <span className="text-lg font-black text-gray-800">{assignedAdults}</span>
+                    <span className="text-xs text-gray-400">/ {form.adultos}</span>
+                  </div>
+                  <div className="mt-1">
+                    {pendingAdults === 0 ? (
+                      <span className="text-[10px] font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">Completado</span>
+                    ) : pendingAdults > 0 ? (
+                      <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">{pendingAdults} pendientes</span>
+                    ) : (
+                      <span className="text-[10px] font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded-full">{Math.abs(pendingAdults)} sobrantes</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-white/80 rounded-xl p-3 border border-gray-100 text-center">
+                  <div className="text-[10px] uppercase font-bold tracking-wider text-gray-400 mb-1">Menores</div>
+                  <div className="flex justify-center items-baseline gap-1">
+                    <span className="text-lg font-black text-gray-800">{assignedMinors}</span>
+                    <span className="text-xs text-gray-400">/ {form.menores}</span>
+                  </div>
+                  <div className="mt-1">
+                    {pendingMinors === 0 ? (
+                      <span className="text-[10px] font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">Completado</span>
+                    ) : pendingMinors > 0 ? (
+                      <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">{pendingMinors} pendientes</span>
+                    ) : (
+                      <span className="text-[10px] font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded-full">{Math.abs(pendingMinors)} sobrantes</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-white/80 rounded-xl p-3 border border-gray-100 text-center">
+                  <div className="text-[10px] uppercase font-bold tracking-wider text-gray-400 mb-1">Mascotas</div>
+                  <div className="flex justify-center items-baseline gap-1">
+                    <span className="text-lg font-black text-gray-800">{assignedPets}</span>
+                    <span className="text-xs text-gray-400">/ {form.mascotas}</span>
+                  </div>
+                  <div className="mt-1">
+                    {pendingPets === 0 ? (
+                      <span className="text-[10px] font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">Completado</span>
+                    ) : pendingPets > 0 ? (
+                      <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">{pendingPets} pendientes</span>
+                    ) : (
+                      <span className="text-[10px] font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded-full">{Math.abs(pendingPets)} sobrantes</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {!allAssignedMatch && (
+                <div className="mt-3 bg-amber-50/80 border border-amber-100 rounded-xl p-3 text-xs text-amber-800 flex items-center gap-2">
+                  <AlertTriangle size={14} className="shrink-0 text-amber-600" />
+                  <span>
+                    La cantidad de huéspedes asignados en los cuartos no coincide exactamente con el formulario principal. Use <strong>"Auto-distribuir Huéspedes"</strong> o ajústelo manualmente abajo.
+                  </span>
+                </div>
+              )}
+            </div>
+
             {/* Room cards list */}
             <div className="space-y-4">
               {selectedGroupRooms.map((roomId, index) => {
@@ -799,10 +1104,30 @@ export default function NuevaReserva() {
 
         {/* Cotización */}
         {cotizacion && (
-          <div className={`bg-gradient-to-r ${isPasadia ? 'from-amber-50 to-mahana-50 border-amber-200' : 'from-ocean-50 to-mahana-50 border-ocean-200'} rounded-xl p-5 border`}>
-            <h3 className="font-semibold text-gray-700 mb-3">Cotización {isPasadia && selectedUnits.length > 1 ? `(${selectedUnits.length} unidades)` : ''}</h3>
+          <div className={`bg-gradient-to-r ${isPasadia ? 'from-amber-50 to-mahana-50 border-amber-200' : 'from-ocean-50 to-mahana-50 border-ocean-200'} rounded-xl p-5 border shadow-sm`}>
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="font-semibold text-gray-700">Cotización {isPasadia && selectedUnits.length > 1 ? `(${selectedUnits.length} unidades)` : ''}</h3>
+              <button
+                type="button"
+                onClick={handleCopyQuote}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+                  copied
+                    ? 'bg-green-500 text-white shadow-md shadow-green-100'
+                    : 'bg-white text-gray-600 border border-gray-200 hover:border-mahana-400 hover:text-mahana-600 shadow-sm'
+                }`}
+              >
+                {copied ? (
+                  <>✓ ¡Copiado!</>
+                ) : (
+                  <>
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
+                    Copiar Cotización
+                  </>
+                )}
+              </button>
+            </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-              <div><span className="text-gray-400">Plan:</span> <span className="font-medium">{cotizacion.plan.nombre}</span></div>
+              <div><span className="text-gray-400">Plan:</span> <span className="font-medium">{cotizacion.plan?.nombre || 'Personalizado'}</span></div>
               <div><span className="text-gray-400">{isPasadia ? 'Tipo:' : 'Noches:'}</span> <span className="font-medium">{isPasadia ? 'Pasadía (1 día)' : cotizacion.noches}</span></div>
               <div><span className="text-gray-400">{isPasadia ? 'Personas:' : 'Huéspedes:'}</span> <span className="font-medium">{form.adultos}{!isPasadia ? ` A + ${form.menores}M` : ''}</span></div>
               {isPasadia && selectedUnits.length > 1 && <div><span className="text-gray-400">Unidades:</span> <span className="font-medium">{selectedUnits.length}</span></div>}
@@ -847,6 +1172,25 @@ export default function NuevaReserva() {
               </div>
               <div className="flex justify-between text-gray-400 text-xs"><span>Depósito sugerido (50%)</span><span>${cotizacion.deposito_sugerido.toFixed(2)}</span></div>
             </div>
+
+            {/* Alternative pricing comparison panel */}
+            {Object.keys(alternativeQuotes).length > 0 && (
+              <div className="mt-4 pt-3 border-t border-gray-200/50">
+                <div className="text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wider">Tarifas en otros planes:</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {filteredPlanes.filter(p => p.codigo !== form.plan_codigo).map(p => {
+                    const rate = alternativeQuotes[p.codigo];
+                    if (rate === undefined) return null;
+                    return (
+                      <div key={p.codigo} className="bg-white/60 backdrop-blur-sm rounded-lg p-2.5 flex items-center justify-between text-xs border border-gray-100 hover:border-mahana-200 hover:bg-white transition">
+                        <span className="text-gray-600 font-medium">{p.nombre}</span>
+                        <span className="font-bold text-gray-800">${rate.toFixed(2)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         )}
 

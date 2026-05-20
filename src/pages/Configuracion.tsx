@@ -340,6 +340,16 @@ export default function Configuracion({ user }: { user: User }) {
                   </label>
                 </div>
                 
+                <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-xl text-amber-800 flex items-start gap-3 shadow-xs">
+                  <AlertCircle size={20} className="text-amber-600 mt-0.5 shrink-0" />
+                  <div>
+                    <h4 className="font-bold text-sm text-amber-900">⚠️ Recomendación de Entregabilidad SMTP</h4>
+                    <p className="text-xs text-amber-700 mt-0.5 leading-relaxed">
+                      <strong>IMPORTANTE:</strong> Para evitar que los correos sean catalogados como Spam o rechazados por los servidores de destino, asegúrese de que el dominio de <strong>"Correo de Remitente (De)"</strong> coincida exactamente con el dominio de su <strong>"Usuario SMTP"</strong> (ej. @casamahana.com).
+                    </p>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
                     <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
@@ -638,9 +648,13 @@ export default function Configuracion({ user }: { user: User }) {
                                     handleResendNotif(log.id);
                                   }
                                 }}
-                                disabled={resendingLogId === log.id}
-                                className="p-1.5 rounded-lg text-green-600 hover:bg-green-50 border border-transparent hover:border-green-100 transition disabled:opacity-50"
-                                title="Reenviar notificación"
+                                disabled={resendingLogId === log.id || !log.contenido}
+                                className={`p-1.5 rounded-lg border border-transparent transition ${
+                                  !log.contenido
+                                    ? 'text-gray-200 cursor-not-allowed bg-transparent hover:border-transparent'
+                                    : 'text-green-600 hover:bg-green-50 hover:border-green-100'
+                                }`}
+                                title={!log.contenido ? 'Registro histórico sin contenido guardado' : 'Reenviar notificación'}
                               >
                                 <RefreshCw size={16} className={resendingLogId === log.id ? 'animate-spin' : ''} />
                               </button>
@@ -932,19 +946,25 @@ export default function Configuracion({ user }: { user: User }) {
               )}
             </div>
 
-            <div className="flex justify-between items-center border-t border-gray-100 pt-4 shrink-0">
-              <button
-                onClick={() => {
-                  if (confirm('¿Está seguro de que desea reenviar este mensaje al destinatario original?')) {
-                    handleResendNotif(selectedLogForView.id);
-                  }
-                }}
-                disabled={resendingLogId !== null}
-                className="px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-xl text-sm transition disabled:opacity-50 flex items-center gap-1.5 shadow-sm"
-              >
-                <RefreshCw size={14} className={resendingLogId === selectedLogForView.id ? 'animate-spin' : ''} />
-                {resendingLogId === selectedLogForView.id ? 'Reenviando...' : 'Reenviar Notificación'}
-              </button>
+            <div className="flex justify-between items-center border-t border-gray-100 pt-4 shrink-0 font-sans">
+              {!selectedLogForView.contenido ? (
+                <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg font-medium flex items-center gap-1">
+                  ⚠️ Registro histórico sin contenido guardado. No es posible reenviar.
+                </span>
+              ) : (
+                <button
+                  onClick={() => {
+                    if (confirm('¿Está seguro de que desea reenviar este mensaje al destinatario original?')) {
+                      handleResendNotif(selectedLogForView.id);
+                    }
+                  }}
+                  disabled={resendingLogId !== null}
+                  className="px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-xl text-sm transition disabled:opacity-50 flex items-center gap-1.5 shadow-sm"
+                >
+                  <RefreshCw size={14} className={resendingLogId === selectedLogForView.id ? 'animate-spin' : ''} />
+                  {resendingLogId === selectedLogForView.id ? 'Reenviando...' : 'Reenviar Notificación'}
+                </button>
+              )}
 
               <button
                 onClick={() => setSelectedLogForView(null)}

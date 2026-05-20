@@ -136,14 +136,17 @@ export default function ReservaDetalle() {
   };
 
   const parseResultStatus = (resultadoStr: string) => {
+    if (!resultadoStr) {
+      return { success: false, text: 'Desconocido', details: { error: 'Sin resultado registrado' } };
+    }
     try {
       const parsed = JSON.parse(resultadoStr);
-      if (parsed.status === 'success' || parsed.success === true || parsed.sent === true) {
+      if (parsed && (parsed.status === 'success' || parsed.success === true || parsed.sent === true)) {
         return { success: true, text: 'Exitoso', details: parsed };
       }
       return { success: false, text: 'Fallido', details: parsed };
     } catch {
-      if (resultadoStr?.toLowerCase().includes('success') || resultadoStr?.toLowerCase().includes('ok')) {
+      if (resultadoStr.toLowerCase().includes('success') || resultadoStr.toLowerCase().includes('ok')) {
         return { success: true, text: 'Exitoso', details: { raw: resultadoStr } };
       }
       return { success: false, text: 'Fallido', details: { error: resultadoStr } };
@@ -151,6 +154,7 @@ export default function ReservaDetalle() {
   };
 
   const getNotifTypeLabel = (type: string) => {
+    if (!type) return <span className="text-gray-500 font-medium">—</span>;
     const cleanType = type.replace('_reenvio', '');
     const labels: Record<string, string> = {
       confirmacion: 'Confirmación',
@@ -344,6 +348,11 @@ export default function ReservaDetalle() {
 
   if (loading) return <div className="animate-pulse text-gray-400 p-8">Cargando...</div>;
   if (!reserva) return <div className="p-8 text-red-500">Reserva no encontrada</div>;
+
+  const isClosed = ['Cancelada', 'No-Show'].includes(reserva.estado);
+  const totalPagado = reserva.monto_pagado || 0;
+  const totalReserva = reserva.monto_total || 0;
+  const saldoPct = totalReserva > 0 ? (totalPagado / totalReserva) * 100 : 0;
 
   const isConsolidated = groupReservations.some((r: any) => r.facturacion_consolidada === 1);
 
@@ -771,8 +780,8 @@ export default function ReservaDetalle() {
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {[...(reserva.folio || [])].sort((a: any, b: any) => a.id - b.id).map((f: any) => {
-                    const isReversal = f.concepto.startsWith('Reversión de pago [ID ') || f.concepto.startsWith('Reversión de cargo [ID ');
-                    const alreadyReversed = (reserva.folio || []).some((other: any) => other.concepto.includes(`[ID ${f.id}]`));
+                    const isReversal = f.concepto && (f.concepto.startsWith('Reversión de pago [ID ') || f.concepto.startsWith('Reversión de cargo [ID '));
+                    const alreadyReversed = (reserva.folio || []).some((other: any) => other.concepto && other.concepto.includes(`[ID ${f.id}]`));
                     return (
                       <tr key={f.id} className={f.tipo === 'credito' ? 'bg-green-50/30' : ''}>
                         <td className="py-2 text-gray-400">{f.fecha}</td>
@@ -1034,9 +1043,13 @@ export default function ReservaDetalle() {
                               </button>
                               <button
                                 onClick={() => handleResendNotif(log.id)}
-                                disabled={resendingId !== null}
-                                className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition disabled:opacity-40"
-                                title="Reenviar esta notificación"
+                                disabled={resendingId !== null || !log.contenido}
+                                className={`p-1.5 rounded-lg transition ${
+                                  !log.contenido
+                                    ? 'text-gray-200 cursor-not-allowed bg-transparent'
+                                    : 'text-gray-400 hover:text-green-600 hover:bg-green-50'
+                                }`}
+                                title={!log.contenido ? 'Registro histórico sin contenido guardado' : 'Reenviar esta notificación'}
                               >
                                 <RefreshCw size={14} className={resendingId === log.id ? 'animate-spin' : ''} />
                               </button>
@@ -1318,28 +1331,34 @@ export default function ReservaDetalle() {
               )}
             </div>
 
-            <div className="flex justify-between items-center border-t border-gray-100 pt-4 shrink-0">
-              <button
-                onClick={() => {
-                  if (confirm('¿Está seguro de que desea reenviar este mensaje al destinatario original?')) {
-                    handleResendNotif(selectedNotifForView.id);
-                    setSelectedNotifForView(null);
-                  }
-                }}
-                disabled={resendingId !== null}
-                className="px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-xl text-sm transition disabled:opacity-50 flex items-center gap-1.5 shadow-sm"
-              >
-                <RefreshCw size={14} className={resendingId === selectedNotifForView.id ? 'animate-spin' : ''} />
-                {resendingId === selectedNotifForView.id ? 'Reenviando...' : 'Reenviar Notificación'}
-              </button>
+            <div className="flex justify-between items-center border-t border-gray-100 pt-4 shrink-0 font-sans">
+               {!selectedNotifForView.contenido ? (
+                 <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg font-medium flex items-center gap-1">
+                   ⚠️ Registro histórico sin contenido guardado. No es posible reenviar.
+                 </span>
+               ) : (
+                 <button
+                   onClick={() => {
+                     if (confirm('¿Está seguro de que desea reenviar este mensaje al destinatario original?')) {
+                       handleResendNotif(selectedNotifForView.id);
+                       setSelectedNotifForView(null);
+                     }
+                   }}
+                   disabled={resendingId !== null}
+                   className="px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-xl text-sm transition disabled:opacity-50 flex items-center gap-1.5 shadow-sm"
+                 >
+                   <RefreshCw size={14} className={resendingId === selectedNotifForView.id ? 'animate-spin' : ''} />
+                   {resendingId === selectedNotifForView.id ? 'Reenviando...' : 'Reenviar Notificación'}
+                 </button>
+               )}
 
-              <button
-                onClick={() => setSelectedNotifForView(null)}
-                className="px-5 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl text-sm transition"
-              >
-                Cerrar
-              </button>
-            </div>
+               <button
+                 onClick={() => setSelectedNotifForView(null)}
+                 className="px-5 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl text-sm transition"
+               >
+                 Cerrar
+               </button>
+             </div>
           </div>
         </div>
       )}
