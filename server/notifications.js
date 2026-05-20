@@ -246,7 +246,7 @@ async function notifyReservationConfirmed(reserva, habitacion) {
     `, `Tu reserva #${reserva.id} en ${HOTEL_NAME} está confirmada`);
     
     results.email = await sendEmail(reserva.email, `✅ Reserva Confirmada #${reserva.id} — ${HOTEL_NAME}`, html);
-    logNotification(db, reserva.id, tipo, 'email', reserva.email, results.email);
+    logNotification(db, reserva.id, tipo, 'email', reserva.email, results.email, html);
   }
   
   // WHATSAPP
@@ -262,7 +262,7 @@ async function notifyReservationConfirmed(reserva, habitacion) {
       `¡Te esperamos! 🌊🌴`;
     
     results.whatsapp = await sendWhatsApp(reserva.whatsapp || reserva.telefono, msg);
-    logNotification(db, reserva.id, tipo, 'whatsapp', reserva.whatsapp || reserva.telefono, results.whatsapp);
+    logNotification(db, reserva.id, tipo, 'whatsapp', reserva.whatsapp || reserva.telefono, results.whatsapp, msg);
   }
   
   return results;
@@ -341,7 +341,7 @@ async function notifyStatusChange(reserva, oldStatus, newStatus, habitacion) {
     `, `${configObj.emoji} Reserva ${configObj.label} #${reserva.id} — ${HOTEL_NAME}`);
     
     results.email = await sendEmail(reserva.email, `${configObj.emoji} ${configObj.label} — Reserva #${reserva.id} — ${HOTEL_NAME}`, html);
-    logNotification(db, reserva.id, tipo, 'email', reserva.email, results.email);
+    logNotification(db, reserva.id, tipo, 'email', reserva.email, results.email, html);
   }
   
   // WHATSAPP
@@ -359,7 +359,7 @@ async function notifyStatusChange(reserva, oldStatus, newStatus, habitacion) {
     }
     
     results.whatsapp = await sendWhatsApp(reserva.whatsapp || reserva.telefono, msg);
-    logNotification(db, reserva.id, tipo, 'whatsapp', reserva.whatsapp || reserva.telefono, results.whatsapp);
+    logNotification(db, reserva.id, tipo, 'whatsapp', reserva.whatsapp || reserva.telefono, results.whatsapp, msg);
   }
   
   return results;
@@ -403,7 +403,7 @@ async function notifyPaymentReceived(reserva, payment, habitacion) {
     `, `Pago de ${formatMoney(payment.monto)} recibido — Reserva #${reserva.id}`);
     
     results.email = await sendEmail(reserva.email, `💳 Pago Recibido ${formatMoney(payment.monto)} — Reserva #${reserva.id}`, html);
-    logNotification(db, reserva.id, 'pago', 'email', reserva.email, results.email);
+    logNotification(db, reserva.id, 'pago', 'email', reserva.email, results.email, html);
   }
   
   // WHATSAPP
@@ -418,7 +418,7 @@ async function notifyPaymentReceived(reserva, payment, habitacion) {
       `\n\n¡Gracias! 🙏`;
     
     results.whatsapp = await sendWhatsApp(reserva.whatsapp || reserva.telefono, msg);
-    logNotification(db, reserva.id, 'pago', 'whatsapp', reserva.whatsapp || reserva.telefono, results.whatsapp);
+    logNotification(db, reserva.id, 'pago', 'whatsapp', reserva.whatsapp || reserva.telefono, results.whatsapp, msg);
   }
   
   return results;
@@ -464,7 +464,7 @@ async function notifyAdminNewBooking(reserva, habitacion) {
   `, `Nueva reserva de ${guestName} — ${reserva.check_in}`);
   
   const emailResult = await sendEmail(adminEmail, `🔔 Nueva Reserva — ${guestName} — ${formatDate(reserva.check_in)}`, html);
-  logNotification(db, reserva.id, 'admin_notif', 'email', adminEmail, emailResult);
+  logNotification(db, reserva.id, 'admin_notif', 'email', adminEmail, emailResult, html);
   return { email: emailResult };
 }
 
@@ -515,7 +515,7 @@ async function notifyReminder(reserva, habitacion, daysUntil) {
     `, `Recordatorio: tu estadía en ${HOTEL_NAME} es ${dayLabel}`);
     
     results.email = await sendEmail(reserva.email, `📅 Recordatorio — Tu estadía es ${dayLabel} — ${HOTEL_NAME}`, html);
-    logNotification(db, reserva.id, 'recordatorio', 'email', reserva.email, results.email);
+    logNotification(db, reserva.id, 'recordatorio', 'email', reserva.email, results.email, html);
   }
   
   // WHATSAPP
@@ -529,7 +529,7 @@ async function notifyReminder(reserva, habitacion, daysUntil) {
       `\n📍 Playa El Palmar, Chame, Panamá\n\n¡Te esperamos! 🌊🌴`;
     
     results.whatsapp = await sendWhatsApp(reserva.whatsapp || reserva.telefono, msg);
-    logNotification(db, reserva.id, 'recordatorio', 'whatsapp', reserva.whatsapp || reserva.telefono, results.whatsapp);
+    logNotification(db, reserva.id, 'recordatorio', 'whatsapp', reserva.whatsapp || reserva.telefono, results.whatsapp, msg);
   }
   
   return results;
@@ -592,11 +592,11 @@ function logNotificationToFile(reservaId, tipo, canal, destinatario, resultado) 
 }
 
 // ── Notification Log (Database & File) ──
-function logNotification(db, reservaId, tipo, canal, destinatario, resultado) {
+function logNotification(db, reservaId, tipo, canal, destinatario, resultado, contenido = null) {
   // 1. Guardar en SQLite
   try {
-    db.prepare(`INSERT INTO notificaciones_log (reserva_id, tipo, canal, destinatario, resultado, created_at) 
-      VALUES (?, ?, ?, ?, ?, datetime('now'))`).run(reservaId, tipo, canal, destinatario, JSON.stringify(resultado));
+    db.prepare(`INSERT INTO notificaciones_log (reserva_id, tipo, canal, destinatario, resultado, contenido, created_at) 
+      VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`).run(reservaId, tipo, canal, destinatario, JSON.stringify(resultado), contenido);
   } catch (err) {
     console.error('⚠️ DB log failed for notifications:', err.message);
   }

@@ -239,6 +239,7 @@ CREATE TABLE IF NOT EXISTS notificaciones_log (
   canal TEXT NOT NULL,                    -- 'email', 'whatsapp'
   destinatario TEXT,
   resultado TEXT,                         -- JSON with delivery status
+  contenido TEXT,                         -- HTML or text message content
   created_at TEXT DEFAULT (datetime('now'))
 );
 

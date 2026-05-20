@@ -1605,4 +1605,79 @@ router.get('/reportes/financiero', requireAuth, (req, res) => {
   } catch (e) { console.error('Report error:', e); err(res, 'SERVER_ERROR', 'Error generando reporte', 500); }
 });
 
+// ── NOTIFICACIONES DE RESERVAS Y REENVÍO ──
+
+// Listar notificaciones de una reserva
+router.get('/hotel/reservas/:id/notificaciones', requireAuth, (req, res) => {
+  try {
+    const db = getDb();
+    const reserva = findById('reservas_hotel', req.params.id);
+    if (!reserva) {
+      return err(res, 'NOT_FOUND', 'Reserva no encontrada', 404);
+    }
+    const notifs = db.prepare('SELECT * FROM notificaciones_log WHERE reserva_id = ? ORDER BY created_at DESC').all(req.params.id);
+    ok(res, notifs);
+  } catch (e) {
+    console.error(e);
+    err(res, 'SERVER_ERROR', 'Error al listar notificaciones de la reserva', 500);
+  }
+});
+
+// Reenviar notificación por ID
+router.post('/hotel/notificaciones/:logId/reenviar', requireAuth, async (req, res) => {
+  try {
+    const db = getDb();
+    const log = db.prepare('SELECT * FROM notificaciones_log WHERE id = ?').get(req.params.logId);
+    if (!log) {
+      return err(res, 'NOT_FOUND', 'Log de notificación no encontrado', 404);
+    }
+
+    let result;
+    if (log.canal === 'email') {
+      let subject = 'Reenvío de Notificación — Casa Mahana';
+      const reserva = findById('reservas_hotel', log.reserva_id);
+      
+      if (reserva) {
+        if (log.tipo === 'confirmacion') {
+          subject = `✅ Reserva Confirmada #${reserva.id} — Casa Mahana`;
+        } else if (log.tipo.startsWith('estado')) {
+          const statusLabels = {
+            'Confirmada': 'Confirmada',
+            'Hospedado': 'Check-In',
+            'Check-Out': 'Check-Out',
+            'Cancelada': 'Cancelada',
+            'No-Show': 'No-Show'
+          };
+          const label = statusLabels[reserva.estado] || reserva.estado;
+          const emojis = { 'Confirmada': '✅', 'Hospedado': '🏨', 'Check-Out': '👋', 'Cancelada': '❌', 'No-Show': '⚠️' };
+          const emoji = emojis[reserva.estado] || '📋';
+          subject = `${emoji} ${label} — Reserva #${reserva.id} — Casa Mahana`;
+        } else if (log.tipo.startsWith('pago')) {
+          subject = `💳 Pago Recibido — Reserva #${reserva.id}`;
+        } else if (log.tipo.startsWith('recordatorio')) {
+          subject = `📅 Recordatorio — Tu estadía es pronto — Casa Mahana`;
+        }
+      }
+      
+      result = await notifications.sendEmail(log.destinatario, subject, log.contenido);
+      // Guardar el intento de reenvío
+      notifications.logNotification(db, log.reserva_id, log.tipo + '_reenvio', 'email', log.destinatario, result, log.contenido);
+    } else if (log.canal === 'whatsapp') {
+      result = await notifications.sendWhatsApp(log.destinatario, log.contenido);
+      notifications.logNotification(db, log.reserva_id, log.tipo + '_reenvio', 'whatsapp', log.destinatario, result, log.contenido);
+    } else {
+      return err(res, 'VALIDATION_ERROR', 'Canal desconocido', 400);
+    }
+
+    if (result && result.sent) {
+      ok(res, { success: true, message: 'Notificación reenviada con éxito', result });
+    } else {
+      err(res, 'SERVER_ERROR', result?.reason || 'Error al reenviar la notificación', 500);
+    }
+  } catch (e) {
+    console.error(e);
+    err(res, 'SERVER_ERROR', 'Error al reenviar la notificación', 500);
+  }
+});
+
 module.exports = router;

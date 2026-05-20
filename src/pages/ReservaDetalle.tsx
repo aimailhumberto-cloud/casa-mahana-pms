@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
-import { ArrowLeft, Plus, Edit2, X, Check, Upload, FileText, Trash2, Image } from 'lucide-react';
+import { ArrowLeft, Plus, Edit2, X, Check, Upload, FileText, Trash2, Image, Mail, Phone, Eye, RefreshCw, Calendar, XCircle, CheckCircle2, ShieldAlert, ExternalLink } from 'lucide-react';
 
 const estadoColor: Record<string, string> = {
   'Confirmada': 'bg-blue-100 text-blue-700',
@@ -48,6 +48,12 @@ export default function ReservaDetalle() {
   const [uploading, setUploading] = useState(false);
   const [reversalLoading, setReversalLoading] = useState<number | null>(null);
 
+  // States for notifications
+  const [notificaciones, setNotificaciones] = useState<any[]>([]);
+  const [loadingNotifs, setLoadingNotifs] = useState(false);
+  const [selectedNotifForView, setSelectedNotifForView] = useState<any | null>(null);
+  const [resendingId, setResendingId] = useState<number | null>(null);
+
   // Voucher upload state inside "Registrar Pago" form
   const [pagoFile, setPagoFile] = useState<File | null>(null);
   const [pagoPreviewUrl, setPagoPreviewUrl] = useState<string | null>(null);
@@ -88,7 +94,83 @@ export default function ReservaDetalle() {
       })
       .catch(() => setLoading(false));
   };
-  useEffect(() => { load(); }, [id]);
+  const loadNotificaciones = () => {
+    setLoadingNotifs(true);
+    api.get(`/hotel/reservas/${id}/notificaciones`)
+      .then(r => setNotificaciones(r.data || []))
+      .catch(e => console.error('Error cargando notificaciones:', e))
+      .finally(() => setLoadingNotifs(false));
+  };
+
+  const handleResendNotif = async (logId: number) => {
+    setResendingId(logId);
+    try {
+      await api.post(`/hotel/notificaciones/${logId}/reenviar`);
+      alert('Notificación reenviada exitosamente');
+      loadNotificaciones();
+    } catch (e: any) {
+      alert(e?.response?.data?.error?.message || 'Error al reenviar la notificación');
+    } finally {
+      setResendingId(null);
+    }
+  };
+
+  const formatNotifDate = (dateStr: string) => {
+    if (!dateStr) return '—';
+    try {
+      const parts = dateStr.split(' ');
+      if (parts.length > 0) {
+        const d = new Date(dateStr.replace(' ', 'T'));
+        return d.toLocaleString('es-PA', {
+          day: '2-digit',
+          month: 'short',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+      }
+      return dateStr;
+    } catch {
+      return dateStr;
+    }
+  };
+
+  const parseResultStatus = (resultadoStr: string) => {
+    try {
+      const parsed = JSON.parse(resultadoStr);
+      if (parsed.status === 'success' || parsed.success === true || parsed.sent === true) {
+        return { success: true, text: 'Exitoso', details: parsed };
+      }
+      return { success: false, text: 'Fallido', details: parsed };
+    } catch {
+      if (resultadoStr?.toLowerCase().includes('success') || resultadoStr?.toLowerCase().includes('ok')) {
+        return { success: true, text: 'Exitoso', details: { raw: resultadoStr } };
+      }
+      return { success: false, text: 'Fallido', details: { error: resultadoStr } };
+    }
+  };
+
+  const getNotifTypeLabel = (type: string) => {
+    const cleanType = type.replace('_reenvio', '');
+    const labels: Record<string, string> = {
+      confirmacion: 'Confirmación',
+      estado: 'Cambio de Estado',
+      pago: 'Recibo de Pago',
+      recordatorio: 'Recordatorio',
+    };
+    const isReenvio = type.endsWith('_reenvio');
+    return (
+      <span className="text-gray-700 font-medium flex items-center gap-1">
+        {labels[cleanType] || cleanType}
+        {isReenvio && <span className="text-[10px] bg-amber-50 text-amber-600 px-1 py-0.2 rounded border border-amber-100 font-semibold uppercase">Reenvío</span>}
+      </span>
+    );
+  };
+
+  useEffect(() => {
+    load();
+    loadNotificaciones();
+  }, [id]);
 
   const handleReversal = async (folioId: number, concepto: string) => {
     if (!confirm(`¿Está seguro de que desea reversar el movimiento "${concepto}"? Esta acción creará una contrapartida y es irreversible.`)) {
@@ -856,6 +938,119 @@ export default function ReservaDetalle() {
             )}
           </div>
 
+          {/* Section: Historial de Notificaciones */}
+          <div className="bg-white rounded-xl p-5 shadow-sm space-y-4">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <h3 className="font-bold text-gray-700 flex items-center gap-2">
+                <Mail size={18} className="text-ocean-600" /> Historial de Notificaciones
+              </h3>
+              <button
+                onClick={loadNotificaciones}
+                className="p-1.5 text-gray-400 hover:text-ocean-600 hover:bg-gray-50 border border-gray-100 rounded-lg transition"
+                title="Refrescar notificaciones"
+              >
+                <RefreshCw size={14} className={loadingNotifs ? 'animate-spin' : ''} />
+              </button>
+            </div>
+
+            {loadingNotifs ? (
+              <div className="text-center text-gray-400 text-sm py-8 animate-pulse">Cargando historial de notificaciones...</div>
+            ) : notificaciones.length === 0 ? (
+              <div className="text-center text-gray-400 text-sm py-8">No se han enviado notificaciones para esta reserva</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50/50 text-gray-400 font-semibold border-b border-gray-100 text-left">
+                      <th className="py-2.5 px-3">Fecha</th>
+                      <th className="py-2.5 px-3">Canal</th>
+                      <th className="py-2.5 px-3">Destinatario</th>
+                      <th className="py-2.5 px-3">Plantilla</th>
+                      <th className="py-2.5 px-3 text-center">Estado</th>
+                      <th className="py-2.5 px-3 text-right">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {notificaciones.map((log: any) => {
+                      const statusInfo = parseResultStatus(log.resultado);
+                      return (
+                        <tr key={log.id} className="hover:bg-gray-50/30 transition text-xs">
+                          <td className="py-3 px-3 text-gray-500 whitespace-nowrap">
+                            <span className="flex items-center gap-1">
+                              <Calendar size={12} className="text-gray-400" />
+                              {formatNotifDate(log.created_at)}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3">
+                            {log.canal === 'email' ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-blue-50 text-blue-600 border border-blue-100 font-medium">
+                                <Mail size={12} /> Email
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-green-50 text-green-600 border border-green-100 font-medium">
+                                <Phone size={12} /> WhatsApp
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 px-3 font-medium text-gray-700 max-w-[150px] truncate" title={log.destinatario}>
+                            {log.destinatario || '—'}
+                          </td>
+                          <td className="py-3 px-3 text-gray-600">
+                            {getNotifTypeLabel(log.tipo)}
+                          </td>
+                          <td className="py-3 px-3 text-center">
+                            <button
+                              onClick={() => {
+                                if (!statusInfo.success) {
+                                  alert(JSON.stringify(statusInfo.details, null, 2));
+                                }
+                              }}
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-semibold ${
+                                statusInfo.success
+                                  ? 'bg-green-50 text-green-700 border border-green-100'
+                                  : 'bg-red-50 text-red-700 border border-red-100 cursor-pointer hover:bg-red-100/50'
+                              }`}
+                              title={!statusInfo.success ? 'Haga clic para ver detalles del error' : undefined}
+                            >
+                              {statusInfo.success ? (
+                                <>
+                                  <CheckCircle2 size={12} /> Entregado
+                                </>
+                              ) : (
+                                <>
+                                  <XCircle size={12} /> Fallido
+                                </>
+                              )}
+                            </button>
+                          </td>
+                          <td className="py-3 px-3 text-right whitespace-nowrap">
+                            <div className="flex justify-end gap-1.5">
+                              <button
+                                onClick={() => setSelectedNotifForView(log)}
+                                className="p-1.5 text-gray-400 hover:text-ocean-600 hover:bg-ocean-50 rounded-lg transition"
+                                title="Ver mensaje enviado"
+                              >
+                                <Eye size={14} />
+                              </button>
+                              <button
+                                onClick={() => handleResendNotif(log.id)}
+                                disabled={resendingId !== null}
+                                className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition disabled:opacity-40"
+                                title="Reenviar esta notificación"
+                              >
+                                <RefreshCw size={14} className={resendingId === log.id ? 'animate-spin' : ''} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
         {/* Sidebar - Totals */}
         <div className="space-y-4">
           <div className="bg-white rounded-xl p-5 shadow-sm">
@@ -1027,6 +1222,124 @@ export default function ReservaDetalle() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Visualizador de Mensaje de Notificación */}
+      {selectedNotifForView && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-55 p-4 animate-fadeIn">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl p-6 relative flex flex-col max-h-[90vh]">
+            <div className="flex justify-between items-center border-b border-gray-100 pb-3 mb-4">
+              <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                <Mail size={20} className="text-ocean-600" /> Detalle de Notificación Enviada
+              </h3>
+              <button
+                onClick={() => setSelectedNotifForView(null)}
+                className="text-gray-400 hover:text-gray-600 transition outline-none text-xl animate-scaleIn"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm bg-gray-50 p-4 rounded-xl mb-4 shrink-0">
+              <div>
+                <span className="text-xs font-bold text-gray-400 uppercase">Destinatario:</span>
+                <p className="font-semibold text-gray-800 break-all">{selectedNotifForView.destinatario || '—'}</p>
+              </div>
+              <div>
+                <span className="text-xs font-bold text-gray-400 uppercase">Fecha de Envío:</span>
+                <p className="font-semibold text-gray-800">{formatNotifDate(selectedNotifForView.created_at)}</p>
+              </div>
+              <div>
+                <span className="text-xs font-bold text-gray-400 uppercase">Canal de Envío:</span>
+                <div className="mt-1">
+                  {selectedNotifForView.canal === 'email' ? (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-100 font-semibold text-xs">
+                      <Mail size={12} /> Correo Electrónico
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-green-50 text-green-700 border border-green-100 font-semibold text-xs">
+                      <Phone size={12} /> WhatsApp
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div>
+                <span className="text-xs font-bold text-gray-400 uppercase">Plantilla / Tipo:</span>
+                <div className="mt-1">
+                  {getNotifTypeLabel(selectedNotifForView.tipo)}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto mb-4 min-h-[300px]">
+              <span className="text-xs font-bold text-gray-400 uppercase block mb-1.5">Contenido del Mensaje:</span>
+              
+              {selectedNotifForView.canal === 'email' ? (
+                selectedNotifForView.contenido ? (
+                  <iframe
+                    title="Previsualización de Correo"
+                    srcDoc={selectedNotifForView.contenido}
+                    className="w-full h-[350px] border border-gray-200 rounded-xl bg-white shadow-inner"
+                    sandbox="allow-popups"
+                  />
+                ) : (
+                  <div className="flex items-center justify-center h-48 border border-gray-100 rounded-xl bg-gray-50 text-gray-400 text-sm italic">
+                    Sin contenido guardado (registro histórico previo a la actualización)
+                  </div>
+                )
+              ) : (
+                /* WhatsApp Mockup Chat bubble */
+                selectedNotifForView.contenido ? (
+                  <div
+                    className="bg-[#efeae2] p-6 rounded-xl border border-gray-200 relative overflow-hidden"
+                    style={{
+                      backgroundImage: 'url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png")',
+                      backgroundRepeat: 'repeat',
+                    }}
+                  >
+                    <div className="flex flex-col space-y-2">
+                      <div className="bg-[#d9fdd3] text-gray-800 p-4 rounded-lg shadow-sm max-w-[85%] self-end relative border border-[#e1f3d4]">
+                        <p className="text-sm whitespace-pre-wrap font-sans leading-relaxed text-gray-700">
+                          {selectedNotifForView.contenido}
+                        </p>
+                        <span className="text-[10px] text-gray-400 block text-right mt-2 font-medium">
+                          {formatNotifDate(selectedNotifForView.created_at)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center h-48 border border-gray-100 rounded-xl bg-gray-50 text-gray-400 text-sm italic">
+                    Sin contenido guardado (registro histórico previo a la actualización)
+                  </div>
+                )
+              )}
+            </div>
+
+            <div className="flex justify-between items-center border-t border-gray-100 pt-4 shrink-0">
+              <button
+                onClick={() => {
+                  if (confirm('¿Está seguro de que desea reenviar este mensaje al destinatario original?')) {
+                    handleResendNotif(selectedNotifForView.id);
+                    setSelectedNotifForView(null);
+                  }
+                }}
+                disabled={resendingId !== null}
+                className="px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-xl text-sm transition disabled:opacity-50 flex items-center gap-1.5 shadow-sm"
+              >
+                <RefreshCw size={14} className={resendingId === selectedNotifForView.id ? 'animate-spin' : ''} />
+                {resendingId === selectedNotifForView.id ? 'Reenviando...' : 'Reenviar Notificación'}
+              </button>
+
+              <button
+                onClick={() => setSelectedNotifForView(null)}
+                className="px-5 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl text-sm transition"
+              >
+                Cerrar
+              </button>
+            </div>
           </div>
         </div>
       )}

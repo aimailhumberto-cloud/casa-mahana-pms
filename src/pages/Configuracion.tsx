@@ -9,6 +9,7 @@ interface LogNotificacion {
   canal: string;
   destinatario: string;
   resultado: string;
+  contenido?: string;
   created_at: string;
 }
 
@@ -60,6 +61,10 @@ export default function Configuracion({ user }: { user: User }) {
   const [logMeta, setLogMeta] = useState<any>({});
   const [logsPage, setLogsPage] = useState(1);
   const [selectedLogResult, setSelectedLogResult] = useState<any | null>(null);
+
+  // Selected log for premium detail view
+  const [selectedLogForView, setSelectedLogForView] = useState<LogNotificacion | null>(null);
+  const [resendingLogId, setResendingLogId] = useState<number | null>(null);
 
   // Tab 3: Logs de Reversiones
   const [reversiones, setReversiones] = useState<LogReversion[]>([]);
@@ -209,14 +214,42 @@ export default function Configuracion({ user }: { user: User }) {
     }
   };
 
-  const getTypeBadge = (type: string) => {
-    const types: Record<string, string> = {
+  const handleResendNotif = async (logId: number) => {
+    setResendingLogId(logId);
+    try {
+      await api.post(`/hotel/notificaciones/${logId}/reenviar`);
+      alert('Notificación reenviada exitosamente');
+      loadLogs();
+      // If the selected log is currently open, update its representation
+      if (selectedLogForView?.id === logId) {
+        setSelectedLogForView(prev => prev ? { ...prev, tipo: prev.tipo.endsWith('_reenvio') ? prev.tipo : prev.tipo + '_reenvio' } : null);
+      }
+    } catch (e: any) {
+      alert(e?.response?.data?.error?.message || 'Error al reenviar la notificación');
+    } finally {
+      setResendingLogId(null);
+    }
+  };
+
+  const getNotifTypeLabel = (type: string) => {
+    const cleanType = type.replace('_reenvio', '');
+    const labels: Record<string, string> = {
       confirmacion: 'Confirmación',
       estado: 'Cambio de Estado',
       pago: 'Recibo de Pago',
       recordatorio: 'Recordatorio',
     };
-    return <span className="text-gray-700 font-medium">{types[type] || type}</span>;
+    const isReenvio = type.endsWith('_reenvio');
+    return (
+      <span className="text-gray-700 font-medium flex items-center gap-1.5">
+        {labels[cleanType] || cleanType}
+        {isReenvio && (
+          <span className="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded border border-amber-100 font-bold uppercase tracking-wider">
+            Reenvío
+          </span>
+        )}
+      </span>
+    );
   };
 
   return (
@@ -529,6 +562,7 @@ export default function Configuracion({ user }: { user: User }) {
                       <th className="px-6 py-4 text-left font-medium">Plantilla / Tipo</th>
                       <th className="px-6 py-4 text-left font-medium">Reserva</th>
                       <th className="px-6 py-4 text-center font-medium w-32">Estado</th>
+                      <th className="px-6 py-4 text-center font-medium w-32">Acciones</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -537,12 +571,8 @@ export default function Configuracion({ user }: { user: User }) {
                       return (
                         <tr
                           key={log.id}
-                          onClick={() => {
-                            if (!statusInfo.success) {
-                              setSelectedLogResult(statusInfo.details);
-                            }
-                          }}
-                          className={`transition ${!statusInfo.success ? 'hover:bg-red-50/20 cursor-pointer' : 'hover:bg-gray-50/50'}`}
+                          onClick={() => setSelectedLogForView(log)}
+                          className="hover:bg-gray-50/70 transition cursor-pointer"
                         >
                           <td className="px-6 py-4 whitespace-nowrap text-gray-500">
                             <div className="flex items-center gap-2">
@@ -559,17 +589,17 @@ export default function Configuracion({ user }: { user: User }) {
                               )}
                             </div>
                           </td>
-                          <td className="px-6 py-4 font-medium text-gray-700">
+                          <td className="px-6 py-4 font-medium text-gray-700 font-sans">
                             {log.destinatario || '—'}
                           </td>
                           <td className="px-6 py-4">
-                            {getTypeBadge(log.tipo)}
+                            {getNotifTypeLabel(log.tipo)}
                           </td>
                           <td className="px-6 py-4">
                             {log.reserva_id ? (
                               <a
                                 href={`/reservas/${log.reserva_id}`}
-                                className="text-ocean-600 font-semibold hover:underline flex items-center gap-1"
+                                className="text-ocean-600 font-semibold hover:underline inline-flex items-center gap-1"
                                 onClick={e => e.stopPropagation()}
                               >
                                 #{log.reserva_id} <ExternalLink size={12} />
@@ -588,11 +618,32 @@ export default function Configuracion({ user }: { user: User }) {
                               ) : (
                                 <>
                                   <XCircle size={16} className="text-red-500" />
-                                  <span className="text-xs font-semibold text-red-700 flex items-center gap-1">
-                                    Fallido <Eye size={12} className="text-red-400" />
-                                  </span>
+                                  <span className="text-xs font-semibold text-red-700">Fallido</span>
                                 </>
                               )}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 text-center whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                            <div className="flex items-center justify-center gap-2">
+                              <button
+                                onClick={() => setSelectedLogForView(log)}
+                                className="p-1.5 rounded-lg text-ocean-600 hover:bg-ocean-50 border border-transparent hover:border-ocean-100 transition"
+                                title="Ver mensaje enviado"
+                              >
+                                <Eye size={16} />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (confirm('¿Está seguro de que desea reenviar esta notificación?')) {
+                                    handleResendNotif(log.id);
+                                  }
+                                }}
+                                disabled={resendingLogId === log.id}
+                                className="p-1.5 rounded-lg text-green-600 hover:bg-green-50 border border-transparent hover:border-green-100 transition disabled:opacity-50"
+                                title="Reenviar notificación"
+                              >
+                                <RefreshCw size={16} className={resendingLogId === log.id ? 'animate-spin' : ''} />
+                              </button>
                             </div>
                           </td>
                         </tr>
@@ -752,6 +803,155 @@ export default function Configuracion({ user }: { user: User }) {
                   Cerrar
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Visualizador de Mensaje de Notificación (Configuración) */}
+      {selectedLogForView && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-55 p-4 animate-fadeIn">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl p-6 relative flex flex-col max-h-[90vh]">
+            <div className="flex justify-between items-center border-b border-gray-100 pb-3 mb-4">
+              <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                <Mail size={20} className="text-ocean-600" /> Detalle de Notificación Enviada
+              </h3>
+              <button
+                onClick={() => setSelectedLogForView(null)}
+                className="text-gray-400 hover:text-gray-600 transition outline-none text-xl animate-scaleIn"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm bg-gray-50 p-4 rounded-xl mb-4 shrink-0">
+              <div>
+                <span className="text-xs font-bold text-gray-400 uppercase">Destinatario:</span>
+                <p className="font-semibold text-gray-800 break-all">{selectedLogForView.destinatario || '—'}</p>
+              </div>
+              <div>
+                <span className="text-xs font-bold text-gray-400 uppercase">Fecha de Envío:</span>
+                <p className="font-semibold text-gray-800">{formatDate(selectedLogForView.created_at)}</p>
+              </div>
+              <div>
+                <span className="text-xs font-bold text-gray-400 uppercase">Canal de Envío:</span>
+                <div className="mt-1">
+                  {selectedLogForView.canal === 'email' ? (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-100 font-semibold text-xs">
+                      <Mail size={12} /> Correo Electrónico
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-green-50 text-green-700 border border-green-100 font-semibold text-xs">
+                      <Phone size={12} /> WhatsApp
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div>
+                <span className="text-xs font-bold text-gray-400 uppercase">Plantilla / Tipo:</span>
+                <div className="mt-1">
+                  {getNotifTypeLabel(selectedLogForView.tipo)}
+                </div>
+              </div>
+              {selectedLogForView.reserva_id && (
+                <div className="md:col-span-2">
+                  <span className="text-xs font-bold text-gray-400 uppercase">Reserva Relacionada:</span>
+                  <p className="mt-0.5">
+                    <a
+                      href={`/reservas/${selectedLogForView.reserva_id}`}
+                      className="text-ocean-600 font-semibold hover:underline inline-flex items-center gap-1 text-sm font-sans"
+                      onClick={() => setSelectedLogForView(null)}
+                    >
+                      Ver Reserva #{selectedLogForView.reserva_id} <ExternalLink size={12} />
+                    </a>
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Error detail banner if failed */}
+            {(() => {
+              const statusInfo = parseResultStatus(selectedLogForView.resultado);
+              if (!statusInfo.success) {
+                return (
+                  <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-4 shrink-0 text-sm">
+                    <h4 className="font-bold text-red-800 flex items-center gap-1.5 mb-1">
+                      <ShieldAlert size={16} /> Error de Entrega / Envío
+                    </h4>
+                    <p className="text-red-700 text-xs font-mono bg-white p-2.5 border border-red-100 rounded-lg overflow-x-auto max-h-24">
+                      {typeof statusInfo.details === 'object' ? JSON.stringify(statusInfo.details) : String(statusInfo.details || 'Error desconocido')}
+                    </p>
+                  </div>
+                );
+              }
+              return null;
+            })()}
+
+            <div className="flex-1 overflow-y-auto mb-4 min-h-[250px]">
+              <span className="text-xs font-bold text-gray-400 uppercase block mb-1.5">Contenido del Mensaje:</span>
+              
+              {selectedLogForView.canal === 'email' ? (
+                selectedLogForView.contenido ? (
+                  <iframe
+                    title="Previsualización de Correo"
+                    srcDoc={selectedLogForView.contenido}
+                    className="w-full h-[300px] border border-gray-200 rounded-xl bg-white shadow-inner"
+                    sandbox="allow-popups"
+                  />
+                ) : (
+                  <div className="flex items-center justify-center h-48 border border-gray-100 rounded-xl bg-gray-50 text-gray-400 text-sm italic">
+                    Sin contenido guardado (registro histórico previo a la actualización)
+                  </div>
+                )
+              ) : (
+                /* WhatsApp Mockup Chat bubble */
+                selectedLogForView.contenido ? (
+                  <div
+                    className="bg-[#efeae2] p-6 rounded-xl border border-gray-200 relative overflow-hidden"
+                    style={{
+                      backgroundImage: 'url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png")',
+                      backgroundRepeat: 'repeat',
+                    }}
+                  >
+                    <div className="flex flex-col space-y-2">
+                      <div className="bg-[#d9fdd3] text-gray-800 p-4 rounded-lg shadow-sm max-w-[85%] self-end relative border border-[#e1f3d4]">
+                        <p className="text-sm whitespace-pre-wrap font-sans leading-relaxed text-gray-700">
+                          {selectedLogForView.contenido}
+                        </p>
+                        <span className="text-[10px] text-gray-400 block text-right mt-2 font-medium">
+                          {formatDate(selectedLogForView.created_at)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center h-48 border border-gray-100 rounded-xl bg-gray-50 text-gray-400 text-sm italic">
+                    Sin contenido guardado (registro histórico previo a la actualización)
+                  </div>
+                )
+              )}
+            </div>
+
+            <div className="flex justify-between items-center border-t border-gray-100 pt-4 shrink-0">
+              <button
+                onClick={() => {
+                  if (confirm('¿Está seguro de que desea reenviar este mensaje al destinatario original?')) {
+                    handleResendNotif(selectedLogForView.id);
+                  }
+                }}
+                disabled={resendingLogId !== null}
+                className="px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-xl text-sm transition disabled:opacity-50 flex items-center gap-1.5 shadow-sm"
+              >
+                <RefreshCw size={14} className={resendingLogId === selectedLogForView.id ? 'animate-spin' : ''} />
+                {resendingLogId === selectedLogForView.id ? 'Reenviando...' : 'Reenviar Notificación'}
+              </button>
+
+              <button
+                onClick={() => setSelectedLogForView(null)}
+                className="px-5 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl text-sm transition"
+              >
+                Cerrar
+              </button>
             </div>
           </div>
         </div>
