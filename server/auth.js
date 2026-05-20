@@ -107,6 +107,16 @@ function requireAuth(req, res, next) {
   if (!decoded) {
     return res.status(401).json({ success: false, error: { code: 'TOKEN_EXPIRED', message: 'Token inválido o expirado' } });
   }
+  // Verify user is still active in DB
+  let getDb;
+  try { getDb = require('./db/database').getDb; } catch { }
+  if (getDb) {
+    const db = getDb();
+    const userRow = db.prepare('SELECT activo FROM usuarios WHERE id = ?').get(decoded.id);
+    if (!userRow || userRow.activo !== 1) {
+      return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Usuario desactivado o inexistente' } });
+    }
+  }
   req.user = decoded;
   next();
 }

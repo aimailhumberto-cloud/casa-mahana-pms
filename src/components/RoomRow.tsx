@@ -125,12 +125,15 @@ const RoomRow = memo(({
         {reservations.map((res: any) => {
           const style = getBarStyle(res, dates);
           const coStyle = getCheckoutIndicator(res, dates);
-          const colorClass = estadoColors[res.estado] || 'bg-gray-400';
+          const isPending = res.estado === 'Pendiente';
+          const colorClass = isPending
+            ? 'bg-amber-500/20 border border-dashed border-amber-500 text-amber-900 font-semibold backdrop-blur-sm'
+            : `${estadoColors[res.estado] || 'bg-gray-400'} text-white`;
           return (
             <div key={res.id}>
               <Link
                 to={`/reservas/${res.id}`}
-                className={`absolute top-1 bottom-1 ${colorClass} rounded-md flex items-center px-2 text-white text-xs font-medium shadow-sm hover:shadow-md hover:brightness-110 transition cursor-pointer overflow-hidden whitespace-nowrap z-10`}
+                className={`absolute top-1 bottom-1 ${colorClass} rounded-md flex items-center px-2 text-xs font-medium shadow-sm hover:shadow-md hover:brightness-110 transition cursor-pointer overflow-hidden whitespace-nowrap z-10`}
                 style={style}
                 onMouseEnter={(e) => onReservaMouseEnter(e, res)}
                 onMouseLeave={onReservaMouseLeave}
@@ -144,7 +147,7 @@ const RoomRow = memo(({
               </Link>
               {coStyle && (
                 <div
-                  className={`absolute top-1 bottom-1 ${colorClass} opacity-40 rounded-r-md z-[9]`}
+                  className={`absolute top-1 bottom-1 ${isPending ? 'bg-amber-500/20 border border-dashed border-amber-500' : colorClass} opacity-40 rounded-r-md z-[9]`}
                   style={coStyle}
                   title={`Check-out: ${res.check_out}`}
                 />

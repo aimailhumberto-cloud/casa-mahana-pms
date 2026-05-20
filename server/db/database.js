@@ -5,13 +5,14 @@ const { hashPassword } = require('../auth');
 
 const DB_DIR = fs.existsSync('/data') ? '/data' : path.join(__dirname, '../../data');
 if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
-const DB_PATH = path.join(DB_DIR, 'casa-mahana.db');
 const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
 
 let db;
 
 function getDb() {
   if (!db) {
+    const dbName = process.env.NODE_ENV === 'test' ? 'casa-mahana-test.db' : 'casa-mahana.db';
+    const DB_PATH = path.join(DB_DIR, dbName);
     db = new Database(DB_PATH);
     db.pragma('journal_mode = WAL');
     db.pragma('foreign_keys = ON');
@@ -289,4 +290,11 @@ function remove(table, id) {
   return item;
 }
 
-module.exports = { getDb, findAll, findById, create, update, remove };
+function resetDb() {
+  if (db) {
+    db.close();
+    db = null;
+  }
+}
+
+module.exports = { getDb, findAll, findById, create, update, remove, resetDb };

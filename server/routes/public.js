@@ -189,6 +189,9 @@ router.post('/reservar', (req, res) => {
     if (missing.length) return err(res, 'VALIDATION_ERROR', `Campos requeridos: ${missing.join(', ')}`);
     if (check_out <= check_in) return err(res, 'VALIDATION_ERROR', 'Check-out debe ser posterior a check_in');
 
+    const todayStr = new Date().toISOString().split('T')[0];
+    if (check_in < todayStr) return err(res, 'VALIDATION_ERROR', 'No se puede reservar en fechas pasadas');
+
     const db = getDb();
     const plan = db.prepare('SELECT * FROM planes_tarifa WHERE codigo = ? AND activo = 1 AND visible_web = 1').get(plan_codigo);
     if (!plan) return err(res, 'NOT_FOUND', 'Plan no disponible');
@@ -218,7 +221,7 @@ router.post('/reservar', (req, res) => {
       subtotal: totals.subtotal, impuesto_pct: totals.impuesto_pct, impuesto_monto: totals.impuesto_monto,
       monto_total: totals.monto_total, deposito_sugerido: totals.deposito_sugerido,
       monto_pagado: paidAmount, saldo_pendiente: Math.round((totals.monto_total - paidAmount) * 100) / 100,
-      estado: 'Por Aprobar', fuente: 'Website',
+      estado: 'Pendiente', fuente: 'Website',
       notas: metodo_pago ? `${metodo_pago.toUpperCase()} Ref: ${referencia || 'N/A'}` : (paypal_order_id ? `PayPal Order: ${paypal_order_id}` : ''),
       created_by: 'Web Booking'
     };
@@ -250,7 +253,8 @@ router.post('/reservar', (req, res) => {
     // Fire notifications for web booking (async)
     const fullReserva = findById('reservas_hotel', reserva.id);
     const hab = fullReserva.habitacion_id ? findById('habitaciones', fullReserva.habitacion_id) : null;
-    notifications.notifyReservationConfirmed(fullReserva, hab).catch(e => console.log('Notif error:', e.message));
+    
+    notifications.notifyReservationConfirmed(fullReserva, hab).catch(e => console.log('Booking notif error:', e.message));
     notifications.notifyAdminNewBooking(fullReserva, hab).catch(e => console.log('Admin notif error:', e.message));
   } catch (e) { console.error('Public booking error:', e); err(res, 'SERVER_ERROR', 'Error creando reserva', 500); }
 });

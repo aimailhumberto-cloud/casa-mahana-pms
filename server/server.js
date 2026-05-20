@@ -170,7 +170,7 @@ app.get('/api/v1/schema', (req, res) => {
           { method: 'GET', path: '/hotel/reservas/:id', description: 'Get reservation detail with folio', auth: 'read' },
           { method: 'POST', path: '/hotel/reservas', description: 'Create reservation', auth: 'write', required: 'cliente, check_in, check_out, habitacion_id, plan_codigo' },
           { method: 'PUT', path: '/hotel/reservas/:id', description: 'Update reservation', auth: 'write' },
-          { method: 'PATCH', path: '/hotel/reservas/:id/estado', description: 'Change status', auth: 'write', body: { estado: 'Confirmada|Check-In|Check-Out|Cancelada|No-Show|Por Aprobar' } }
+          { method: 'PATCH', path: '/hotel/reservas/:id/status', description: 'Change status', auth: 'write', body: { estado: 'Pendiente|Confirmada|Hospedado|Check-Out|Cancelada|No-Show' } }
         ],
         fields: { id: 'int', cliente: 'string', apellido: 'string', check_in: 'date', check_out: 'date', habitacion_id: 'int', plan_codigo: 'string', adultos: 'int', menores: 'int', estado: 'string', monto_total: 'float', saldo_pendiente: 'float' }
       },
@@ -237,7 +237,7 @@ if (fs.existsSync(distPath)) {
 }
 
 // ── Start Server ──
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   const db = getDb(); // Initialize on startup
 
   // Start background scheduler
@@ -318,3 +318,5 @@ app.listen(PORT, () => {
 
   logger.info(`🏨 Casa Mahana PMS running on port ${PORT}`);
 });
+
+module.exports = { app, server };

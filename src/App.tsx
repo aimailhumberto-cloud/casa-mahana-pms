@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, Link, useNavigate, useLocation } from 'react-router-dom';
 import { api, setToken, clearToken, isLoggedIn } from './api/client';
-import { Hotel, CalendarDays, BedDouble, DollarSign, LogOut, Menu, X, LayoutGrid, Settings, Package, ExternalLink, BarChart3, Upload, Users } from 'lucide-react';
+import { Hotel, CalendarDays, BedDouble, DollarSign, LogOut, Menu, X, LayoutGrid, Settings, Package, ExternalLink, BarChart3, Upload, Users, Bell } from 'lucide-react';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Reservas from './pages/Reservas';
@@ -16,11 +16,13 @@ import Reportes from './pages/Reportes';
 import BookingWidget from './pages/BookingWidget';
 import ImportarDatos from './pages/ImportarDatos';
 import Huespedes from './pages/Huespedes';
+import Aprobaciones from './pages/Aprobaciones';
 
 function App() {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -30,6 +32,24 @@ function App() {
         .catch(() => { clearToken(); setLoading(false); });
     } else { setLoading(false); }
   }, []);
+
+  // Fetch pending count periodically
+  useEffect(() => {
+    if (user && user.rol !== 'cleaning') {
+      const fetchPending = () => {
+        api.get('/hotel/reservas?estado=Pendiente')
+          .then(r => {
+            if (Array.isArray(r.data)) {
+              setPendingCount(r.data.length);
+            }
+          })
+          .catch(() => {});
+      };
+      fetchPending();
+      const interval = setInterval(fetchPending, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [user]);
 
   const handleLogin = async (email: string, password: string) => {
     const r = await api.post('/auth/login', { email, password });
@@ -45,9 +65,12 @@ function App() {
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-gray-50"><div className="animate-pulse text-xl text-gray-400">Cargando...</div></div>;
   if (!user) return <Login onLogin={handleLogin} />;
 
-  const nav = [
+  const isCleaning = user?.rol === 'cleaning';
+
+  const fullNav = [
     { path: '/', label: 'Dashboard', icon: Hotel },
     { path: '/calendario', label: 'Calendario', icon: LayoutGrid },
+    { path: '/aprobaciones', label: 'Aprobaciones', icon: Bell, badge: pendingCount > 0 ? pendingCount : undefined },
     { path: '/reservas', label: 'Reservas', icon: CalendarDays },
     { path: '/habitaciones', label: 'Habitaciones', icon: BedDouble },
     { path: '/productos', label: 'Productos', icon: Package },
@@ -57,6 +80,10 @@ function App() {
     { path: '/reportes', label: 'Reportes', icon: BarChart3 },
     { path: '/admin/importar', label: 'Importar', icon: Upload },
   ];
+
+  const nav = isCleaning
+    ? fullNav.filter(n => ['/', '/calendario', '/habitaciones'].includes(n.path))
+    : fullNav;
 
   const isActive = (path: string) => location.pathname === path || (path !== '/' && location.pathname.startsWith(path));
 
@@ -88,7 +115,12 @@ function App() {
               <Link key={n.path} to={n.path} onClick={() => setSidebarOpen(false)}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition ${isActive(n.path) ? 'bg-mahana-50 text-mahana-700' : 'text-gray-600 hover:bg-gray-50'}`}>
                 <n.icon size={18} />
-                {n.label}
+                <span className="flex-1">{n.label}</span>
+                {n.badge !== undefined && (
+                  <span className="px-2 py-0.5 text-[10px] font-bold bg-amber-500 text-white rounded-full animate-pulse leading-none flex items-center justify-center">
+                    {n.badge}
+                  </span>
+                )}
               </Link>
             ))}
             {/* Vista Cliente separator + link */}
@@ -110,16 +142,23 @@ function App() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/calendario" element={<Calendario />} />
-            <Route path="/reservas" element={<Reservas />} />
-            <Route path="/reservas/nueva" element={<NuevaReserva />} />
-            <Route path="/reservas/:id" element={<ReservaDetalle />} />
             <Route path="/habitaciones" element={<Habitaciones />} />
-            <Route path="/admin/habitaciones" element={<AdminHabitaciones />} />
-            <Route path="/productos" element={<Productos />} />
-            <Route path="/saldos" element={<Saldos />} />
-            <Route path="/reportes" element={<Reportes />} />
-            <Route path="/huespedes" element={<Huespedes />} />
-            <Route path="/admin/importar" element={<ImportarDatos />} />
+
+            {!isCleaning && (
+              <>
+                <Route path="/aprobaciones" element={<Aprobaciones />} />
+                <Route path="/reservas" element={<Reservas />} />
+                <Route path="/reservas/nueva" element={<NuevaReserva />} />
+                <Route path="/reservas/:id" element={<ReservaDetalle />} />
+                <Route path="/admin/habitaciones" element={<AdminHabitaciones />} />
+                <Route path="/productos" element={<Productos />} />
+                <Route path="/saldos" element={<Saldos />} />
+                <Route path="/reportes" element={<Reportes />} />
+                <Route path="/huespedes" element={<Huespedes />} />
+                <Route path="/admin/importar" element={<ImportarDatos />} />
+              </>
+            )}
+
             <Route path="/login" element={<Navigate to="/" />} />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>

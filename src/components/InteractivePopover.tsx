@@ -209,7 +209,23 @@ export default function InteractivePopover({
             >
               Ver Ficha
             </button>
-            {!isRestrictedRole && pending > 0 && (
+            {!isRestrictedRole && reserva.estado === 'Pendiente' && (
+              <>
+                <button
+                  onClick={() => onAction('approve_reserva', reserva.id)}
+                  className="flex-1 py-1.5 bg-green-500 hover:bg-green-600 text-white rounded-lg font-semibold text-[11px] transition text-center shadow-sm"
+                >
+                  Aprobar
+                </button>
+                <button
+                  onClick={() => onAction('reject_reserva', reserva.id)}
+                  className="flex-1 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-lg font-semibold text-[11px] transition text-center"
+                >
+                  Rechazar
+                </button>
+              </>
+            )}
+            {!isRestrictedRole && reserva.estado !== 'Pendiente' && pending > 0 && (
               <button
                 onClick={() => onAction('register_payment', reserva.id)}
                 className="flex-1 py-1.5 bg-green-500 hover:bg-green-600 text-white rounded-lg font-semibold text-[11px] transition text-center shadow-sm"

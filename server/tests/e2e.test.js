@@ -1,0 +1,573 @@
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import fs from 'fs';
+import path from 'path';
+
+// Force test environment
+process.env.PORT = '3299';
+process.env.NODE_ENV = 'test';
+process.env.NOTIFICATIONS_ENABLED = 'true';
+
+// Mock nodemailer transporter globally before importing notifications
+vi.mock('nodemailer', () => {
+  return {
+    default: {
+      createTransport: vi.fn().mockReturnValue({
+        verify: vi.fn().mockResolvedValue(true),
+        sendMail: vi.fn().mockResolvedValue({ messageId: 'mock-email-id' })
+      })
+    },
+    createTransport: vi.fn().mockReturnValue({
+      verify: vi.fn().mockResolvedValue(true),
+      sendMail: vi.fn().mockResolvedValue({ messageId: 'mock-email-id' })
+    })
+  };
+});
+
+// Intercept outgoing HTTP/HTTPS calls to mock the WhatsApp REST API webhooks
+vi.mock('https', () => {
+  return {
+    request: vi.fn().mockImplementation((options, callback) => {
+      const res = {
+        statusCode: 200,
+        on: (event, cb) => {
+          if (event === 'data') cb('{"success": true}');
+          if (event === 'end') cb();
+        }
+      };
+      if (callback) callback(res);
+      return {
+        on: vi.fn(),
+        write: vi.fn(),
+        end: vi.fn()
+      };
+    })
+  };
+});
+
+vi.mock('http', () => {
+  return {
+    request: vi.fn().mockImplementation((options, callback) => {
+      const res = {
+        statusCode: 200,
+        on: (event, cb) => {
+          if (event === 'data') cb('{"success": true}');
+          if (event === 'end') cb();
+        }
+      };
+      if (callback) callback(res);
+      return {
+        on: vi.fn(),
+        write: vi.fn(),
+        end: vi.fn()
+      };
+    })
+  };
+});
+
+// Import server & DB helpers
+const { app, server } = require('../server');
+const { getDb, resetDb } = require('../db/database');
+const { generateToken, hashPassword } = require('../auth');
+
+const BASE_URL = 'http://localhost:3299/api/v1';
+
+// Keep track of created user tokens
+let adminToken = '';
+let receptionistToken = '';
+let cleaningToken = '';
+let deactivatedToken = '';
+
+beforeAll(async () => {
+  // Ensure the database is clean before the test suite runs
+  resetDb();
+  
+  const dbDir = fs.existsSync('/data') ? '/data' : path.resolve(__dirname, '../../data');
+  const dbPath = path.join(dbDir, 'casa-mahana-test.db');
+  
+  if (fs.existsSync(dbPath)) {
+    try {
+      fs.unlinkSync(dbPath);
+    } catch (e) {
+      console.warn('Could not delete old test DB file, resetDb should handle it:', e.message);
+    }
+  }
+  
+  // Initialize and seed database
+  const db = getDb();
+  
+  // Seed distinct roles for RBAC testing
+  db.prepare('DELETE FROM usuarios').run();
+  
+  const insertUser = db.prepare('INSERT INTO usuarios (email, password_hash, nombre, rol, activo) VALUES (?, ?, ?, ?, ?)');
+  
+  const adminId = insertUser.run('admin_test@casamahana.com', hashPassword('pass123'), 'Admin User', 'admin', 1).lastInsertRowid;
+  const recepId = insertUser.run('recep_test@casamahana.com', hashPassword('pass123'), 'Recep User', 'receptionist', 1).lastInsertRowid;
+  const cleanId = insertUser.run('clean_test@casamahana.com', hashPassword('pass123'), 'Clean User', 'cleaning', 1).lastInsertRowid;
+  const deactId = insertUser.run('deact_test@casamahana.com', hashPassword('pass123'), 'Deactivated User', 'receptionist', 0).lastInsertRowid;
+  
+  adminToken = generateToken({ id: adminId, email: 'admin_test@casamahana.com', rol: 'admin', nombre: 'Admin User' });
+  receptionistToken = generateToken({ id: recepId, email: 'recep_test@casamahana.com', rol: 'receptionist', nombre: 'Recep User' });
+  cleaningToken = generateToken({ id: cleanId, email: 'clean_test@casamahana.com', rol: 'cleaning', nombre: 'Clean User' });
+  deactivatedToken = generateToken({ id: deactId, email: 'deact_test@casamahana.com', rol: 'receptionist', nombre: 'Deactivated User' });
+});
+
+afterAll(async () => {
+  // Gracefully close server and database connection to prevent hanging
+  await new Promise((resolve) => server.close(resolve));
+  resetDb();
+});
+
+describe('Casa Mahana PMS — Opaque-box E2E Test Suite', () => {
+
+  // Helper function to hit endpoints
+  async function apiRequest(endpoint, options = {}) {
+    const url = endpoint.startsWith('http') ? endpoint : `${BASE_URL}${endpoint}`;
+    const headers = {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    };
+    if (options.token) {
+      headers['Authorization'] = `Bearer ${options.token}`;
+    }
+    const response = await fetch(url, {
+      ...options,
+      headers,
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    });
+    const status = response.status;
+    let data = null;
+    try {
+      data = await response.json();
+    } catch (e) {
+      // no JSON or parsing failed
+    }
+    return { status, data };
+  }
+
+  // ── TIER 1: FEATURE COVERAGE ──
+
+  describe('Tier 1: Feature Coverage & Basic Flows', () => {
+    
+    it('TC-1.1.1: Web Booking Initial State sets to Pendiente and logs received notification', async () => {
+      const today = new Date();
+      const checkIn = today.toISOString().split('T')[0];
+      const checkOut = new Date(today.setDate(today.getDate() + 2)).toISOString().split('T')[0];
+      
+      const payload = {
+        cliente: 'Juan',
+        apellido: 'Pérez',
+        email: 'juan.perez@example.com',
+        whatsapp: '+50766667777',
+        nacionalidad: 'Panameña',
+        check_in: checkIn,
+        check_out: checkOut,
+        tipo_habitacion: 'Doble',
+        plan_codigo: 'todo_incluido',
+        adultos: 2,
+        menores: 0
+      };
+
+      const { status, data } = await apiRequest('/public/reservar', {
+        method: 'POST',
+        body: payload
+      });
+
+      expect(status).toBe(201);
+      expect(data.success).toBe(true);
+      expect(data.data.reserva_id).toBeDefined();
+
+      const reservationId = data.data.reserva_id;
+
+      // Verify in DB state is Pendiente
+      const db = getDb();
+      const resRow = db.prepare('SELECT estado, habitacion_id FROM reservas_hotel WHERE id = ?').get(reservationId);
+      expect(resRow).toBeDefined();
+      expect(resRow.estado).toBe('Pendiente');
+
+      // Verify received notification is logged in notificaciones_log
+      const logRows = db.prepare('SELECT * FROM notificaciones_log WHERE reserva_id = ? AND tipo = ?').all(reservationId, 'recibida');
+      expect(logRows.length).toBeGreaterThan(0);
+      expect(logRows[0].canal).toBeDefined();
+    });
+
+    it('TC-1.1.2: Status Change Approve Pending sets to Confirmada and logs confirmacion notification', async () => {
+      const db = getDb();
+      // Insert a fresh pending booking
+      const resId = db.prepare(`
+        INSERT INTO reservas_hotel (cliente, email, check_in, check_out, noches, adultos, estado, tipo_habitacion, habitacion_id, plan_codigo, monto_total, saldo_pendiente)
+        VALUES ('Maria', 'maria@example.com', '2026-06-10', '2026-06-12', 2, 2, 'Pendiente', 'Doble', 5, 'todo_incluido', 200, 200)
+      `).run().lastInsertRowid;
+
+      const { status, data } = await apiRequest(`/hotel/reservas/${resId}/status`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: { estado: 'Confirmada' }
+      });
+
+      expect(status).toBe(200);
+      expect(data.success).toBe(true);
+
+      const resRow = db.prepare('SELECT estado FROM reservas_hotel WHERE id = ?').get(resId);
+      expect(resRow.estado).toBe('Confirmada');
+
+      // Verify confirmation notification was logged
+      const logRows = db.prepare('SELECT * FROM notificaciones_log WHERE reserva_id = ? AND tipo = ?').all(resId, 'confirmacion');
+      expect(logRows.length).toBeGreaterThan(0);
+    });
+
+    it('TC-1.1.3: Check-In Confirmed sets room to Ocupada and logs bienvenida notification', async () => {
+      const db = getDb();
+      const resId = db.prepare(`
+        INSERT INTO reservas_hotel (cliente, email, check_in, check_out, noches, adultos, estado, tipo_habitacion, habitacion_id, plan_codigo, monto_total, saldo_pendiente)
+        VALUES ('Carlos', 'carlos@example.com', '2026-06-15', '2026-06-17', 2, 2, 'Confirmada', 'Doble', 5, 'todo_incluido', 200, 200)
+      `).run().lastInsertRowid;
+
+      const { status, data } = await apiRequest(`/hotel/reservas/${resId}/status`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: { estado: 'Hospedado' }
+      });
+
+      expect(status).toBe(200);
+      expect(data.success).toBe(true);
+
+      const resRow = db.prepare('SELECT estado, habitacion_id FROM reservas_hotel WHERE id = ?').get(resId);
+      expect(resRow.estado).toBe('Hospedado');
+
+      // Verify Room State sync is Ocupada
+      const roomRow = db.prepare('SELECT estado_habitacion FROM habitaciones WHERE id = ?').get(resRow.habitacion_id);
+      expect(roomRow.estado_habitacion).toBe('Ocupada');
+
+      // Verify bienvenida notification logged
+      const logRows = db.prepare('SELECT * FROM notificaciones_log WHERE reserva_id = ? AND tipo = ?').all(resId, 'bienvenida');
+      expect(logRows.length).toBeGreaterThan(0);
+    });
+
+    it('TC-1.1.4: Check-Out sets room to Vacía/Sucia and logs checkout notification', async () => {
+      const db = getDb();
+      const resId = db.prepare(`
+        INSERT INTO reservas_hotel (cliente, email, check_in, check_out, noches, adultos, estado, tipo_habitacion, habitacion_id, plan_codigo, monto_total, saldo_pendiente)
+        VALUES ('Sofia', 'sofia@example.com', '2026-06-20', '2026-06-22', 2, 2, 'Hospedado', 'Doble', 6, 'todo_incluido', 200, 200)
+      `).run().lastInsertRowid;
+
+      const { status, data } = await apiRequest(`/hotel/reservas/${resId}/status`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: { estado: 'Check-Out' }
+      });
+
+      expect(status).toBe(200);
+      expect(data.success).toBe(true);
+
+      const resRow = db.prepare('SELECT estado, habitacion_id FROM reservas_hotel WHERE id = ?').get(resId);
+      expect(resRow.estado).toBe('Check-Out');
+
+      // Verify Room is Vacía and cleanup is Sucia
+      const roomRow = db.prepare('SELECT estado_habitacion, estado_limpieza FROM habitaciones WHERE id = ?').get(resRow.habitacion_id);
+      expect(roomRow.estado_habitacion).toBe('Vacía');
+      expect(roomRow.estado_limpieza).toBe('Sucia');
+
+      // Verify checkout notification logged
+      const logRows = db.prepare('SELECT * FROM notificaciones_log WHERE reserva_id = ? AND tipo = ?').all(resId, 'checkout');
+      expect(logRows.length).toBeGreaterThan(0);
+    });
+
+    it('TC-1.5.3: Add payment logs a pago notification and updates balances', async () => {
+      const db = getDb();
+      const resId = db.prepare(`
+        INSERT INTO reservas_hotel (cliente, email, check_in, check_out, noches, adultos, estado, tipo_habitacion, habitacion_id, plan_codigo, monto_total, monto_pagado, saldo_pendiente)
+        VALUES ('Luis', 'luis@example.com', '2026-06-25', '2026-06-27', 2, 2, 'Confirmada', 'Doble', 7, 'todo_incluido', 300, 50, 250)
+      `).run().lastInsertRowid;
+
+      const { status, data } = await apiRequest(`/hotel/reservas/${resId}/folio`, {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          monto: 100,
+          concepto: 'Abono reserva',
+          tipo: 'credito',
+          metodo_pago: 'yappy'
+        }
+      });
+
+      expect(status).toBe(200);
+      expect(data.success).toBe(true);
+
+      const resRow = db.prepare('SELECT monto_pagado, saldo_pendiente FROM reservas_hotel WHERE id = ?').get(resId);
+      expect(resRow.monto_pagado).toBe(150);
+      expect(resRow.saldo_pendiente).toBe(150);
+
+      // Verify notification logged
+      const logRows = db.prepare('SELECT * FROM notificaciones_log WHERE reserva_id = ? AND tipo = ?').all(resId, 'pago');
+      expect(logRows.length).toBeGreaterThan(0);
+    });
+
+    it('TC-1.4.3/1.4.4: RBAC blocks cleaning role from updating status with HTTP 403', async () => {
+      const db = getDb();
+      const resId = db.prepare(`
+        INSERT INTO reservas_hotel (cliente, email, check_in, check_out, noches, adultos, estado, tipo_habitacion, habitacion_id, plan_codigo, monto_total, saldo_pendiente)
+        VALUES ('Pedro', 'pedro@example.com', '2026-07-01', '2026-07-03', 2, 2, 'Pendiente', 'Doble', 7, 'todo_incluido', 200, 200)
+      `).run().lastInsertRowid;
+
+      const { status } = await apiRequest(`/hotel/reservas/${resId}/status`, {
+        method: 'PATCH',
+        token: cleaningToken,
+        body: { estado: 'Confirmada' }
+      });
+
+      expect(status).toBe(403);
+
+      const resRow = db.prepare('SELECT estado FROM reservas_hotel WHERE id = ?').get(resId);
+      expect(resRow.estado).toBe('Pendiente'); // remains unchanged
+    });
+
+  });
+
+  // ── TIER 2: BOUNDARY & CORNER CASES ──
+
+  describe('Tier 2: Boundary & Corner Cases', () => {
+
+    it('TC-2.1.2: Check-In Bypass from Pending is rejected by the state machine', async () => {
+      const db = getDb();
+      const resId = db.prepare(`
+        INSERT INTO reservas_hotel (cliente, email, check_in, check_out, noches, adultos, estado, tipo_habitacion, habitacion_id, plan_codigo, monto_total, saldo_pendiente)
+        VALUES ('Bypass', 'bypass@example.com', '2026-07-05', '2026-07-07', 2, 2, 'Pendiente', 'Doble', 8, 'todo_incluido', 200, 200)
+      `).run().lastInsertRowid;
+
+      // Using receptionist token to enforce state machine check
+      const { status, data } = await apiRequest(`/hotel/reservas/${resId}/status`, {
+        method: 'PATCH',
+        token: receptionistToken,
+        body: { estado: 'Hospedado' }
+      });
+
+      expect(status).toBe(400);
+      expect(data.success).toBe(false);
+      expect(data.error.code).toBe('INVALID_TRANSITION');
+
+      const resRow = db.prepare('SELECT estado FROM reservas_hotel WHERE id = ?').get(resId);
+      expect(resRow.estado).toBe('Pendiente'); // unchanged
+    });
+
+    it('TC-2.1.4: Checkout of Confirmed Reservation is rejected by the state machine', async () => {
+      const db = getDb();
+      const resId = db.prepare(`
+        INSERT INTO reservas_hotel (cliente, email, check_in, check_out, noches, adultos, estado, tipo_habitacion, habitacion_id, plan_codigo, monto_total, saldo_pendiente)
+        VALUES ('NoHospedado', 'nohosp@example.com', '2026-07-10', '2026-07-12', 2, 2, 'Confirmada', 'Doble', 8, 'todo_incluido', 200, 200)
+      `).run().lastInsertRowid;
+
+      // Using receptionist token to enforce state machine check
+      const { status, data } = await apiRequest(`/hotel/reservas/${resId}/status`, {
+        method: 'PATCH',
+        token: receptionistToken,
+        body: { estado: 'Check-Out' }
+      });
+
+      expect(status).toBe(400);
+      expect(data.success).toBe(false);
+      expect(data.error.code).toBe('INVALID_TRANSITION');
+
+      const resRow = db.prepare('SELECT estado FROM reservas_hotel WHERE id = ?').get(resId);
+      expect(resRow.estado).toBe('Confirmada'); // unchanged
+    });
+
+    it('TC-2.1.3: Retroactive Date Creation throws validation error', async () => {
+      const payload = {
+        cliente: 'Retro',
+        apellido: 'Test',
+        email: 'retro@example.com',
+        whatsapp: '+50766667777',
+        nacionalidad: 'Panameña',
+        check_in: '2020-01-01', // definitely in the past
+        check_out: '2020-01-03',
+        tipo_habitacion: 'Doble',
+        plan_codigo: 'todo_incluido',
+        adultos: 2,
+        menores: 0
+      };
+
+      const { status, data } = await apiRequest('/public/reservar', {
+        method: 'POST',
+        body: payload
+      });
+
+      expect(status).toBe(400);
+      expect(data.success).toBe(false);
+      expect(data.error.code).toBe('VALIDATION_ERROR');
+    });
+
+    it('TC-2.4.4: Deactivated Staff Member Block fails immediately with HTTP 401', async () => {
+      const { status } = await apiRequest('/hotel/dashboard', {
+        method: 'GET',
+        token: deactivatedToken
+      });
+
+      expect(status).toBe(401);
+    });
+
+  });
+
+  // ── TIER 3: CROSS-FEATURE PAIRWISE COMBINATIONS ──
+
+  describe('Tier 3: Cross-Feature Pairwise Integrations', () => {
+
+    it('TC-3.1: Happy Path Complete Flow (Book -> Pendiente -> Confirmada -> Payment -> Hospedado -> Check-Out)', async () => {
+      const db = getDb();
+      const today = new Date();
+      const checkIn = today.toISOString().split('T')[0];
+      const checkOut = new Date(today.setDate(today.getDate() + 3)).toISOString().split('T')[0];
+
+      // 1. Online booking
+      const bookPayload = {
+        cliente: 'Integración',
+        apellido: 'Completa',
+        email: 'integ@example.com',
+        whatsapp: '+50766667777',
+        nacionalidad: 'Panameña',
+        check_in: checkIn,
+        check_out: checkOut,
+        tipo_habitacion: 'Doble',
+        plan_codigo: 'todo_incluido',
+        adultos: 2,
+        menores: 0
+      };
+
+      const { status: st1, data: d1 } = await apiRequest('/public/reservar', {
+        method: 'POST',
+        body: bookPayload
+      });
+
+      expect(st1).toBe(201);
+      const resId = d1.data.reserva_id;
+
+      // Verify 'recibida' notification
+      let logRows = db.prepare('SELECT * FROM notificaciones_log WHERE reserva_id = ? AND tipo = ?').all(resId, 'recibida');
+      expect(logRows.length).toBeGreaterThan(0);
+
+      // 2. Approve booking as admin
+      const { status: st2 } = await apiRequest(`/hotel/reservas/${resId}/status`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: { estado: 'Confirmada' }
+      });
+      expect(st2).toBe(200);
+
+      // Verify 'confirmacion' notification
+      logRows = db.prepare('SELECT * FROM notificaciones_log WHERE reserva_id = ? AND tipo = ?').all(resId, 'confirmacion');
+      expect(logRows.length).toBeGreaterThan(0);
+
+      // 3. Register payment
+      const { status: st3 } = await apiRequest(`/hotel/reservas/${resId}/folio`, {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          monto: 150,
+          concepto: 'Deposito 50%',
+          tipo: 'credito',
+          metodo_pago: 'yappy'
+        }
+      });
+      expect(st3).toBe(200);
+
+      // Verify 'pago' notification
+      logRows = db.prepare('SELECT * FROM notificaciones_log WHERE reserva_id = ? AND tipo = ?').all(resId, 'pago');
+      expect(logRows.length).toBeGreaterThan(0);
+
+      // 4. Check-in guest
+      const { status: st4 } = await apiRequest(`/hotel/reservas/${resId}/status`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: { estado: 'Hospedado' }
+      });
+      expect(st4).toBe(200);
+
+      // Verify Room status sync
+      const resRow = db.prepare('SELECT habitacion_id FROM reservas_hotel WHERE id = ?').get(resId);
+      const roomRow = db.prepare('SELECT estado_habitacion FROM habitaciones WHERE id = ?').get(resRow.habitacion_id);
+      expect(roomRow.estado_habitacion).toBe('Ocupada');
+
+      // Verify 'bienvenida' notification
+      logRows = db.prepare('SELECT * FROM notificaciones_log WHERE reserva_id = ? AND tipo = ?').all(resId, 'bienvenida');
+      expect(logRows.length).toBeGreaterThan(0);
+
+      // 5. Check-out guest
+      const { status: st5 } = await apiRequest(`/hotel/reservas/${resId}/status`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: { estado: 'Check-Out' }
+      });
+      expect(st5).toBe(200);
+
+      // Verify Room status vacant & dirty
+      const roomRowPost = db.prepare('SELECT estado_habitacion, estado_limpieza FROM habitaciones WHERE id = ?').get(resRow.habitacion_id);
+      expect(roomRowPost.estado_habitacion).toBe('Vacía');
+      expect(roomRowPost.estado_limpieza).toBe('Sucia');
+
+      // Verify 'checkout' notification
+      logRows = db.prepare('SELECT * FROM notificaciones_log WHERE reserva_id = ? AND tipo = ?').all(resId, 'checkout');
+      expect(logRows.length).toBeGreaterThan(0);
+    });
+
+  });
+
+  // ── TIER 4: REAL-WORLD WORKLOADS / CONCURRENCY ──
+
+  describe('Tier 4: Real-world Workloads & Concurrency', () => {
+
+    it('TC-4.3: Concurrency allocations: parallel online bookings on same room and overlapping dates serialize cleanly with only one succeeding', async () => {
+      const db = getDb();
+      // Ensure only 1 room of type Familiar is available for the test dates
+      db.prepare("UPDATE habitaciones SET activa = 0 WHERE tipo = 'Familiar'").run();
+      const mainRoomId = db.prepare("SELECT id FROM habitaciones WHERE tipo = 'Familiar' LIMIT 1").get().id;
+      db.prepare("UPDATE habitaciones SET activa = 1 WHERE id = ?").run(mainRoomId);
+
+      const checkIn = '2026-08-01';
+      const checkOut = '2026-08-05';
+
+      const payloadA = {
+        cliente: 'User A',
+        apellido: 'Test',
+        email: 'usera@example.com',
+        whatsapp: '+50766667777',
+        nacionalidad: 'Panameña',
+        check_in: checkIn,
+        check_out: checkOut,
+        tipo_habitacion: 'Familiar',
+        plan_codigo: 'todo_incluido',
+        adultos: 2,
+        menores: 0
+      };
+
+      const payloadB = {
+        cliente: 'User B',
+        apellido: 'Test',
+        email: 'userb@example.com',
+        whatsapp: '+50766667778',
+        nacionalidad: 'Panameña',
+        check_in: checkIn,
+        check_out: checkOut,
+        tipo_habitacion: 'Familiar',
+        plan_codigo: 'todo_incluido',
+        adultos: 2,
+        menores: 0
+      };
+
+      // Fire both parallel online booking requests concurrently
+      const results = await Promise.all([
+        apiRequest('/public/reservar', { method: 'POST', body: payloadA }),
+        apiRequest('/public/reservar', { method: 'POST', body: payloadB })
+      ]);
+
+      const successCount = results.filter(r => r.status === 201).length;
+      const rejectCount = results.filter(r => r.status === 400).length;
+
+      expect(successCount).toBe(1);
+      expect(rejectCount).toBe(1);
+
+      // Restore other Familiar rooms
+      db.prepare("UPDATE habitaciones SET activa = 1 WHERE tipo = 'Familiar'").run();
+    });
+
+  });
+
+});

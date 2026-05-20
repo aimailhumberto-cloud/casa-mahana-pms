@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS reservas_hotel (
   monto_pagado REAL DEFAULT 0,
   saldo_pendiente REAL DEFAULT 0,
   -- Estado
-  estado TEXT DEFAULT 'Confirmada',
+  estado TEXT DEFAULT 'Pendiente',
   fuente TEXT DEFAULT 'Teléfono',
   notas TEXT,
   created_by TEXT,

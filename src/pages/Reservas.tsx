@@ -31,14 +31,34 @@ export default function Reservas() {
   // Initialize context menu
   const { contextMenu, handleContextMenu, closeMenu } = useContextMenu();
 
+  const [pendingCount, setPendingCount] = useState(0);
+
   // Retrieve user role on mount
   useEffect(() => {
     api.get('/auth/me')
       .then(r => {
-        if (r.data && r.data.rol) setUserRole(r.data.rol);
+        if (r.data && r.data.rol) {
+          setUserRole(r.data.rol);
+          if (r.data.rol === 'cleaning') {
+            navigate('/');
+          }
+        }
       })
       .catch(() => {});
-  }, []);
+  }, [navigate]);
+
+  // Fetch pending count
+  useEffect(() => {
+    if (userRole !== 'cleaning') {
+      api.get('/hotel/reservas?estado=Pendiente')
+        .then(r => {
+          if (Array.isArray(r.data)) {
+            setPendingCount(r.data.length);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [userRole]);
 
   const load = () => {
     setLoading(true);
@@ -120,6 +140,23 @@ export default function Reservas() {
           <Plus size={18} /> Nueva Reserva
         </Link>
       </div>
+
+      {pendingCount > 0 && (
+        <div className="bg-amber-50 border border-amber-200/60 rounded-2xl p-4 mb-4 flex items-center justify-between shadow-sm animate-fade-in">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-amber-100 rounded-xl text-amber-600 animate-pulse">
+              ⚠️
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-amber-800">Tienes {pendingCount} reserva{pendingCount !== 1 ? 's' : ''} pendiente{pendingCount !== 1 ? 's' : ''} de aprobación</p>
+              <p className="text-xs text-amber-600 font-medium">Estas reservas aún no aparecen confirmadas en el inventario y deben ser gestionadas.</p>
+            </div>
+          </div>
+          <Link to="/aprobaciones" className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-semibold shadow-sm hover:shadow-md transition">
+            Gestionar Aprobaciones
+          </Link>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="bg-white rounded-xl p-4 mb-4 flex flex-wrap gap-3 items-center shadow-sm">

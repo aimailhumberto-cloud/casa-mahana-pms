@@ -62,13 +62,13 @@ async function checkExpiredStays() {
     const todayStr = getFutureDateString(0);
     
     const expiredStays = db.prepare(
-      "SELECT * FROM reservas_hotel WHERE check_out < ? AND estado = 'Check-In'"
+      "SELECT * FROM reservas_hotel WHERE check_out < ? AND estado = 'Hospedado'"
     ).all(todayStr);
     
     if (expiredStays.length > 0) {
       logger.warn(`⚠️ Found ${expiredStays.length} active stays that exceeded check_out date without checkout recorded.`);
       for (const res of expiredStays) {
-        logger.warn(`Stay expired: Reserva #${res.id} for guest ${res.cliente} (checkout: ${res.check_out}) is still in state 'Check-In'`);
+        logger.warn(`Stay expired: Reserva #${res.id} for guest ${res.cliente} (checkout: ${res.check_out}) is still in state 'Hospedado'`);
       }
     } else {
       logger.info('✅ No expired active stays detected.');

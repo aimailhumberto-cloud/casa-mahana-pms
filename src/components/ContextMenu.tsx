@@ -94,7 +94,7 @@ export default function ContextMenu({
             <span>Ver Ficha Completa</span>
           </button>
 
-          {!isRestrictedRole && data.reserva?.saldo_pendiente > 0 && (
+          {!isRestrictedRole && data.reserva?.saldo_pendiente > 0 && data.reserva?.estado !== 'Pendiente' && (
             <button
               onClick={() => handleItemClick('register_payment')}
               className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-semibold text-gray-700 hover:bg-green-50 hover:text-green-700 rounded-lg transition text-left"
@@ -102,6 +102,25 @@ export default function ContextMenu({
               <DollarSign size={14} className="text-green-500" />
               <span>Registrar Abono</span>
             </button>
+          )}
+
+          {!isRestrictedRole && data.reserva?.estado === 'Pendiente' && (
+            <>
+              <button
+                onClick={() => handleItemClick('approve_reserva')}
+                className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-semibold text-gray-700 hover:bg-green-50 hover:text-green-700 rounded-lg transition text-left"
+              >
+                <CheckSquare size={14} className="text-green-500" />
+                <span>Aprobar Reserva</span>
+              </button>
+              <button
+                onClick={() => handleItemClick('reject_reserva')}
+                className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-semibold text-gray-700 hover:bg-red-50 hover:text-red-700 rounded-lg transition text-left"
+              >
+                <Ban size={14} className="text-red-500" />
+                <span>Rechazar / Cancelar</span>
+              </button>
+            </>
           )}
 
           {data.reserva?.estado === 'Confirmada' && (
@@ -124,7 +143,7 @@ export default function ContextMenu({
             </button>
           )}
 
-          {!isRestrictedRole && !['Cancelada', 'No-Show'].includes(data.reserva?.estado) && (
+          {!isRestrictedRole && !['Cancelada', 'No-Show', 'Pendiente'].includes(data.reserva?.estado) && (
             <div className="border-t border-gray-100 my-1 pt-1">
               <button
                 onClick={() => handleItemClick('cancel_reserva')}

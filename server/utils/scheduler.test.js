@@ -86,11 +86,11 @@ describe('Modulo Scheduler - Casa Mahana PMS', () => {
 
   it('debe detectar estancias expiradas sin checkout', async () => {
     const mockExpiredStays = [
-      { id: 201, cliente: 'Carlos', check_out: '2026-05-19', estado: 'Check-In' }
+      { id: 201, cliente: 'Carlos', check_out: '2026-05-19', estado: 'Hospedado' }
     ];
 
     mockPrepare.mockImplementation((sql) => {
-      if (sql.includes("reservas_hotel WHERE check_out < ? AND estado = 'Check-In'")) {
+      if (sql.includes("reservas_hotel WHERE check_out < ? AND estado = 'Hospedado'")) {
         return {
           all: vi.fn(() => mockExpiredStays)
         };
@@ -103,6 +103,6 @@ describe('Modulo Scheduler - Casa Mahana PMS', () => {
 
     await checkExpiredStays();
 
-    expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining("reservas_hotel WHERE check_out < ? AND estado = 'Check-In'"));
+    expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining("reservas_hotel WHERE check_out < ? AND estado = 'Hospedado'"));
   });
 });

@@ -517,7 +517,7 @@ router.put('/hotel/reservas/:id', requireAuth, (req, res) => {
 });
 
 // Status change (Check-in / Check-out)
-router.patch('/hotel/reservas/:id/status', requireAuth, (req, res) => {
+router.patch('/hotel/reservas/:id/status', requireAuth, requireRole('admin', 'receptionist'), (req, res) => {
   try {
     const { estado } = req.body;
     const valid = ['Pendiente', 'Confirmada', 'Hospedado', 'Check-Out', 'Cancelada', 'No-Show'];
@@ -526,15 +526,39 @@ router.patch('/hotel/reservas/:id/status', requireAuth, (req, res) => {
     const existing = findById('reservas_hotel', req.params.id);
     if (!existing) return err(res, 'NOT_FOUND', 'Reserva no encontrada', 404);
 
+    // ── Enforce State Machine Transitions ──
+    const ALLOWED_TRANSITIONS = {
+      'Pendiente': ['Confirmada', 'Cancelada'],
+      'Confirmada': ['Pendiente', 'Hospedado', 'Cancelada', 'No-Show'],
+      'Hospedado': ['Check-Out', 'Confirmada', 'Cancelada'],
+      'Check-Out': [], // Terminal state
+      'Cancelada': [], // Terminal state
+      'No-Show': []    // Terminal state
+    };
+
+    const fromStatus = existing.estado;
+    const toStatus = estado;
+
+    if (fromStatus !== toStatus) {
+      // Admins are allowed to bypass the state machine rules to make operational corrections
+      if (req.user.rol !== 'admin') {
+        const allowed = ALLOWED_TRANSITIONS[fromStatus];
+        if (!allowed || !allowed.includes(toStatus)) {
+          return err(res, 'INVALID_TRANSITION', `No se permite cambiar el estado de la reserva de '${fromStatus}' a '${toStatus}'`);
+        }
+      }
+    }
+
     const updated = update('reservas_hotel', req.params.id, { estado });
 
-    // Auto-update room status
+    // ── Auto-update Room Occupancy/Cleaning Status ──
     if (existing.habitacion_id) {
       if (estado === 'Hospedado') {
         update('habitaciones', existing.habitacion_id, { estado_habitacion: 'Ocupada' });
       } else if (estado === 'Check-Out') {
         update('habitaciones', existing.habitacion_id, { estado_habitacion: 'Vacía', estado_limpieza: 'Sucia' });
-      } else if (estado === 'Cancelada' || estado === 'No-Show') {
+      } else if (['Pendiente', 'Confirmada', 'Cancelada', 'No-Show'].includes(estado)) {
+        // Correcting room status if reverted from Checked-In or Cancelled
         update('habitaciones', existing.habitacion_id, { estado_habitacion: 'Vacía' });
       }
     }
@@ -586,7 +610,7 @@ router.post('/hotel/reservas/:id/folio', requireAuth, (req, res) => {
     }
 
     const updated = findById('reservas_hotel', req.params.id);
-    ok(res, updated, null, 201);
+    ok(res, updated, null, 200);
 
     // Fire payment notification (async)
     if (tipo === 'credito') {

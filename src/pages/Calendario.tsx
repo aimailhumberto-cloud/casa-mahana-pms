@@ -186,6 +186,22 @@ export default function Calendario() {
       } catch (err: any) {
         alert(err?.response?.data?.error?.message || 'Error al hacer Check-Out');
       }
+    } else if (actionType === 'approve_reserva') {
+      try {
+        await api.patch(`/hotel/reservas/${reservaId}/status`, { estado: 'Confirmada' });
+        load();
+      } catch (err: any) {
+        alert(err?.response?.data?.error?.message || 'Error al aprobar la reserva');
+      }
+    } else if (actionType === 'reject_reserva') {
+      if (confirm('¿Estás seguro de que deseas rechazar y cancelar esta reserva pendiente?')) {
+        try {
+          await api.patch(`/hotel/reservas/${reservaId}/status`, { estado: 'Cancelada' });
+          load();
+        } catch (err: any) {
+          alert(err?.response?.data?.error?.message || 'Error al rechazar la reserva');
+        }
+      }
     } else if (actionType === 'register_payment') {
       setQuickPayReservaId(reservaId);
       const resObj = data?.reservas?.find((r: any) => r.id === reservaId);
@@ -217,6 +233,22 @@ export default function Calendario() {
         load();
       } catch (err: any) {
         alert(err?.response?.data?.error?.message || 'Error al hacer Check-Out');
+      }
+    } else if (actionType === 'approve_reserva') {
+      try {
+        await api.patch(`/hotel/reservas/${payload.reserva.id}/status`, { estado: 'Confirmada' });
+        load();
+      } catch (err: any) {
+        alert(err?.response?.data?.error?.message || 'Error al aprobar la reserva');
+      }
+    } else if (actionType === 'reject_reserva') {
+      if (confirm(`¿Estás seguro de que deseas rechazar y cancelar la reserva pendiente de ${payload.reserva.cliente}?`)) {
+        try {
+          await api.patch(`/hotel/reservas/${payload.reserva.id}/status`, { estado: 'Cancelada' });
+          load();
+        } catch (err: any) {
+          alert(err?.response?.data?.error?.message || 'Error al rechazar la reserva');
+        }
       }
     } else if (actionType === 'register_payment') {
       setQuickPayReservaId(payload.reserva.id);
