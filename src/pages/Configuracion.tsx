@@ -196,7 +196,7 @@ export default function Configuracion({ user }: { user: User }) {
   const parseResultStatus = (resultadoStr: string) => {
     try {
       const parsed = JSON.parse(resultadoStr);
-      if (parsed.status === 'success' || parsed.success === true) {
+      if (parsed.status === 'success' || parsed.success === true || parsed.sent === true) {
         return { success: true, text: 'Exitoso', details: parsed };
       }
       return { success: false, text: 'Fallido', details: parsed };
