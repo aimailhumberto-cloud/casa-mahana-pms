@@ -3,6 +3,8 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const { getDb } = require('./db/database');
+const logger = require('./utils/logger');
+const { startScheduler } = require('./utils/scheduler');
 
 const app = express();
 const PORT = process.env.PORT || 3201;
@@ -13,7 +15,7 @@ const corsOrigins = process.env.ALLOWED_ORIGINS
   : true;
 
 if (process.env.NODE_ENV === 'production' && corsOrigins === true) {
-  console.warn('⚠️ WARNING: ALLOWED_ORIGINS not set in production. Falling back to reflected origins.');
+  logger.warn('⚠️ WARNING: ALLOWED_ORIGINS not set in production. Falling back to reflected origins.');
 }
 
 app.use(cors({
@@ -21,6 +23,16 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+
+// Request logging middleware with status code and duration
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    logger.http(`${req.method} ${req.originalUrl || req.url} ${res.statusCode} - ${duration}ms`);
+  });
+  next();
+});
 
 // ── Helpers ──
 function ok(res, data, meta, status = 200) {
@@ -48,6 +60,34 @@ app.use('/api/v1/webhooks', webRouter);
 app.use('/api/v1/admin', adminRouter);
 app.use('/api/v1/public', publicRouter);
 app.use('/api/v1', hotelRouter); // serves /hotel/* and /reportes/*
+
+// ── Health Check ──
+app.get('/health', (req, res) => {
+  try {
+    const db = getDb();
+    // Run a quick query to ensure database is responsive
+    db.prepare('SELECT 1').get();
+    
+    // Check if data directory is writable
+    const dbDir = fs.existsSync('/data') ? '/data' : path.join(__dirname, '../data');
+    fs.accessSync(dbDir, fs.constants.W_OK);
+    
+    return res.status(200).json({
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      database: 'connected',
+      storage: 'writable'
+    });
+  } catch (err) {
+    logger.error('Healthcheck failed:', err);
+    return res.status(500).json({
+      status: 'unhealthy',
+      timestamp: new Date().toISOString(),
+      error: err.message
+    });
+  }
+});
 
 // ── OPENAPI / SCHEMA DISCOVERY ──
 
@@ -200,6 +240,13 @@ if (fs.existsSync(distPath)) {
 app.listen(PORT, () => {
   const db = getDb(); // Initialize on startup
 
+  // Start background scheduler
+  try {
+    startScheduler();
+  } catch (err) {
+    logger.error('Failed to start background scheduler:', err);
+  }
+
   // ── Auto-migrate Cloudbeds guest history (one-time) ──
   try {
     const guestCount = db.prepare("SELECT COUNT(*) as c FROM huespedes WHERE total_reservas > 0 AND total_ingresos > 0").get().c;
@@ -210,7 +257,7 @@ app.listen(PORT, () => {
     if (importedCount > 0) {
       const campingImports = db.prepare("SELECT COUNT(*) as c FROM reservas_hotel WHERE created_by = 'Cloudbeds Import' AND tipo_habitacion = 'Camping'").get().c;
       if (campingImports > 0) {
-        console.log(`🔧 Fixing ${campingImports} Camping-assigned historical reservations...`);
+        logger.info(`🔧 Fixing ${campingImports} Camping-assigned historical reservations...`);
         db.prepare("DELETE FROM folio_hotel WHERE reserva_id IN (SELECT id FROM reservas_hotel WHERE created_by = 'Cloudbeds Import')").run();
         db.prepare("DELETE FROM reservas_hotel WHERE created_by = 'Cloudbeds Import'").run();
         needsMigration = true;
@@ -218,11 +265,11 @@ app.listen(PORT, () => {
     }
 
     if (needsMigration) {
-      console.log(`🔄 Auto-migrating ${guestCount} guests into historical reservations...`);
+      logger.info(`🔄 Auto-migrating ${guestCount} guests into historical reservations...`);
 
       const rooms = db.prepare("SELECT id, nombre, tipo FROM habitaciones WHERE categoria = 'Estadía' AND activa = 1 AND tipo != 'Camping'").all();
       if (rooms.length === 0) {
-        console.log('⚠️ No Estadía rooms found, skipping migration');
+        logger.warn('⚠️ No Estadía rooms found, skipping migration');
       } else {
         const guests = db.prepare("SELECT * FROM huespedes WHERE total_reservas > 0 AND total_ingresos > 0 ORDER BY ultima_estadia DESC").all();
 
@@ -262,12 +309,12 @@ app.listen(PORT, () => {
           }
         });
         txn();
-        console.log(`✅ Migrated ${total.toLocaleString()} historical reservations ($${revenue.toLocaleString()})`);
+        logger.info(`✅ Migrated ${total.toLocaleString()} historical reservations ($${revenue.toLocaleString()})`);
       }
     }
   } catch (e) {
-    console.log('Migration check error:', e.message);
+    logger.error('Migration check error:', e);
   }
 
-  console.log(`🏨 Casa Mahana PMS running on port ${PORT}`);
+  logger.info(`🏨 Casa Mahana PMS running on port ${PORT}`);
 });
