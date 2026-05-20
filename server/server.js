@@ -28,7 +28,18 @@ const upload = multer({
 });
 
 // ── Middleware ──
-app.use(cors({ origin: true, credentials: true }));
+const corsOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+  : true;
+
+if (process.env.NODE_ENV === 'production' && corsOrigins === true) {
+  console.warn('⚠️ WARNING: ALLOWED_ORIGINS not set in production. Falling back to reflected origins.');
+}
+
+app.use(cors({
+  origin: process.env.NODE_ENV === 'production' && corsOrigins !== true ? corsOrigins : true,
+  credentials: true
+}));
 app.use(express.json());
 
 // ── Helpers ──

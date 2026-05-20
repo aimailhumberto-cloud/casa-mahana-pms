@@ -2,6 +2,11 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 
+if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'casa-mahana-jwt-secret-2026')) {
+  console.error('❌ FATAL: JWT_SECRET is required in production and cannot match the default insecure value!');
+  process.exit(1);
+}
+
 const JWT_SECRET = process.env.JWT_SECRET || 'casa-mahana-jwt-secret-2026';
 const JWT_EXPIRES = '7d';
 
