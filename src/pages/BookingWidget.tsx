@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Calendar, Users, ChevronRight, Check, CreditCard, Loader2, MapPin, Star, Shield, ArrowLeft, Bed, Coffee, Sun, Waves, Clock, Mail, Phone, Globe } from 'lucide-react'
+import { Calendar, Users, ChevronRight, Check, CreditCard, Loader2, MapPin, Star, Shield, ArrowLeft, Bed, Coffee, Sun, Waves, Clock, Mail, Phone, Globe, Upload } from 'lucide-react'
 
 const API = '/api/v1/public'
 
@@ -78,6 +78,29 @@ export default function BookingWidget() {
   const [result, setResult] = useState<{ reserva_id?: number; mensaje?: string } | null>(null)
   const [tipoFotos, setTipoFotos] = useState<Record<string, string>>({})
 
+  // Offline Payment states
+  const [receiptFile, setReceiptFile] = useState<File | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [dragActive, setDragActive] = useState(false)
+  const [paymentMethod, setPaymentMethod] = useState<'paypal' | 'transferencia' | 'yappy'>('paypal')
+  const [reference, setReference] = useState('')
+
+  useEffect(() => {
+    if (!receiptFile) {
+      setPreviewUrl(null)
+      return
+    }
+    if (receiptFile.type.startsWith('image/')) {
+      const reader = new FileReader()
+      reader.onloadend = () => {
+        setPreviewUrl(reader.result as string)
+      }
+      reader.readAsDataURL(receiptFile)
+    } else {
+      setPreviewUrl(null)
+    }
+  }, [receiptFile])
+
   useEffect(() => {
     fetch(`${API}/paypal-config`).then(r => r.json()).then(d => { if (d.success) setPaypalConfig(d.data) })
     fetch(`${API}/tipo-fotos`).then(r => r.json()).then(d => { if (d.success) setTipoFotos(d.data) })
@@ -134,6 +157,63 @@ export default function BookingWidget() {
       if (!data.success) { setError(data.error?.message || 'Error creando reserva'); return }
       setResult(data.data); setStep(6)
     } catch { setError('Error de conexión') } finally { setLoading(false) }
+  }
+
+  const handleOfflineBooking = async () => {
+    setLoading(true); setError('')
+    const montoPagar = pagoTipo === 'total' ? cotizacion!.monto_total : cotizacion!.deposito_minimo
+    try {
+      // 1. Create the reservation
+      const resp = await fetch(`${API}/reservar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cliente: guest.nombre,
+          apellido: guest.apellido,
+          email: guest.email,
+          whatsapp: guest.whatsapp,
+          nacionalidad: guest.nacionalidad,
+          check_in: checkIn,
+          check_out: checkOut,
+          tipo_habitacion: selectedType,
+          plan_codigo: selectedPlan!.codigo,
+          adultos,
+          menores,
+          monto_pagado: montoPagar,
+          pago_tipo: pagoTipo,
+          metodo_pago: paymentMethod,
+          referencia: reference
+        })
+      })
+      const data = await resp.json()
+      if (!data.success) {
+        setError(data.error?.message || 'Error creando reserva')
+        return
+      }
+
+      // 2. Sequential upload of transaction receipt/comprobante if file is selected
+      if (receiptFile && data.data.reserva_id) {
+        const formData = new FormData()
+        formData.append('comprobante', receiptFile)
+        formData.append('notas', `Comprobante de ${paymentMethod.toUpperCase()} (Ref: ${reference}) subido por el huésped durante la reserva online.`)
+        
+        const uploadResp = await fetch(`${API}/reservas/${data.data.reserva_id}/comprobante`, {
+          method: 'POST',
+          body: formData
+        })
+        const uploadData = await uploadResp.json()
+        if (!uploadData.success) {
+          console.error('Error subiendo comprobante:', uploadData.error?.message)
+        }
+      }
+
+      setResult(data.data)
+      setStep(6)
+    } catch (err: any) {
+      setError('Error de conexión al procesar la reserva')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const isGuestValid = guest.nombre && guest.email && guest.apellido
@@ -399,7 +479,7 @@ export default function BookingWidget() {
           </div>
         )}
 
-        {/* STEP 5: PayPal */}
+        {/* STEP 5: Pago */}
         {step === 5 && cotizacion && (
           <div className="bg-white rounded-3xl shadow-xl overflow-hidden border border-amber-100/50">
             {planImage && (
@@ -414,28 +494,213 @@ export default function BookingWidget() {
               </div>
             )}
             <div className="p-6 sm:p-8">
-              <div className="flex items-center gap-3 mb-5 justify-center">
-                <Shield className="w-5 h-5 text-emerald-500" />
-                <span className="text-sm text-gray-500">Pago seguro procesado por PayPal</span>
-              </div>
               {pagoTipo === 'deposito' && (
                 <p className="text-center text-xs text-gray-400 mb-5">Saldo restante de <b>${(cotizacion.monto_total - montoPagar).toFixed(2)}</b> se cancela en check-in</p>
               )}
-              {paypalConfig.paypal_enabled && paypalConfig.paypal_client_id ? (
-                <PayPalButtons clientId={paypalConfig.paypal_client_id} mode={paypalConfig.paypal_mode}
-                  monto={montoPagar} descripcion={`Casa Mahana - ${selectedPlan?.nombre} (${cotizacion.noches} noches)`}
-                  onSuccess={(orderId) => createReservation(orderId)}
-                  onError={(msg) => setError(msg)} />
-              ) : (
-                <div className="text-center py-8 text-gray-500">
-                  <p className="font-medium">Sistema de pago no disponible temporalmente</p>
-                  <p className="text-sm mt-2">Contacta directamente al hotel para confirmar tu reserva</p>
-                  <div className="flex gap-3 justify-center mt-4">
-                    <a href="https://wa.me/50760000000" className="px-5 py-2.5 bg-emerald-500 text-white rounded-xl font-medium hover:bg-emerald-600 transition flex items-center gap-2"><Phone className="w-4 h-4" /> WhatsApp</a>
-                    <a href="mailto:info@casamahana.com" className="px-5 py-2.5 bg-gray-100 text-gray-700 rounded-xl font-medium hover:bg-gray-200 transition flex items-center gap-2"><Mail className="w-4 h-4" /> Email</a>
+
+              {/* Segmented Tab Control */}
+              <div className="flex bg-amber-50/50 p-1.5 rounded-2xl border border-amber-200/50 mb-6 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod('paypal')}
+                  className={`flex-1 py-3 text-sm font-semibold rounded-xl transition flex items-center justify-center gap-2 ${
+                    paymentMethod === 'paypal'
+                      ? 'bg-amber-700 text-white shadow-md'
+                      : 'text-amber-800 hover:bg-amber-100/30'
+                  }`}
+                >
+                  <CreditCard className="w-4 h-4" />
+                  <span>Pago Seguro Online</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod('transferencia')}
+                  className={`flex-1 py-3 text-sm font-semibold rounded-xl transition flex items-center justify-center gap-2 ${
+                    paymentMethod !== 'paypal'
+                      ? 'bg-amber-700 text-white shadow-md'
+                      : 'text-amber-800 hover:bg-amber-100/30'
+                  }`}
+                >
+                  <Upload className="w-4 h-4" />
+                  <span>Transferencia / Yappy</span>
+                </button>
+              </div>
+
+              {/* PayPal Payment Tab */}
+              {paymentMethod === 'paypal' ? (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3 mb-5 justify-center">
+                    <Shield className="w-5 h-5 text-emerald-500" />
+                    <span className="text-sm text-gray-500">Pago seguro procesado por PayPal</span>
                   </div>
+                  {paypalConfig.paypal_enabled && paypalConfig.paypal_client_id ? (
+                    <PayPalButtons clientId={paypalConfig.paypal_client_id} mode={paypalConfig.paypal_mode}
+                      monto={montoPagar} descripcion={`Casa Mahana - ${selectedPlan?.nombre} (${cotizacion.noches} noches)`}
+                      onSuccess={(orderId) => createReservation(orderId)}
+                      onError={(msg) => setError(msg)} />
+                  ) : (
+                    <div className="text-center py-8 text-gray-500">
+                      <p className="font-medium">Sistema de pago no disponible temporalmente</p>
+                      <p className="text-sm mt-2">Contacta directamente al hotel para confirmar tu reserva</p>
+                      <div className="flex gap-3 justify-center mt-4">
+                        <a href="https://wa.me/50760000000" className="px-5 py-2.5 bg-emerald-500 text-white rounded-xl font-medium hover:bg-emerald-600 transition flex items-center gap-2"><Phone className="w-4 h-4" /> WhatsApp</a>
+                        <a href="mailto:info@casamahana.com" className="px-5 py-2.5 bg-gray-100 text-gray-700 rounded-xl font-medium hover:bg-gray-200 transition flex items-center gap-2"><Mail className="w-4 h-4" /> Email</a>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Offline Payment (Transfer/Yappy) Tab */
+                <div className="space-y-4 text-left">
+                  {/* Account Type Toggle */}
+                  <div className="grid grid-cols-2 gap-2 mb-4">
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod('transferencia')}
+                      className={`py-2 px-3 text-xs font-semibold rounded-xl border transition ${
+                        paymentMethod === 'transferencia'
+                          ? 'border-amber-500 bg-amber-50 text-amber-800 ring-1 ring-amber-400 font-bold'
+                          : 'border-gray-200 hover:border-amber-300 text-gray-500 bg-white'
+                      }`}
+                    >
+                      🏦 Transferencia Bancaria
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod('yappy')}
+                      className={`py-2 px-3 text-xs font-semibold rounded-xl border transition ${
+                        paymentMethod === 'yappy'
+                          ? 'border-amber-500 bg-amber-50 text-amber-800 ring-1 ring-amber-400 font-bold'
+                          : 'border-gray-200 hover:border-amber-300 text-gray-500 bg-white'
+                      }`}
+                    >
+                      📱 Yappy (Banco General)
+                    </button>
+                  </div>
+
+                  {/* Payment Info Card */}
+                  {paymentMethod === 'transferencia' ? (
+                    <div className="bg-amber-50/40 border border-amber-100 rounded-2xl p-4 text-sm mb-5 space-y-2">
+                      <p className="font-bold text-amber-900 text-base mb-1">Datos de Transferencia</p>
+                      <div className="grid grid-cols-2 gap-y-2 text-gray-700 text-xs sm:text-sm">
+                        <div><span className="text-gray-400 text-[10px] block uppercase font-medium">Banco</span><strong>Banco General</strong></div>
+                        <div><span className="text-gray-400 text-[10px] block uppercase font-medium">Tipo de Cuenta</span><strong>Cuenta Corriente</strong></div>
+                        <div><span className="text-gray-400 text-[10px] block uppercase font-medium">Nombre</span><strong>Casa Mahana S.A.</strong></div>
+                        <div><span className="text-gray-400 text-[10px] block uppercase font-medium">Número de Cuenta</span><strong>03-72-01-123456-7</strong></div>
+                      </div>
+                      <p className="text-[10px] text-amber-700/80 italic pt-2 border-t border-amber-200/30">Por favor, transfiera el monto indicado arriba y adjunte el comprobante.</p>
+                    </div>
+                  ) : (
+                    <div className="bg-amber-50/40 border border-amber-100 rounded-2xl p-4 text-sm mb-5 space-y-2">
+                      <p className="font-bold text-amber-900 text-base mb-1">Pagar con Yappy</p>
+                      <div className="grid grid-cols-2 gap-y-2 text-gray-700 text-xs sm:text-sm">
+                        <div><span className="text-gray-400 text-[10px] block uppercase font-medium">Directorio Yappy</span><strong>@casamahana</strong></div>
+                        <div><span className="text-gray-400 text-[10px] block uppercase font-medium">Banco</span><strong>Banco General</strong></div>
+                      </div>
+                      <p className="text-[10px] text-amber-700/80 italic pt-2 border-t border-amber-200/30">Envíe el pago en Yappy a @casamahana y adjunte la captura de pantalla del recibo.</p>
+                    </div>
+                  )}
+
+                  {/* Reference input */}
+                  <div className="mb-4">
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Número de Referencia / Transacción *</label>
+                    <input
+                      type="text"
+                      value={reference}
+                      onChange={e => setReference(e.target.value)}
+                      required
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-amber-400 focus:border-transparent transition text-gray-700 bg-gray-50/30 text-sm"
+                      placeholder="Ej: 123456"
+                    />
+                  </div>
+
+                  {/* Sleek drag & drop zone */}
+                  <div className="mb-5">
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">📸 Adjuntar Comprobante de Pago *</label>
+                    <div
+                      onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
+                      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
+                      onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(false); }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setDragActive(false);
+                        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                          const file = e.dataTransfer.files[0];
+                          const allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+                          if (allowed.includes(file.type)) {
+                            setReceiptFile(file);
+                          } else {
+                            alert('Solo se permiten imágenes JPG, PNG, WebP o archivos PDF.');
+                          }
+                        }
+                      }}
+                      className={`border-2 border-dashed rounded-2xl p-5 text-center transition relative overflow-hidden flex flex-col items-center justify-center min-h-[140px] bg-gray-50/50 ${
+                        dragActive ? 'border-amber-600 bg-amber-50/30' : 'border-gray-300 hover:border-amber-500'
+                      }`}
+                    >
+                      <input
+                        type="file"
+                        id="public-receipt-input"
+                        accept=".jpg,.jpeg,.png,.webp,.pdf"
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                        onChange={(e) => {
+                          if (e.target.files && e.target.files[0]) {
+                            setReceiptFile(e.target.files[0]);
+                          }
+                        }}
+                      />
+                      {!receiptFile ? (
+                        <div className="flex flex-col items-center justify-center space-y-2 pointer-events-none">
+                          <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center shadow-sm text-amber-700">
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                          </div>
+                          <div>
+                            <span className="text-sm font-semibold text-amber-800 hover:underline">Selecciona comprobante</span>
+                            <span className="text-sm text-gray-500"> o arrastra aquí</span>
+                          </div>
+                          <p className="text-xs text-gray-400">PNG, JPG, WebP o PDF hasta 10MB</p>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center w-full space-y-3 z-20">
+                          {previewUrl ? (
+                            <div className="relative w-24 h-24 rounded-lg overflow-hidden border border-gray-200 bg-white shadow-sm">
+                              <img src={previewUrl} alt="Comprobante" className="w-full h-full object-cover" />
+                            </div>
+                          ) : (
+                            <div className="w-12 h-12 rounded-xl bg-white border border-gray-100 flex items-center justify-center text-red-500 shadow-sm font-bold text-xs uppercase">
+                              {receiptFile.name.split('.').pop()}
+                            </div>
+                          )}
+                          <div className="text-center">
+                            <p className="text-sm font-semibold text-gray-700 truncate max-w-xs">{receiptFile.name}</p>
+                            <p className="text-xs text-gray-400">{(receiptFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setReceiptFile(null); }}
+                            className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-xs font-semibold transition"
+                          >
+                            Remover archivo
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Submission Button */}
+                  <button
+                    type="button"
+                    disabled={loading || !reference || !receiptFile}
+                    onClick={handleOfflineBooking}
+                    className="w-full py-4 text-white font-bold rounded-2xl hover:shadow-2xl transition-all duration-300 disabled:opacity-40 flex items-center justify-center gap-2 text-lg animate-pulse-subtle"
+                    style={{ background: 'linear-gradient(135deg, #78350f, #92400e, #a16207)' }}
+                  >
+                    {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <><span>Confirmar Reserva y Subir Recibo</span><Check className="w-5 h-5" /></>}
+                  </button>
                 </div>
               )}
+
               <button onClick={() => setStep(4)} className="mt-5 text-sm text-amber-700 hover:text-amber-900 font-medium flex items-center gap-1 mx-auto"><ArrowLeft className="w-4 h-4" /> Volver al resumen</button>
             </div>
           </div>
@@ -448,6 +713,11 @@ export default function BookingWidget() {
               <Check className="w-10 h-10 text-emerald-600" />
             </div>
             <h2 className="text-2xl font-bold text-emerald-700 mb-2">Reserva recibida</h2>
+            {paymentMethod !== 'paypal' && (
+              <p className="text-xs text-amber-700 bg-amber-50 py-2 px-4 rounded-xl inline-flex items-center gap-1.5 mx-auto mb-4 border border-amber-200/50">
+                <span>🧾 Comprobante de pago ({paymentMethod.toUpperCase()}) recibido y en revisión.</span>
+              </p>
+            )}
             <p className="text-gray-500 mb-6">{result.mensaje}</p>
             <div className="rounded-2xl p-5 inline-block" style={{ background: 'linear-gradient(135deg, #ecfdf5, #d1fae5)' }}>
               <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-1">Número de referencia</p>

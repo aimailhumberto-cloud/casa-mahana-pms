@@ -6,7 +6,7 @@ const { getDb, findById, create, update } = require('../db/database');
 const { requireAuth, requireRole } = require('../auth');
 const { calcNoches, calcReservation, calcReservationWithRates, getConfig } = require('../utils/calculations');
 const { fireWebhooks } = require('../utils/webhooks');
-const { upload, UPLOADS_DIR } = require('../utils/upload');
+const { upload, validateUploadSignature, UPLOADS_DIR } = require('../utils/upload');
 const notifications = require('../notifications');
 
 // ── Helpers ──
@@ -879,7 +879,7 @@ router.get('/hotel/dashboard', requireAuth, (req, res) => {
 // ══════════════════════════════════════
 
 // Upload document
-router.post('/hotel/reservas/:id/documentos', requireAuth, upload.single('archivo'), (req, res) => {
+router.post('/hotel/reservas/:id/documentos', requireAuth, upload.single('archivo'), validateUploadSignature, (req, res) => {
   try {
     if (!req.file) return err(res, 'VALIDATION_ERROR', 'Archivo requerido (JPEG, PNG, WebP, PDF, máx 10MB)');
     const reserva = findById('reservas_hotel', req.params.id);

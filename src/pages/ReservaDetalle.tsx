@@ -31,6 +31,27 @@ export default function ReservaDetalle() {
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
 
+  // Voucher upload state inside "Registrar Pago" form
+  const [pagoFile, setPagoFile] = useState<File | null>(null);
+  const [pagoPreviewUrl, setPagoPreviewUrl] = useState<string | null>(null);
+  const [pagoDragActive, setPagoDragActive] = useState(false);
+
+  useEffect(() => {
+    if (!pagoFile) {
+      setPagoPreviewUrl(null);
+      return;
+    }
+    if (pagoFile.type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setPagoPreviewUrl(reader.result as string);
+      };
+      reader.readAsDataURL(pagoFile);
+    } else {
+      setPagoPreviewUrl(null);
+    }
+  }, [pagoFile]);
+
   const load = () => { api.get(`/hotel/reservas/${id}`).then(r => { setReserva(r.data); setLoading(false); }).catch(() => setLoading(false)); };
   useEffect(() => { load(); }, [id]);
 
@@ -48,7 +69,20 @@ export default function ReservaDetalle() {
     setPagoLoading(true);
     try {
       await api.post(`/hotel/reservas/${id}/folio`, { ...pago, monto: parseFloat(pago.monto), tipo: 'credito' });
+      
+      // Sequential upload of voucher if present
+      if (pagoFile) {
+        const formData = new FormData();
+        formData.append('archivo', pagoFile);
+        formData.append('tipo', 'recibo');
+        formData.append('notas', `Comprobante adjunto al registrar pago/abono de $${parseFloat(pago.monto).toFixed(2)}.`);
+        await api.post(`/hotel/reservas/${id}/documentos`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+      }
+
       setPago({ monto: '', concepto: 'Abono', metodo_pago: 'efectivo', referencia: '' });
+      setPagoFile(null);
       setShowPago(false);
       load();
     } catch (err: any) { alert(err.message); }
@@ -211,7 +245,7 @@ export default function ReservaDetalle() {
 
             {showPago && (
               <form onSubmit={submitPago} className="bg-ocean-50 rounded-lg p-4 mb-4 space-y-3">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-start">
                   <div>
                     <label className="text-xs text-gray-500">Monto *</label>
                     <input type="number" step="0.01" min="0.01" value={pago.monto} onChange={e => setPago(p => ({ ...p, monto: e.target.value }))} required className="input" placeholder="0.00" />
@@ -223,20 +257,96 @@ export default function ReservaDetalle() {
                   <div>
                     <label className="text-xs text-gray-500">Método</label>
                     <select value={pago.metodo_pago} onChange={e => setPago(p => ({ ...p, metodo_pago: e.target.value }))} className="input">
-                      <option value="efectivo">Efectivo</option><option value="transferencia">Transferencia</option>
-                      <option value="yappy">Yappy</option><option value="tarjeta">Tarjeta</option>
+                      <option value="efectivo">Efectivo</option>
+                      <option value="transferencia">Transferencia</option>
+                      <option value="yappy">Yappy</option>
+                      <option value="tarjeta">Tarjeta (POS)</option>
                     </select>
                   </div>
                   <div>
                     <label className="text-xs text-gray-500">Referencia</label>
                     <input value={pago.referencia} onChange={e => setPago(p => ({ ...p, referencia: e.target.value }))} className="input" placeholder="#" />
                   </div>
+
+                  {/* Upload receipt container inside Registrar Pago form */}
+                  {(pago.metodo_pago === 'transferencia' || pago.metodo_pago === 'yappy' || pago.metodo_pago === 'efectivo') && parseFloat(pago.monto) > 0 && (
+                    <div className="col-span-2 md:col-span-4 mt-1">
+                      <label className="block text-xs font-medium text-gray-500 mb-1.5">📸 Adjuntar Comprobante de Pago (Opcional)</label>
+                      <div
+                        onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setPagoDragActive(true); }}
+                        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setPagoDragActive(true); }}
+                        onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setPagoDragActive(false); }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setPagoDragActive(false);
+                          if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                            const file = e.dataTransfer.files[0];
+                            const allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+                            if (allowed.includes(file.type)) {
+                              setPagoFile(file);
+                            } else {
+                              alert('Solo se permiten imágenes JPG, PNG, WebP o archivos PDF.');
+                            }
+                          }
+                        }}
+                        className={`border border-dashed rounded-lg p-4 text-center transition relative overflow-hidden flex flex-col items-center justify-center min-h-[100px] bg-white/60 ${
+                          pagoDragActive ? 'border-ocean-500 bg-ocean-50/20' : 'border-gray-300 hover:border-ocean-400'
+                        }`}
+                      >
+                        <input
+                          type="file"
+                          id="pago-file-input"
+                          accept=".jpg,.jpeg,.png,.webp,.pdf"
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                          onChange={(e) => {
+                            if (e.target.files && e.target.files[0]) {
+                              setPagoFile(e.target.files[0]);
+                            }
+                          }}
+                        />
+                        {!pagoFile ? (
+                          <div className="flex flex-col items-center justify-center space-y-1 pointer-events-none">
+                            <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                            <div className="text-xs">
+                              <span className="font-semibold text-ocean-600 hover:underline">Selecciona comprobante</span>
+                              <span className="text-gray-500"> o arrastra aquí</span>
+                            </div>
+                            <p className="text-[10px] text-gray-400">PNG, JPG, WebP o PDF hasta 10MB</p>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col items-center w-full space-y-2 z-20">
+                            {pagoPreviewUrl ? (
+                              <div className="relative w-16 h-16 rounded overflow-hidden border border-gray-200 bg-white">
+                                <img src={pagoPreviewUrl} alt="Comprobante" className="w-full h-full object-cover" />
+                              </div>
+                            ) : (
+                              <div className="w-8 h-8 rounded bg-white border border-gray-100 flex items-center justify-center text-red-500 shadow-sm font-bold text-[10px] uppercase">
+                                {pagoFile.name.split('.').pop()}
+                              </div>
+                            )}
+                            <div className="text-center">
+                              <p className="text-xs font-semibold text-gray-700 truncate max-w-xs">{pagoFile.name}</p>
+                              <p className="text-[10px] text-gray-400">{(pagoFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPagoFile(null); }}
+                              className="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded text-[10px] font-semibold transition"
+                            >
+                              Remover
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div className="flex gap-2">
                   <button type="submit" disabled={pagoLoading} className="px-4 py-2 bg-ocean-500 text-white rounded-lg text-sm hover:bg-ocean-600 disabled:opacity-50">
                     {pagoLoading ? 'Guardando...' : 'Guardar Pago'}
                   </button>
-                  <button type="button" onClick={() => setShowPago(false)} className="px-4 py-2 text-gray-500 text-sm">Cancelar</button>
+                  <button type="button" onClick={() => { setShowPago(false); setPagoFile(null); }} className="px-4 py-2 text-gray-500 text-sm">Cancelar</button>
                 </div>
               </form>
             )}

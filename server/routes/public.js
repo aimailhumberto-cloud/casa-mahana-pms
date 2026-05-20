@@ -3,6 +3,7 @@ const router = express.Router();
 const { getDb, findById, create } = require('../db/database');
 const { calcNoches, calcReservationWithRates, getConfig } = require('../utils/calculations');
 const { fireWebhooks } = require('../utils/webhooks');
+const { upload, validateUploadSignature } = require('../utils/upload');
 const notifications = require('../notifications');
 
 // ── Helpers ──
@@ -173,10 +174,10 @@ router.post('/paypal/capture-order', async (req, res) => {
   } catch (e) { console.error('PayPal capture error:', e); err(res, 'SERVER_ERROR', 'Error capturando pago PayPal', 500); }
 });
 
-// Public reservation creation (with PayPal payment)
+// Public reservation creation (with PayPal or manual payment)
 router.post('/reservar', (req, res) => {
   try {
-    const { cliente, apellido, email, whatsapp, nacionalidad, check_in, check_out, tipo_habitacion, plan_codigo, adultos = 1, menores = 0, mascotas = 0, monto_pagado = 0, paypal_order_id, pago_tipo = 'deposito' } = req.body;
+    const { cliente, apellido, email, whatsapp, nacionalidad, check_in, check_out, tipo_habitacion, plan_codigo, adultos = 1, menores = 0, mascotas = 0, monto_pagado = 0, paypal_order_id, pago_tipo = 'deposito', metodo_pago, referencia } = req.body;
     // Validations
     const missing = [];
     if (!cliente) missing.push('cliente');
@@ -217,7 +218,8 @@ router.post('/reservar', (req, res) => {
       subtotal: totals.subtotal, impuesto_pct: totals.impuesto_pct, impuesto_monto: totals.impuesto_monto,
       monto_total: totals.monto_total, deposito_sugerido: totals.deposito_sugerido,
       monto_pagado: paidAmount, saldo_pendiente: Math.round((totals.monto_total - paidAmount) * 100) / 100,
-      estado: 'Por Aprobar', fuente: 'Website', notas: paypal_order_id ? `PayPal Order: ${paypal_order_id}` : '',
+      estado: 'Por Aprobar', fuente: 'Website',
+      notas: metodo_pago ? `${metodo_pago.toUpperCase()} Ref: ${referencia || 'N/A'}` : (paypal_order_id ? `PayPal Order: ${paypal_order_id}` : ''),
       created_by: 'Web Booking'
     };
 
@@ -233,9 +235,11 @@ router.post('/reservar', (req, res) => {
         reserva.id, 'debito', `Impuesto ${totals.impuesto_pct}%`, totals.impuesto_monto, 'Web Booking');
     }
     if (paidAmount > 0) {
+      const finalMetodo = metodo_pago || 'paypal';
+      const finalReferencia = referencia || paypal_order_id || '';
       db.prepare('INSERT INTO folio_hotel (reserva_id, tipo, concepto, monto, metodo_pago, referencia, registrado_por) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
         reserva.id, 'credito', pago_tipo === 'total' ? 'Pago total (Website)' : 'Depósito (Website)',
-        paidAmount, 'paypal', paypal_order_id || '', 'Web Booking');
+        paidAmount, finalMetodo, finalReferencia, 'Web Booking');
     }
 
     // Fire webhook
@@ -249,6 +253,28 @@ router.post('/reservar', (req, res) => {
     notifications.notifyReservationConfirmed(fullReserva, hab).catch(e => console.log('Notif error:', e.message));
     notifications.notifyAdminNewBooking(fullReserva, hab).catch(e => console.log('Admin notif error:', e.message));
   } catch (e) { console.error('Public booking error:', e); err(res, 'SERVER_ERROR', 'Error creando reserva', 500); }
+});
+
+// Public upload of transaction receipt/comprobante
+router.post('/reservas/:id/comprobante', upload.single('comprobante'), validateUploadSignature, (req, res) => {
+  try {
+    if (!req.file) return err(res, 'VALIDATION_ERROR', 'Archivo requerido (JPEG, PNG, WebP, PDF, máx 10MB)');
+    const reserva = findById('reservas_hotel', req.params.id);
+    if (!reserva) return err(res, 'NOT_FOUND', 'Reserva no encontrada', 404);
+    
+    const db = getDb();
+    const tipo = 'recibo';
+    db.prepare(`INSERT INTO documentos_reserva (reserva_id, tipo, nombre_original, nombre_archivo, mime_type, tamaño, notas, subido_por)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      req.params.id, tipo, req.file.originalname, req.file.filename, req.file.mimetype, req.file.size,
+      req.body.notas || 'Comprobante subido por Huésped desde el Widget de Reservas.', 'Huésped Online'
+    );
+    const doc = db.prepare('SELECT * FROM documentos_reserva WHERE reserva_id = ? ORDER BY id DESC LIMIT 1').get(req.params.id);
+    ok(res, doc, null, 201);
+  } catch (e) {
+    console.error('Error subiendo comprobante publico:', e);
+    err(res, 'SERVER_ERROR', 'Error subiendo comprobante', 500);
+  }
 });
 
 module.exports = router;

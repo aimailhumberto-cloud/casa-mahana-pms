@@ -12,6 +12,27 @@ export default function NuevaReserva() {
   const [error, setError] = useState('');
   const [cotizacion, setCotizacion] = useState<any>(null);
 
+  // Receipt upload state
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+
+  useEffect(() => {
+    if (!receiptFile) {
+      setPreviewUrl(null);
+      return;
+    }
+    if (receiptFile.type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setPreviewUrl(reader.result as string);
+      };
+      reader.readAsDataURL(receiptFile);
+    } else {
+      setPreviewUrl(null);
+    }
+  }, [receiptFile]);
+
   // Category selection — first step
   const [categoria, setCategoria] = useState<'Estadía' | 'Pasadía'>(
     searchParams.get('categoria') as any || 'Estadía'
@@ -179,6 +200,16 @@ export default function NuevaReserva() {
               metodo_pago: depositMetodo,
               referencia: depositRef
             });
+            // Sequential receipt upload
+            if (receiptFile) {
+              const formData = new FormData();
+              formData.append('archivo', receiptFile);
+              formData.append('tipo', 'recibo');
+              formData.append('notas', `Comprobante de abono inicial registrado en la creación de la reserva por $${parseFloat(depositAmount).toFixed(2)}.`);
+              await api.post(`/hotel/reservas/${r.data.id}/documentos`, formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+              });
+            }
           }
         }
         navigate(`/reservas/${firstId}`);
@@ -195,6 +226,16 @@ export default function NuevaReserva() {
             metodo_pago: depositMetodo,
             referencia: depositRef
           });
+          // Sequential receipt upload
+          if (receiptFile) {
+            const formData = new FormData();
+            formData.append('archivo', receiptFile);
+            formData.append('tipo', 'recibo');
+            formData.append('notas', `Comprobante de abono inicial registrado en la creación de la reserva por $${parseFloat(depositAmount).toFixed(2)}.`);
+            await api.post(`/hotel/reservas/${r.data.id}/documentos`, formData, {
+              headers: { 'Content-Type': 'multipart/form-data' }
+            });
+          }
         }
         navigate(`/reservas/${r.data.id}`);
       }
@@ -433,23 +474,101 @@ export default function NuevaReserva() {
               <AlertTriangle size={16} />
               <span>Depósito sugerido: <strong>${cotizacion.deposito_sugerido.toFixed(2)}</strong> (50% del total). Puede registrar un abono ahora o dejarlo en $0.</span>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <Field label="Monto del abono">
-                <input type="number" step="0.01" min="0" value={depositAmount}
-                  onChange={e => setDepositAmount(e.target.value)} className="input" placeholder="0.00" />
-              </Field>
-              <Field label="Método de pago">
-                <select value={depositMetodo} onChange={e => setDepositMetodo(e.target.value)} className="input">
-                  <option value="efectivo">Efectivo</option>
-                  <option value="transferencia">Transferencia</option>
-                  <option value="yappy">Yappy</option>
-                  <option value="tarjeta">Tarjeta</option>
-                  <option value="paypal">PayPal</option>
-                </select>
-              </Field>
-              <Field label="Referencia">
-                <input value={depositRef} onChange={e => setDepositRef(e.target.value)} className="input" placeholder="# recibo" />
-              </Field>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-start">
+              <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Field label="Monto del abono">
+                  <input type="number" step="0.01" min="0" value={depositAmount}
+                    onChange={e => setDepositAmount(e.target.value)} className="input" placeholder="0.00" />
+                </Field>
+                <Field label="Método de pago">
+                  <select value={depositMetodo} onChange={e => setDepositMetodo(e.target.value)} className="input">
+                    <option value="efectivo">Efectivo</option>
+                    <option value="transferencia">Transferencia</option>
+                    <option value="yappy">Yappy</option>
+                    <option value="tarjeta">Tarjeta (POS)</option>
+                    <option value="paypal">PayPal</option>
+                  </select>
+                </Field>
+                <Field label="Referencia">
+                  <input value={depositRef} onChange={e => setDepositRef(e.target.value)} className="input" placeholder="# recibo" />
+                </Field>
+              </div>
+
+              {/* Upload receipt container */}
+              {(depositMetodo === 'transferencia' || depositMetodo === 'yappy' || depositMetodo === 'efectivo') && parseFloat(depositAmount) > 0 && (
+                <div className="md:col-span-4 mt-2">
+                  <label className="block text-sm font-medium text-gray-500 mb-2">📸 Comprobante de Pago (Yappy, Recibo o Transferencia)</label>
+                  <div
+                    onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
+                    onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
+                    onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(false); }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setDragActive(false);
+                      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                        const file = e.dataTransfer.files[0];
+                        const allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+                        if (allowed.includes(file.type)) {
+                          setReceiptFile(file);
+                        } else {
+                          alert('Solo se permiten imágenes JPG, PNG, WebP o archivos PDF.');
+                        }
+                      }
+                    }}
+                    className={`border-2 border-dashed rounded-xl p-5 text-center transition relative overflow-hidden flex flex-col items-center justify-center min-h-[140px] bg-gray-50 ${
+                      dragActive ? 'border-mahana-500 bg-mahana-50/20' : 'border-gray-300 hover:border-mahana-400'
+                    }`}
+                  >
+                    <input
+                      type="file"
+                      id="receipt-file-input"
+                      accept=".jpg,.jpeg,.png,.webp,.pdf"
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files[0]) {
+                          setReceiptFile(e.target.files[0]);
+                        }
+                      }}
+                    />
+                    {!receiptFile ? (
+                      <div className="flex flex-col items-center justify-center space-y-2 pointer-events-none">
+                        <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center shadow-sm text-gray-400">
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                        </div>
+                        <div>
+                          <span className="text-sm font-semibold text-mahana-600 hover:underline">Selecciona un archivo</span>
+                          <span className="text-sm text-gray-500"> o arrástralo aquí</span>
+                        </div>
+                        <p className="text-xs text-gray-400">PNG, JPG, WebP o PDF hasta 10MB</p>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center w-full space-y-3 z-20">
+                        {previewUrl ? (
+                          <div className="relative w-24 h-24 rounded-lg overflow-hidden border border-gray-200 bg-white">
+                            <img src={previewUrl} alt="Comprobante" className="w-full h-full object-cover" />
+                          </div>
+                        ) : (
+                          <div className="w-12 h-12 rounded-xl bg-white border border-gray-100 flex items-center justify-center text-red-500 shadow-sm font-bold text-xs uppercase">
+                            {receiptFile.name.split('.').pop()}
+                          </div>
+                        )}
+                        <div className="text-center">
+                          <p className="text-sm font-semibold text-gray-700 truncate max-w-xs">{receiptFile.name}</p>
+                          <p className="text-xs text-gray-400">{(receiptFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); setReceiptFile(null); }}
+                          className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-xs font-semibold transition"
+                        >
+                          Remover archivo
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </Section>
         )}
