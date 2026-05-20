@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getDb, findById, create, update } = require('../db/database');
 const { requireAuth, requireRole } = require('../auth');
-const { upload } = require('../utils/upload');
+const { upload, validateUploadSignature } = require('../utils/upload');
 
 function ok(res, data, meta, status = 200) {
   const response = { success: true, data };
@@ -138,7 +138,7 @@ router.patch('/:id', requireAuth, (req, res) => {
 });
 
 // Upload photo for room type
-router.post('/tipo/:tipo/foto', requireAuth, requireRole('admin'), upload.single('foto'), (req, res) => {
+router.post('/tipo/:tipo/foto', requireAuth, requireRole('admin'), upload.single('foto'), validateUploadSignature, (req, res) => {
   try {
     if (!req.file) return err(res, 'VALIDATION_ERROR', 'Archivo de imagen requerido');
     const tipo = req.params.tipo;

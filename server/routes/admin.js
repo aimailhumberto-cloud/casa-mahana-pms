@@ -4,7 +4,7 @@ const path = require('path');
 const { getDb } = require('../db/database');
 const { requireAuth, requireRole } = require('../auth');
 const { parseFile, detectColumns, runImport } = require('../import-cloudbeds');
-const { importUpload } = require('../utils/upload');
+const { importUpload, validateImportSignature } = require('../utils/upload');
 
 // ── Helpers ──
 function ok(res, data, meta, status = 200) {
@@ -61,7 +61,7 @@ function detectGuestColumns(fileHeaders) {
 }
 
 // Preview import (dry run — no data saved)
-router.post('/import/preview', requireAuth, requireRole('admin'), importUpload.single('archivo'), (req, res) => {
+router.post('/import/preview', requireAuth, requireRole('admin'), importUpload.single('archivo'), validateImportSignature, (req, res) => {
   try {
     if (!req.file) return err(res, 'VALIDATION_ERROR', 'Archivo CSV o XLSX requerido');
     const { headers, rows, errors: parseErrors } = parseFile(req.file.buffer, req.file.originalname);
@@ -97,7 +97,7 @@ router.post('/import/preview', requireAuth, requireRole('admin'), importUpload.s
 });
 
 // Execute import (saves data)
-router.post('/import/execute', requireAuth, requireRole('admin'), importUpload.single('archivo'), (req, res) => {
+router.post('/import/execute', requireAuth, requireRole('admin'), importUpload.single('archivo'), validateImportSignature, (req, res) => {
   try {
     if (!req.file) return err(res, 'VALIDATION_ERROR', 'Archivo CSV o XLSX requerido');
     const { headers, rows, errors: parseErrors } = parseFile(req.file.buffer, req.file.originalname);
@@ -151,7 +151,7 @@ router.get('/import/stats', requireAuth, requireRole('admin'), (req, res) => {
 });
 
 // Preview guests import
-router.post('/import/guests/preview', requireAuth, requireRole('admin'), importUpload.single('archivo'), (req, res) => {
+router.post('/import/guests/preview', requireAuth, requireRole('admin'), importUpload.single('archivo'), validateImportSignature, (req, res) => {
   try {
     if (!req.file) return err(res, 'VALIDATION_ERROR', 'Archivo requerido');
     const { headers, rows } = parseFile(req.file.buffer, req.file.originalname);
@@ -236,7 +236,7 @@ router.post('/import/guests/preview', requireAuth, requireRole('admin'), importU
 });
 
 // Execute guests import
-router.post('/import/guests/execute', requireAuth, requireRole('admin'), importUpload.single('archivo'), (req, res) => {
+router.post('/import/guests/execute', requireAuth, requireRole('admin'), importUpload.single('archivo'), validateImportSignature, (req, res) => {
   try {
     if (!req.file) return err(res, 'VALIDATION_ERROR', 'Archivo requerido');
     const { headers, rows } = parseFile(req.file.buffer, req.file.originalname);
