@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings, Bell, RefreshCw, Mail, Phone, Calendar, ShieldAlert, CheckCircle2, XCircle, ArrowRightLeft, Eye, HelpCircle, AlertCircle, ExternalLink } from 'lucide-react';
+import { Settings, Bell, RefreshCw, Mail, Phone, Calendar, ShieldAlert, CheckCircle2, XCircle, ArrowRightLeft, Eye, HelpCircle, AlertCircle, ExternalLink, Edit3, Undo, Save, ChevronLeft, Sparkles, MessageSquare, List } from 'lucide-react';
 import { api } from '../api/client';
 
 interface LogNotificacion {
@@ -30,9 +30,84 @@ interface User {
   rol: 'admin' | 'receptionist' | 'cleaning';
 }
 
+interface Plantilla {
+  codigo: string;
+  canal: string;
+  nombre: string;
+  asunto: string | null;
+  contenido: string;
+  variables: string[];
+  updated_at: string;
+}
+
+const VAR_LABELS: Record<string, string> = {
+  cliente: 'Nombre Huésped',
+  apellido: 'Apellido Huésped',
+  cliente_nombre_completo: 'Nombre Completo',
+  email: 'Email Huésped',
+  telefono: 'Teléfono Huésped',
+  whatsapp: 'WhatsApp Huésped',
+  check_in: 'Check-in (YYYY-MM-DD)',
+  check_out: 'Check-out (YYYY-MM-DD)',
+  check_in_formateado: 'F. Check-in',
+  check_out_formateado: 'F. Check-out',
+  noches: 'Cant. Noches',
+  hora_llegada: 'Hora Llegada',
+  adultos: 'Cant. Adultos',
+  menores: 'Cant. Menores',
+  mascotas: 'Cant. Mascotas',
+  habitacion: 'Habitación Asignada',
+  plan: 'Plan / Producto',
+  subtotal: 'Subtotal ($)',
+  impuesto_monto: 'Monto Impuestos',
+  monto_total: 'Total Reserva',
+  monto_pagado: 'Monto Pagado',
+  saldo_pendiente: 'Saldo Pendiente',
+  pago_monto: 'Monto Último Pago',
+  pago_concepto: 'Concepto de Pago',
+  pago_metodo: 'Método de Pago',
+  pago_referencia: 'Ref. de Pago',
+  pago_fecha: 'Fecha de Pago',
+  dias_restantes: 'Días Restantes',
+  etiqueta_dias: 'Etiqueta de Días',
+  fuente: 'Canal de Reserva',
+  notas: 'Comentarios del Huésped',
+  hotel_nombre: 'Nombre Hotel',
+  hotel_url: 'URL del Sitio Web',
+  hotel_telefono: 'Teléfono Hotel',
+  hotel_correo: 'Correo Hotel',
+  hotel_politica_cancelacion: 'Pol. Cancelación',
+  hotel_politica_reembolso: 'Pol. Reembolso',
+};
+
+const getPlantillaDesc = (codigo: string) => {
+  const descs: Record<string, string> = {
+    confirmacion: 'Enviada automáticamente al confirmar una nueva reserva con detalles de su estadía y formas de pago.',
+    pago: 'Comprobante de abono o pago enviado al registrar movimientos en el folio de la reserva.',
+    recordatorio: 'Recordatorio automático enviado unos días antes de la fecha de llegada (Check-in).',
+    estado: 'Notificación enviada al huésped cuando su reserva cambia de estado (ej: Activa, Check-in, Check-out).'
+  };
+  return descs[codigo] || 'Notificación del sistema para comunicación con el huésped.';
+};
+
+const formatWhatsAppText = (text: string) => {
+  if (!text) return '';
+  let escaped = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  
+  escaped = escaped.replace(/\*(.*?)\*/g, '<strong>$1</strong>');
+  escaped = escaped.replace(/_(.*?)_/g, '<em>$1</em>');
+  escaped = escaped.replace(/~(.*?)~/g, '<del>$1</del>');
+  escaped = escaped.replace(/```(.*?)```/g, '<code>$1</code>');
+  
+  return escaped;
+};
+
 export default function Configuracion({ user }: { user: User }) {
   const isAdmin = user?.rol === 'admin';
-  const [activeTab, setActiveTab] = useState<'notificaciones' | 'logs' | 'reversiones'>('notificaciones');
+  const [activeTab, setActiveTab] = useState<'notificaciones' | 'logs' | 'reversiones' | 'plantillas'>('notificaciones');
   
   // Tab 1: Configuración de Notificaciones
   const [smtpHost, setSmtpHost] = useState('');
@@ -47,6 +122,10 @@ export default function Configuracion({ user }: { user: User }) {
   const [waApiToken, setWaApiToken] = useState('');
   const [waFromNumber, setWaFromNumber] = useState('');
   const [waEnabled, setWaEnabled] = useState(false);
+  
+  const [hotelTelefono, setHotelTelefono] = useState('');
+  const [hotelPoliticaCancelacion, setHotelPoliticaCancelacion] = useState('');
+  const [hotelPoliticaReembolso, setHotelPoliticaReembolso] = useState('');
   
   const [loadingConfig, setLoadingConfig] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
@@ -72,6 +151,18 @@ export default function Configuracion({ user }: { user: User }) {
   const [reversionesPage, setReversionesPage] = useState(1);
   const [reversionesMeta, setReversionesMeta] = useState<any>({});
 
+  // Tab 4: Plantillas de Mensajes
+  const [plantillas, setPlantillas] = useState<Plantilla[]>([]);
+  const [loadingPlantillas, setLoadingPlantillas] = useState(false);
+  const [selectedPlantilla, setSelectedPlantilla] = useState<Plantilla | null>(null);
+  const [editAsunto, setEditAsunto] = useState('');
+  const [editContenido, setEditContenido] = useState('');
+  const [previewAsunto, setPreviewAsunto] = useState('');
+  const [previewContenido, setPreviewContenido] = useState('');
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [savingPlantilla, setSavingPlantilla] = useState(false);
+  const [lastFocusedInput, setLastFocusedInput] = useState<'asunto' | 'contenido'>('contenido');
+
   // 1. Load System Config
   const loadConfig = () => {
     setLoadingConfig(true);
@@ -91,6 +182,10 @@ export default function Configuracion({ user }: { user: User }) {
           setWaApiToken(c.wa_api_token || '');
           setWaFromNumber(c.wa_from_number || '');
           setWaEnabled(c.wa_enabled === 1);
+          
+          setHotelTelefono(c.hotel_telefono || '');
+          setHotelPoliticaCancelacion(c.hotel_politica_cancelacion || '');
+          setHotelPoliticaReembolso(c.hotel_politica_reembolso || '');
         }
       })
       .catch(() => {})
@@ -133,6 +228,113 @@ export default function Configuracion({ user }: { user: User }) {
       .finally(() => setLoadingReversiones(false));
   };
 
+  // 4. Load Notification Templates
+  const loadPlantillas = () => {
+    setLoadingPlantillas(true);
+    api.get('/admin/notificaciones/plantillas')
+      .then(r => {
+        setPlantillas(r.data || []);
+      })
+      .catch(err => {
+        console.error('Error fetching templates:', err);
+      })
+      .finally(() => setLoadingPlantillas(false));
+  };
+
+  // Preview debouncer hook
+  useEffect(() => {
+    if (!selectedPlantilla) return;
+    
+    setLoadingPreview(true);
+    const delayDebounceFn = setTimeout(() => {
+      api.post(`/admin/notificaciones/plantillas/${selectedPlantilla.codigo}/${selectedPlantilla.canal}/preview`, {
+        asuntoCustom: editAsunto,
+        contenidoCustom: editContenido
+      })
+        .then(r => {
+          setPreviewAsunto(r.data?.asunto || '');
+          setPreviewContenido(r.data?.contenido || '');
+        })
+        .catch(err => {
+          console.error('Error rendering preview:', err);
+        })
+        .finally(() => setLoadingPreview(false));
+    }, 400);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [editAsunto, editContenido, selectedPlantilla]);
+
+  const handleSavePlantilla = async () => {
+    if (!selectedPlantilla || !isAdmin) return;
+    setSavingPlantilla(true);
+    try {
+      await api.put(`/admin/notificaciones/plantillas/${selectedPlantilla.codigo}/${selectedPlantilla.canal}`, {
+        asunto: selectedPlantilla.canal === 'email' ? editAsunto : null,
+        contenido: editContenido
+      });
+      alert('Plantilla guardada exitosamente.');
+      loadPlantillas();
+      setSelectedPlantilla(null); // return to list
+    } catch (err: any) {
+      alert(err.response?.data?.error?.message || 'Error al guardar la plantilla');
+    } finally {
+      setSavingPlantilla(false);
+    }
+  };
+
+  const handleRestaurarPlantilla = async (codigo: string, canal: string) => {
+    if (!isAdmin) return;
+    if (!confirm('¿Está seguro de que desea restaurar esta plantilla a sus valores predeterminados de fábrica? Perderá todos los cambios personalizados.')) {
+      return;
+    }
+    try {
+      const res = await api.post(`/admin/notificaciones/plantillas/${codigo}/${canal}/restaurar`);
+      alert('Plantilla restaurada exitosamente.');
+      loadPlantillas();
+      if (selectedPlantilla && selectedPlantilla.codigo === codigo && selectedPlantilla.canal === canal) {
+        setEditAsunto(res.data?.asunto || '');
+        setEditContenido(res.data?.contenido || '');
+      }
+    } catch (err: any) {
+      alert(err.response?.data?.error?.message || 'Error al restaurar la plantilla');
+    }
+  };
+
+  const insertVariable = (variable: string) => {
+    const placeholder = `{{${variable}}}`;
+    if (lastFocusedInput === 'asunto' && selectedPlantilla?.canal === 'email') {
+      const inputEl = document.getElementById('edit-asunto') as HTMLInputElement;
+      if (inputEl) {
+        const start = inputEl.selectionStart || 0;
+        const end = inputEl.selectionEnd || 0;
+        const text = editAsunto;
+        const newText = text.substring(0, start) + placeholder + text.substring(end);
+        setEditAsunto(newText);
+        setTimeout(() => {
+          inputEl.focus();
+          inputEl.setSelectionRange(start + placeholder.length, start + placeholder.length);
+        }, 0);
+      } else {
+        setEditAsunto(prev => prev + placeholder);
+      }
+    } else {
+      const txtEl = document.getElementById('edit-contenido') as HTMLTextAreaElement;
+      if (txtEl) {
+        const start = txtEl.selectionStart || 0;
+        const end = txtEl.selectionEnd || 0;
+        const text = editContenido;
+        const newText = text.substring(0, start) + placeholder + text.substring(end);
+        setEditContenido(newText);
+        setTimeout(() => {
+          txtEl.focus();
+          txtEl.setSelectionRange(start + placeholder.length, start + placeholder.length);
+        }, 0);
+      } else {
+        setEditContenido(prev => prev + placeholder);
+      }
+    }
+  };
+
   useEffect(() => {
     if (activeTab === 'notificaciones') {
       loadConfig();
@@ -140,6 +342,8 @@ export default function Configuracion({ user }: { user: User }) {
       loadLogs();
     } else if (activeTab === 'reversiones') {
       loadReversiones();
+    } else if (activeTab === 'plantillas') {
+      loadPlantillas();
     }
   }, [activeTab, logsPage, reversionesPage, filterType, filterChannel]);
 
@@ -163,7 +367,10 @@ export default function Configuracion({ user }: { user: User }) {
         wa_api_url: waApiUrl || null,
         wa_api_token: waApiToken || null,
         wa_from_number: waFromNumber || null,
-        wa_enabled: waEnabled ? 1 : 0
+        wa_enabled: waEnabled ? 1 : 0,
+        hotel_telefono: hotelTelefono || null,
+        hotel_politica_cancelacion: hotelPoliticaCancelacion || null,
+        hotel_politica_reembolso: hotelPoliticaReembolso || null
       };
       
       await api.put('/admin/configuracion/sistema', payload);
@@ -284,6 +491,14 @@ export default function Configuracion({ user }: { user: User }) {
             className={`px-5 py-3 text-sm font-semibold border-b-2 transition flex items-center gap-2 ${activeTab === 'reversiones' ? 'border-mahana-500 text-mahana-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}
           >
             <ArrowRightLeft size={16} /> Registro de Reversiones
+          </button>
+        )}
+        {isAdmin && (
+          <button
+            onClick={() => { setActiveTab('plantillas'); }}
+            className={`px-5 py-3 text-sm font-semibold border-b-2 transition flex items-center gap-2 ${activeTab === 'plantillas' ? 'border-mahana-500 text-mahana-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}
+          >
+            <Edit3 size={16} /> Plantillas de Mensajes
           </button>
         )}
       </div>
@@ -492,6 +707,67 @@ export default function Configuracion({ user }: { user: User }) {
                       className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm disabled:bg-gray-50 disabled:text-gray-400"
                       placeholder="EAAGb..."
                     />
+                  </div>
+                </div>
+              </div>
+
+              {/* Property Info and Policies */}
+              <div className="space-y-4 pt-4 border-t border-gray-100">
+                <div className="border-b border-gray-100 pb-2">
+                  <h2 className="font-bold text-gray-800 text-base flex items-center gap-2">
+                    <Sparkles size={18} className="text-mahana-600" /> Información y Políticas de la Propiedad
+                  </h2>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Establezca la información de contacto y las políticas legales que se inyectarán en los correos y mensajes de WhatsApp.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1 font-sans">
+                      Teléfono de Atención (WhatsApp)
+                    </label>
+                    <input
+                      type="text"
+                      disabled={!isAdmin}
+                      value={hotelTelefono}
+                      onChange={e => setHotelTelefono(e.target.value)}
+                      className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm disabled:bg-gray-50 disabled:text-gray-400 font-sans"
+                      placeholder="+507 6000-0000"
+                    />
+                    <p className="text-[10px] text-gray-400 mt-1">Número utilizado para el enlace rápido de atención al cliente y pie de página de correos.</p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1 font-sans">
+                        Política de Cancelación
+                      </label>
+                      <textarea
+                        rows={4}
+                        disabled={!isAdmin}
+                        value={hotelPoliticaCancelacion}
+                        onChange={e => setHotelPoliticaCancelacion(e.target.value)}
+                        className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm disabled:bg-gray-50 disabled:text-gray-400 font-sans leading-relaxed"
+                        placeholder="Describa la política de cancelación..."
+                      />
+                      <p className="text-[10px] text-gray-400 mt-1">Placeholder disponible: <code className="bg-gray-100 px-1 py-0.5 rounded text-gray-600 font-mono text-[9px] font-semibold">{"{{hotel_politica_cancelacion}}"}</code></p>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1 font-sans">
+                        Política de Reembolso
+                      </label>
+                      <textarea
+                        rows={4}
+                        disabled={!isAdmin}
+                        value={hotelPoliticaReembolso}
+                        onChange={e => setHotelPoliticaReembolso(e.target.value)}
+                        className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm disabled:bg-gray-50 disabled:text-gray-400 font-sans leading-relaxed"
+                        placeholder="Describa la política de reembolso..."
+                      />
+                      <p className="text-[10px] text-gray-400 mt-1">Placeholder disponible: <code className="bg-gray-100 px-1 py-0.5 rounded text-gray-600 font-mono text-[9px] font-semibold">{"{{hotel_politica_reembolso}}"}</code></p>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -781,6 +1057,438 @@ export default function Configuracion({ user }: { user: User }) {
                 >
                   Siguiente
                 </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab 4 Content: Plantillas de Mensajes */}
+      {activeTab === 'plantillas' && isAdmin && (
+        <div className="space-y-6">
+          {!selectedPlantilla ? (
+            // Vista 1: Lista / Cuadrícula de Plantillas
+            <div className="space-y-4">
+              <div className="bg-white p-4 border border-gray-200 rounded-2xl flex flex-wrap gap-4 items-center justify-between shadow-sm">
+                <div>
+                  <h2 className="font-bold text-gray-800 text-lg flex items-center gap-2">
+                    <List size={20} className="text-mahana-600" /> Plantillas de Mensajería
+                  </h2>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Gestione y edite el asunto, contenido y variables de los correos electrónicos y mensajes de WhatsApp.
+                  </p>
+                </div>
+                <button
+                  onClick={loadPlantillas}
+                  disabled={loadingPlantillas}
+                  className="px-4 py-2 text-sm font-semibold border border-gray-200 rounded-xl hover:bg-gray-50 transition flex items-center gap-2 text-gray-600 disabled:opacity-50 font-sans"
+                >
+                  <RefreshCw size={14} className={loadingPlantillas ? 'animate-spin' : ''} /> Refrescar
+                </button>
+              </div>
+
+              {loadingPlantillas ? (
+                <div className="bg-white border border-gray-200 rounded-2xl p-12 text-center text-gray-400 animate-pulse font-sans">
+                  Cargando plantillas de mensajes...
+                </div>
+              ) : plantillas.length === 0 ? (
+                <div className="bg-white border border-gray-200 rounded-2xl p-12 text-center text-gray-400 font-sans">
+                  No se encontraron plantillas registradas.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {plantillas.map(plantilla => {
+                    const isEmail = plantilla.canal === 'email';
+                    return (
+                      <div
+                        key={`${plantilla.codigo}-${plantilla.canal}`}
+                        className="bg-white border border-gray-200 rounded-2xl shadow-sm hover:shadow-md transition duration-200 overflow-hidden flex flex-col justify-between"
+                      >
+                        <div className="p-6 space-y-4">
+                          {/* Card Header */}
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider font-mono">
+                                Código: {plantilla.codigo}
+                              </span>
+                              <h3 className="font-bold text-gray-800 text-base mt-0.5 font-sans">
+                                {plantilla.nombre}
+                              </h3>
+                            </div>
+                            
+                            {isEmail ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-100 font-bold text-xs font-sans">
+                                <Mail size={12} /> Email
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-green-50 text-green-700 border border-green-100 font-bold text-xs font-sans">
+                                <Phone size={12} /> WhatsApp
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Description */}
+                          <p className="text-xs text-gray-600 leading-relaxed min-h-[40px] font-sans">
+                            {getPlantillaDesc(plantilla.codigo)}
+                          </p>
+
+                          {/* Subject / Preview line */}
+                          {isEmail && plantilla.asunto && (
+                            <div className="text-xs bg-gray-50 border border-gray-150 p-2.5 rounded-lg">
+                              <span className="font-bold text-gray-500 uppercase tracking-wider text-[9px] block font-sans">
+                                Asunto por defecto:
+                              </span>
+                              <span className="text-gray-700 font-medium truncate block mt-0.5 font-sans">
+                                {plantilla.asunto}
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Variables badge summary */}
+                          <div className="space-y-1.5">
+                            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider font-mono block">
+                              Variables Disponibles:
+                            </span>
+                            <div className="flex flex-wrap gap-1 max-h-[50px] overflow-hidden">
+                              {plantilla.variables.map(v => (
+                                <span
+                                  key={v}
+                                  className="text-[9px] bg-gray-100 border border-gray-200 text-gray-600 px-1.5 py-0.5 rounded font-mono"
+                                  title={VAR_LABELS[v] || v}
+                                >
+                                  {v}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Card Actions */}
+                        <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
+                          <span className="text-[10px] text-gray-400 font-medium font-sans">
+                            Actualizado: {formatDate(plantilla.updated_at)}
+                          </span>
+                          
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => {
+                                setSelectedPlantilla(plantilla);
+                                setEditAsunto(plantilla.asunto || '');
+                                setEditContenido(plantilla.contenido || '');
+                              }}
+                              className="px-3.5 py-1.5 bg-white border border-gray-200 text-mahana-600 font-semibold rounded-xl text-xs hover:bg-mahana-50 hover:border-mahana-200 hover:shadow-xs transition flex items-center gap-1 font-sans"
+                            >
+                              <Edit3 size={12} /> Editar
+                            </button>
+                            <button
+                              onClick={() => handleRestaurarPlantilla(plantilla.codigo, plantilla.canal)}
+                              className="p-1.5 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg border border-transparent hover:border-amber-100 transition"
+                              title="Restaurar valores de fábrica"
+                            >
+                              <Undo size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ) : (
+            // Vista 2: Editor Split-Screen Completo (Doble Panel)
+            <div className="space-y-4">
+              {/* Editor Header Bar */}
+              <div className="bg-white p-4 border border-gray-200 rounded-2xl flex flex-wrap gap-4 items-center justify-between shadow-sm">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setSelectedPlantilla(null)}
+                    className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-xl transition"
+                    title="Volver a la lista"
+                  >
+                    <ChevronLeft size={20} />
+                  </button>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="font-bold text-gray-800 text-lg font-sans">
+                        {selectedPlantilla.nombre}
+                      </h2>
+                      {selectedPlantilla.canal === 'email' ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-100 font-bold text-xs font-sans">
+                          <Mail size={10} /> Email
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-100 font-bold text-xs font-sans">
+                          <Phone size={10} /> WhatsApp
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-500 mt-0.5 font-sans">
+                      Personalice el contenido dinámico de esta notificación para mejorar la comunicación.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleRestaurarPlantilla(selectedPlantilla.codigo, selectedPlantilla.canal)}
+                    className="px-4 py-2 border border-gray-200 text-gray-600 font-semibold rounded-xl text-xs hover:bg-gray-50 transition flex items-center gap-1.5 font-sans"
+                  >
+                    <Undo size={14} /> Restaurar Fábrica
+                  </button>
+                  <button
+                    onClick={handleSavePlantilla}
+                    disabled={savingPlantilla}
+                    className="px-4 py-2 bg-gradient-to-r from-mahana-500 to-mahana-600 text-white font-semibold rounded-xl text-xs hover:shadow-lg transform hover:-translate-y-0.5 transition flex items-center gap-1.5 disabled:opacity-50 font-sans"
+                  >
+                    <Save size={14} /> {savingPlantilla ? 'Guardando...' : 'Guardar Cambios'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Split Screen Workspace */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                
+                {/* Panel Izquierdo: Editor de Contenido (7 columnas) */}
+                <div className="lg:col-span-7 bg-white border border-gray-200 rounded-2xl p-6 space-y-5 shadow-sm">
+                  <div className="border-b border-gray-100 pb-2">
+                    <h3 className="font-bold text-gray-800 text-sm flex items-center gap-1.5 font-sans">
+                      <Edit3 size={16} className="text-mahana-600" /> Editor de Texto
+                    </h3>
+                  </div>
+
+                  <div className="space-y-4">
+                    {/* Asunto (Solo si es Email) */}
+                    {selectedPlantilla.canal === 'email' && (
+                      <div>
+                        <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5 font-sans">
+                          Asunto del Correo
+                        </label>
+                        <input
+                          id="edit-asunto"
+                          type="text"
+                          value={editAsunto}
+                          onChange={e => setEditAsunto(e.target.value)}
+                          onFocus={() => setLastFocusedInput('asunto')}
+                          className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm font-sans"
+                          placeholder="Ingrese el asunto del correo..."
+                        />
+                      </div>
+                    )}
+
+                    {/* Mensaje / Cuerpo */}
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5 font-sans">
+                        Cuerpo del Mensaje {selectedPlantilla.canal === 'whatsapp' ? '(WhatsApp)' : '(HTML)'}
+                      </label>
+                      <textarea
+                        id="edit-contenido"
+                        rows={selectedPlantilla.canal === 'whatsapp' ? 10 : 14}
+                        value={editContenido}
+                        onChange={e => setEditContenido(e.target.value)}
+                        onFocus={() => setLastFocusedInput('contenido')}
+                        className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm font-mono leading-relaxed resize-y"
+                        placeholder="Escriba el contenido del mensaje utilizando etiquetas dinámicas..."
+                      />
+                    </div>
+                  </div>
+
+                  {/* Dynamic Variable Badges Grid */}
+                  <div className="space-y-3 bg-gray-50/70 border border-gray-150 p-4 rounded-xl">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-gray-700 flex items-center gap-1 font-sans">
+                        <Sparkles size={14} className="text-amber-500" /> Etiquetas Dinámicas Clicables
+                      </span>
+                      <span className="text-[10px] text-gray-400 font-semibold font-sans">
+                        Último foco: {lastFocusedInput === 'asunto' ? 'Asunto' : 'Cuerpo'}
+                      </span>
+                    </div>
+                    
+                    <p className="text-[11px] text-gray-500 leading-normal font-sans">
+                      Posicione el cursor en el texto de arriba y haga clic en cualquiera de las siguientes etiquetas para insertarla automáticamente:
+                    </p>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1 max-h-[160px] overflow-y-auto pr-1">
+                      {selectedPlantilla.variables.map(v => (
+                        <button
+                          key={v}
+                          type="button"
+                          onClick={() => insertVariable(v)}
+                          className="p-2 text-left text-xs bg-white border border-gray-200 rounded-xl hover:bg-mahana-50 hover:border-mahana-300 transition-all font-medium text-gray-700 flex flex-col justify-center shadow-xs"
+                          title={`Insertar {{${v}}}`}
+                        >
+                          <span className="font-mono text-mahana-600 text-[10px] font-bold">{"{{" + v + "}}"}</span>
+                          <span className="text-[9px] text-gray-400 truncate mt-0.5 font-sans">{VAR_LABELS[v] || v}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Panel Buttons */}
+                  <div className="flex items-center justify-end gap-3 pt-3 border-t border-gray-100 font-sans">
+                    <button
+                      onClick={() => setSelectedPlantilla(null)}
+                      className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl text-xs transition"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={handleSavePlantilla}
+                      disabled={savingPlantilla}
+                      className="px-5 py-2 bg-gradient-to-r from-mahana-500 to-mahana-600 text-white font-semibold rounded-xl text-xs hover:shadow-lg transform hover:-translate-y-0.5 transition flex items-center gap-1 disabled:opacity-50"
+                    >
+                      <Save size={12} /> {savingPlantilla ? 'Guardando...' : 'Guardar Cambios'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Panel Derecho: Previsualización en Tiempo Real (5 columnas) */}
+                <div className="lg:col-span-5 bg-white border border-gray-200 rounded-2xl p-6 space-y-4 shadow-sm flex flex-col min-h-[480px]">
+                  <div className="border-b border-gray-100 pb-2 flex items-center justify-between shrink-0 font-sans">
+                    <h3 className="font-bold text-gray-800 text-sm flex items-center gap-1.5">
+                      <Eye size={16} className="text-ocean-600" /> Previsualización en Vivo
+                    </h3>
+                    
+                    {loadingPreview && (
+                      <span className="text-[10px] text-mahana-500 font-semibold flex items-center gap-1 animate-pulse">
+                        <RefreshCw size={10} className="animate-spin" /> Renderizando...
+                      </span>
+                    )}
+                  </div>
+
+                  {selectedPlantilla.canal === 'email' ? (
+                    // Correo electrónico: Mockup de cliente de correo
+                    <div className="flex-1 flex flex-col border border-gray-200 rounded-2xl overflow-hidden shadow-inner bg-gray-50">
+                      {/* Browser Chrome Header */}
+                      <div className="bg-gray-150 px-4 py-3 flex items-center gap-2 border-b border-gray-200 shrink-0 select-none">
+                        <div className="flex gap-1.5 shrink-0">
+                          <span className="w-2.5 h-2.5 rounded-full bg-red-400 block"></span>
+                          <span className="w-2.5 h-2.5 rounded-full bg-amber-400 block"></span>
+                          <span className="w-2.5 h-2.5 rounded-full bg-green-400 block"></span>
+                        </div>
+                        <div className="w-full bg-white/70 border border-gray-200 rounded-lg text-[10px] text-gray-400 px-3 py-1 text-center font-mono truncate">
+                          https://casamahana.com/email-preview
+                        </div>
+                      </div>
+
+                      {/* Email Header Details */}
+                      <div className="p-4 bg-white border-b border-gray-150 text-xs space-y-1.5 shrink-0 font-sans">
+                        <div>
+                          <span className="font-bold text-gray-400 uppercase text-[9px] w-12 inline-block">De:</span>
+                          <span className="text-gray-700 font-medium">Casa Mahana &lt;reservas@casamahana.com&gt;</span>
+                        </div>
+                        <div>
+                          <span className="font-bold text-gray-400 uppercase text-[9px] w-12 inline-block">Para:</span>
+                          <span className="text-gray-700 font-medium">juan.perez@example.com</span>
+                        </div>
+                        <div className="pt-1.5 border-t border-gray-50 mt-1">
+                          <span className="font-bold text-gray-400 uppercase text-[9px] w-12 inline-block">Asunto:</span>
+                          <span className="text-gray-800 font-bold">{previewAsunto || '(Sin asunto)'}</span>
+                        </div>
+                      </div>
+
+                      {/* Live rendered email iframe */}
+                      <div className="flex-1 min-h-[300px] relative bg-white">
+                        {loadingPreview && (
+                          <div className="absolute inset-0 bg-white/75 flex items-center justify-center z-10 transition-opacity">
+                            <RefreshCw size={24} className="text-mahana-500 animate-spin" />
+                          </div>
+                        )}
+                        <iframe
+                          title="Previsualización de Correo"
+                          srcDoc={previewContenido}
+                          className="w-full h-full border-none bg-white"
+                          sandbox="allow-popups"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    // WhatsApp: Mockup de pantalla de chat de smartphone extremadamente premium
+                    <div className="flex-1 flex items-center justify-center py-2 bg-gray-50 rounded-2xl border border-gray-150 shadow-inner">
+                      {/* Teléfono Inteligente Mockup Frame */}
+                      <div className="border-[8px] border-gray-800 rounded-[2.5rem] bg-gray-800 overflow-hidden shadow-xl w-full max-w-[310px] aspect-[9/18.5] flex flex-col relative">
+                        {/* Notch */}
+                        <div className="absolute top-0 left-1/2 transform -translate-x-1/2 h-4 w-28 bg-gray-800 rounded-b-xl z-20 flex items-center justify-center">
+                          <div className="w-1.5 h-1.5 rounded-full bg-gray-900 absolute left-8"></div>
+                          <div className="w-8 h-1 bg-gray-900 rounded-full"></div>
+                        </div>
+
+                        {/* WhatsApp Header Panel */}
+                        <div className="bg-[#075e54] text-white px-4 pt-6 pb-2.5 flex items-center justify-between shrink-0 select-none font-sans">
+                          <div className="flex items-center gap-2">
+                            <span className="text-white text-xs">←</span>
+                            <div className="w-7 h-7 rounded-full bg-[#128c7e] flex items-center justify-center font-bold text-xs border border-white/20">
+                              CM
+                            </div>
+                            <div>
+                              <h4 className="text-[11px] font-bold leading-tight font-sans">Casa Mahana - Recepción</h4>
+                              <span className="text-[9px] text-green-300 font-medium flex items-center gap-0.5 leading-none font-sans">
+                                <span className="w-1.5 h-1.5 bg-green-400 rounded-full block animate-pulse"></span>
+                                en línea
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 text-white/80">
+                            <span className="text-xs">📞</span>
+                            <span className="text-xs">⋮</span>
+                          </div>
+                        </div>
+
+                        {/* WhatsApp Chat Body with textured background */}
+                        <div
+                          className="flex-1 p-3 overflow-y-auto relative flex flex-col justify-between"
+                          style={{
+                            backgroundColor: '#efeae2',
+                            backgroundImage: 'url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png")',
+                            backgroundRepeat: 'repeat',
+                            backgroundSize: '150px'
+                          }}
+                        >
+                          {loadingPreview && (
+                            <div className="absolute inset-0 bg-white/30 flex items-center justify-center z-10">
+                              <RefreshCw size={24} className="text-green-600 animate-spin" />
+                            </div>
+                          )}
+                          
+                          <div className="flex flex-col space-y-3">
+                            {/* Date bubble */}
+                            <div className="self-center bg-white/70 border border-gray-200/40 text-[9px] text-gray-500 font-bold uppercase px-2 py-0.5 rounded shadow-xs select-none font-sans">
+                              Hoy
+                            </div>
+
+                            {/* WhatsApp Message Bubble */}
+                            <div className="bg-[#d9fdd3] text-gray-800 p-3 rounded-lg shadow-xs max-w-[88%] self-start relative border border-[#e1f3d4] rounded-tl-none animate-fadeIn flex flex-col">
+                              {/* Triangle Tail */}
+                              <div className="absolute top-0 -left-1.5 w-0 h-0 border-t-[8px] border-t-[#d9fdd3] border-l-[8px] border-l-transparent"></div>
+                              
+                              {/* Rendered Text with dynamic custom HTML formatting */}
+                              <div
+                                className="text-[11px] whitespace-pre-wrap font-sans leading-relaxed text-gray-800 break-words"
+                                dangerouslySetInnerHTML={{ __html: formatWhatsAppText(previewContenido) }}
+                              />
+                              
+                              <div className="flex items-center justify-end gap-0.5 self-end mt-1 mt-auto shrink-0 select-none font-sans">
+                                <span className="text-[8px] text-gray-400 font-medium">17:11</span>
+                                <span className="text-[10px] text-blue-500 font-bold leading-none">✓✓</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Bottom mock input bar */}
+                          <div className="bg-white/90 backdrop-blur-xs p-1 rounded-full flex items-center gap-1 mt-4 border border-gray-200 shrink-0 select-none shadow-xs">
+                            <span className="text-xs pl-2 text-gray-400">😊</span>
+                            <span className="text-[10px] text-gray-400 flex-1 font-sans">Mensaje</span>
+                            <span className="text-xs text-gray-400 pr-2">📎</span>
+                            <div className="w-6 h-6 rounded-full bg-[#00a884] flex items-center justify-center text-white text-xs shadow-sm">
+                              🎤
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
               </div>
             </div>
           )}

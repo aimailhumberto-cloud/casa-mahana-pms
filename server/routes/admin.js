@@ -6,6 +6,7 @@ const { requireAuth, requireRole } = require('../auth');
 const { parseFile, detectColumns, runImport } = require('../import-cloudbeds');
 const { importUpload, validateImportSignature } = require('../utils/upload');
 const { calcNoches, calcReservation, calcReservationWithRates } = require('../utils/calculations');
+const { baseTemplate } = require('../notifications');
 
 // ── Helpers ──
 function ok(res, data, meta, status = 200) {
@@ -542,7 +543,8 @@ router.put('/configuracion/sistema', requireAuth, requireRole('admin'), (req, re
     const allowed = [
       'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'smtp_from',
       'admin_email', 'notifications_enabled', 'wa_api_url', 'wa_api_token',
-      'wa_from_number', 'wa_enabled'
+      'wa_from_number', 'wa_enabled',
+      'hotel_telefono', 'hotel_politica_cancelacion', 'hotel_politica_reembolso'
     ];
     const updates = [];
     const params = [];
@@ -847,6 +849,438 @@ router.post('/solicitudes-modificacion/:id/procesar', requireAuth, requireRole('
   } catch (error) {
     console.error('Error procesando la solicitud:', error);
     return err(res, 'TRANSACTION_FAILED', error.message, 500);
+  }
+});
+
+// ── NOTIFICATION TEMPLATES ROUTES ──
+
+// Define default templates structure for recovery/restore purposes
+const DEFAULT_TEMPLATES = {
+  confirmacion: {
+    email: {
+      asunto: '✅ Reserva Confirmada #{{id}} — {{hotel_nombre}}',
+      contenido: `<h2>✅ ¡Reserva Confirmada!</h2>
+<p style="color:#4a5568;">Hola <strong>{{cliente_nombre_completo}}</strong>, tu reserva ha sido confirmada. ¡Te esperamos!</p>
+
+<table class="detail-table">
+  <tr><td>📋 Reserva</td><td>#{{id}}</td></tr>
+  <tr><td>📅 Check-in</td><td><strong>{{check_in_formateado}}</strong></td></tr>
+  <tr><td>📅 Check-out</td><td><strong>{{check_out_formateado}}</strong></td></tr>
+  <tr><td>🌙 Noches</td><td>{{noches}}</td></tr>
+  <tr><td>🏠 Habitación</td><td>{{habitacion}}</td></tr>
+  <tr><td>🍽️ Plan</td><td>{{plan}}</td></tr>
+  <tr><td>👥 Huéspedes</td><td>{{adultos}} adultos, {{menores}} menores</td></tr>
+</table>
+
+<div class="highlight">
+  <div class="amount">{{monto_total}}</div>
+  <div class="label">Total de tu estadía</div>
+  <div style="margin-top:8px;font-size:13px;color:#22863a;">✓ Pagado: {{monto_pagado}} | Saldo: {{saldo_pendiente}}</div>
+</div>
+
+<p style="color:#718096;font-size:14px;">
+  <strong>Check-in:</strong> A partir de las 2:00 PM<br>
+  <strong>Check-out:</strong> Antes de las 12:00 PM<br>
+  <strong>Dirección:</strong> Playa El Palmar, Chame, Panamá
+</p>
+
+<p style="text-align:center;">
+  <a href="{{hotel_url}}" class="btn">Ver Detalles</a>
+</p>
+
+<p style="color:#a0aec0;font-size:12px;">Si necesitas hacer cambios, contáctanos por WhatsApp al {{hotel_telefono}} o responde a este correo.</p>`
+    },
+    whatsapp: {
+      asunto: null,
+      contenido: `✅ *Reserva Confirmada* — {{hotel_nombre}}
+
+Hola {{cliente_nombre_completo}} 👋
+
+Tu reserva ha sido confirmada:
+📋 #{{id}}
+📅 {{check_in}} → {{check_out}} ({{noches}} noches)
+🏠 {{habitacion}}
+💰 Total: {{monto_total}}
+
+Check-in: 2:00 PM
+Check-out: 12:00 PM
+
+¡Te esperamos! 🌊🌴`
+    }
+  },
+  bienvenida: {
+    email: {
+      asunto: '🎉 ¡Bienvenido! Reserva Hospedado #{{id}} — {{hotel_nombre}}',
+      contenido: `<h2>🎉 ¡Bienvenido a {{hotel_nombre}}!</h2>
+<p style="color:#4a5568;">Hola <strong>{{cliente_nombre_completo}}</strong>, tu habitación <strong>{{habitacion}}</strong> está lista. ¡Esperamos que disfrutes tu estadía con nosotros!</p>
+
+<table class="detail-table">
+  <tr><td>📋 Reserva</td><td>#{{id}}</td></tr>
+  <tr><td>📅 Check-in</td><td>{{check_in_formateado}}</td></tr>
+  <tr><td>📅 Check-out</td><td>{{check_out_formateado}}</td></tr>
+  <tr><td>🏠 Habitación</td><td>{{habitacion}}</td></tr>
+</table>
+
+<div class="highlight">
+  <div class="label">Información Útil:</div>
+  <p style="margin:8px 0 0;font-size:14px;color:#4a5568;">
+    📶 <strong>WiFi:</strong> Casa Mahana Guest<br>
+    🍽️ <strong>Restaurante:</strong> 7:00 AM - 10:00 PM<br>
+    🌊 ¡Disfruta de la playa y la naturaleza!
+  </p>
+</div>`
+    },
+    whatsapp: {
+      asunto: null,
+      contenido: `🎉 *¡Bienvenido!* — {{hotel_nombre}}
+
+Hola {{cliente_nombre_completo}}, ¡tu check-in ha sido registrado con éxito!
+
+📋 Reserva #{{id}}
+🏠 Habitación: {{habitacion}}
+📅 Check-out: {{check_out}} (12:00 PM)
+
+📶 WiFi: Casa Mahana Guest
+🍽️ Restaurante: 7:00 AM - 10:00 PM
+
+🎉 ¡Disfruta tu estadía con nosotros! 🌴🌊`
+    }
+  },
+  checkout: {
+    email: {
+      asunto: '👋 ¡Gracias por tu visita! Reserva Check-Out #{{id}} — {{hotel_nombre}}',
+      contenido: `<h2>👋 ¡Gracias por hospedarte con nosotros!</h2>
+<p style="color:#4a5568;">Hola <strong>{{cliente_nombre_completo}}</strong>, esperamos que hayas tenido un excelente viaje y que hayas disfrutado tu estadía en {{hotel_nombre}}.</p>
+
+<table class="detail-table">
+  <tr><td>📋 Reserva</td><td>#{{id}}</td></tr>
+  <tr><td>🏠 Habitación</td><td>{{habitacion}}</td></tr>
+  <tr><td>📅 Check-out</td><td>{{check_out_formateado}}</td></tr>
+</table>
+
+<div class="highlight">
+  <div class="amount">{{monto_total}}</div>
+  <div class="label">Total de tu estadía</div>
+  <div style="margin-top:8px;font-size:13px;color:#22863a;">✓ Pagado: {{monto_pagado}} | Saldo: {{saldo_pendiente}}</div>
+</div>
+
+<p style="color:#4a5568;font-size:14px;">¿Disfrutaste tu estadía? Tu opinión es muy valiosa para nosotros. Por favor déjanos una reseña en Google o TripAdvisor. ⭐⭐⭐⭐⭐</p>
+<p style="color:#718096;font-size:13px;">¡Esperamos verte pronto de regreso en nuestro pequeño paraíso!</p>`
+    },
+    whatsapp: {
+      asunto: null,
+      contenido: `👋 *¡Gracias por tu visita!* — {{hotel_nombre}}
+
+Hola {{cliente_nombre_completo}}, tu salida ha sido registrada con éxito.
+
+📋 Reserva #{{id}}
+🏠 Habitación: {{habitacion}}
+💰 Total: {{monto_total}}
+✅ Pagado: {{monto_pagado}}
+⚠️ Saldo pendiente: {{saldo_pendiente}}
+
+🙏 ¡Muchas gracias por hospedarte con nosotros! Esperamos verte de nuevo muy pronto. ¡Buen viaje de regreso! 🌊🌴`
+    }
+  },
+  pago: {
+    email: {
+      asunto: '💳 Pago Registrado con Éxito — Reserva #{{id}}',
+      contenido: `<h2>💳 Pago Registrado con Éxito</h2>
+<p style="color:#4a5568;">Hola <strong>{{cliente_nombre_completo}}</strong>, hemos recibido y registrado tu abono a tu estadía en {{hotel_nombre}}.</p>
+
+<div class="highlight">
+  <div class="amount" style="color:#22863a;">+ {{pago_monto}}</div>
+  <div class="label">{{pago_concepto}} — {{pago_metodo}}</div>
+  <div style="font-size:12px;color:#718096;margin-top:4px;">Ref: {{pago_referencia}} | Fecha: {{pago_fecha}}</div>
+</div>
+
+<table class="detail-table">
+  <tr><td>📋 Reserva</td><td>#{{id}}</td></tr>
+  <tr><td>🏠 Habitación</td><td>{{habitacion}}</td></tr>
+  <tr><td>💰 Total estadía</td><td>{{monto_total}}</td></tr>
+  <tr><td>✅ Total pagado</td><td style="color:#22863a;">{{monto_pagado}}</td></tr>
+  <tr><td>📊 Saldo</td><td style="font-weight:bold;color:#e53e3e;">{{saldo_pendiente}}</td></tr>
+</table>
+
+<p style="color:#718096;font-size:12px;margin-top:20px;text-align:center;">Si tienes alguna pregunta sobre este cargo, no dudes en escribirnos por WhatsApp al {{hotel_telefono}}.</p>`
+    },
+    whatsapp: {
+      asunto: null,
+      contenido: `💳 *Pago Registrado* — {{hotel_nombre}}
+
+Hola {{cliente_nombre_completo}}, hemos registrado un nuevo pago para tu reserva:
+
+✅ Monto: {{pago_monto}}
+📝 Concepto: {{pago_concepto}}
+💳 Método: {{pago_metodo}}
+
+📋 Reserva: #{{id}}
+💰 Total: {{monto_total}}
+✅ Pagado: {{monto_pagado}}
+⚠️ Saldo pendiente: {{saldo_pendiente}}
+
+¡Muchas gracias! 🙏`
+    }
+  },
+  recordatorio: {
+    email: {
+      asunto: '📅 Recordatorio — Tu estadía es {{etiqueta_dias}} — {{hotel_nombre}}',
+      contenido: `<h2>📅 ¡Falta poco para tu viaje!</h2>
+<p style="color:#4a5568;">Hola <strong>{{cliente_nombre_completo}}</strong>, te recordamos que tu reserva en {{hotel_nombre}} inicia <strong>{{etiqueta_dias}}</strong>.</p>
+
+<table class="detail-table">
+  <tr><td>📅 Check-in</td><td><strong>{{check_in_formateado}}</strong> (A partir de las 2:00 PM)</td></tr>
+  <tr><td>📅 Check-out</td><td>{{check_out_formateado}} (Antes de las 12:00 PM)</td></tr>
+  <tr><td>🏠 Habitación</td><td>{{habitacion}}</td></tr>
+  <tr><td>🍽️ Plan</td><td>{{plan}}</td></tr>
+</table>
+
+<div class="highlight">
+  <div class="label">Saldo pendiente a tu llegada:</div>
+  <div class="amount" style="color:#e53e3e;">{{saldo_pendiente}}</div>
+</div>
+
+<p style="color:#718096;font-size:14px;">
+  <strong>📍 Dirección:</strong> Playa El Palmar, Chame, Panamá<br>
+  <strong>🅿️ Estacionamiento:</strong> Disponible y gratuito en el hotel<br>
+  <strong>📶 WiFi:</strong> Conexión disponible de alta velocidad
+</p>
+
+<p style="color:#4a5568;">¡El mar, la playa y el sol te esperan! Buen viaje. 🌴🌊🌊</p>`
+    },
+    whatsapp: {
+      asunto: null,
+      contenido: `📅 *Recordatorio* — {{hotel_nombre}}
+
+Hola {{cliente_nombre_completo}} 👋
+
+Te recordamos que tu estadía inicia *{{etiqueta_dias}}*:
+
+📅 Check-in: {{check_in}} (2:00 PM)
+🏠 Habitación: {{habitacion}}
+💰 Saldo pendiente: {{saldo_pendiente}}
+
+📍 Ubicación: Playa El Palmar, Chame, Panamá
+
+¡Te esperamos con la mejor energía! 🌊🌴`
+    }
+  },
+  admin_notif: {
+    email: {
+      asunto: '🔔 Nueva Reserva — {{cliente_nombre_completo}} — {{check_in_formateado}}',
+      contenido: `<h2>🔔 Nueva Reserva Recibida</h2>
+<p style="color:#4a5568;">Se ha registrado una nueva reserva en el sistema de Casa Mahana.</p>
+
+<table class="detail-table">
+  <tr><td>👤 Huésped</td><td><strong>{{cliente_nombre_completo}}</strong></td></tr>
+  <tr><td>📧 Email</td><td>{{email}}</td></tr>
+  <tr><td>📱 WhatsApp/Tel</td><td>{{whatsapp}}</td></tr>
+  <tr><td>📅 Check-in</td><td><strong>{{check_in_formateado}}</strong></td></tr>
+  <tr><td>📅 Check-out</td><td><strong>{{check_out_formateado}}</strong></td></tr>
+  <tr><td>🌙 Noches</td><td>{{noches}}</td></tr>
+  <tr><td>🏠 Habitación</td><td>{{habitacion}}</td></tr>
+  <tr><td>🍽️ Plan</td><td>{{plan}}</td></tr>
+  <tr><td>💰 Total</td><td><strong>{{monto_total}}</strong></td></tr>
+  <tr><td>📝 Fuente</td><td>{{fuente}}</td></tr>
+  <tr><td>📝 Notas</td><td>{{notas}}</td></tr>
+</table>
+
+<p style="text-align:center;">
+  <a href="{{hotel_url}}" class="btn">Ir al PMS de Casa Mahana</a>
+</p>`
+    }
+  }
+};
+
+// 1. Get all templates
+router.get('/notificaciones/plantillas', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const db = getDb();
+    const templates = db.prepare('SELECT codigo, canal, nombre, asunto, contenido, variables, updated_at FROM notificaciones_plantillas ORDER BY nombre ASC, canal ASC').all();
+    
+    // Parse variables JSON string if needed
+    const parsedTemplates = templates.map(t => ({
+      ...t,
+      variables: t.variables ? JSON.parse(t.variables) : []
+    }));
+    
+    ok(res, parsedTemplates);
+  } catch (e) {
+    console.error('Error fetching templates:', e);
+    err(res, 'SERVER_ERROR', 'Error al obtener las plantillas', 500);
+  }
+});
+
+// 2. Get single template by code and canal
+router.get('/notificaciones/plantillas/:codigo/:canal', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const { codigo, canal } = req.params;
+    const db = getDb();
+    const template = db.prepare('SELECT codigo, canal, nombre, asunto, contenido, variables, updated_at FROM notificaciones_plantillas WHERE codigo = ? AND canal = ?').get(codigo, canal);
+    
+    if (!template) {
+      return err(res, 'NOT_FOUND', 'Plantilla no encontrada', 404);
+    }
+    
+    template.variables = template.variables ? JSON.parse(template.variables) : [];
+    ok(res, template);
+  } catch (e) {
+    console.error('Error fetching template:', e);
+    err(res, 'SERVER_ERROR', 'Error al obtener la plantilla', 500);
+  }
+});
+
+// 3. Update single template by code and canal
+router.put('/notificaciones/plantillas/:codigo/:canal', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const { codigo, canal } = req.params;
+    const { asunto, contenido } = req.body;
+    
+    if (contenido === undefined || contenido === null) {
+      return err(res, 'VALIDATION_ERROR', 'El contenido de la plantilla es requerido');
+    }
+    
+    const db = getDb();
+    
+    // Check if template exists
+    const template = db.prepare('SELECT codigo FROM notificaciones_plantillas WHERE codigo = ? AND canal = ?').get(codigo, canal);
+    if (!template) {
+      return err(res, 'NOT_FOUND', 'Plantilla no encontrada', 404);
+    }
+    
+    db.prepare(`
+      UPDATE notificaciones_plantillas 
+      SET asunto = ?, contenido = ?, updated_at = datetime('now')
+      WHERE codigo = ? AND canal = ?
+    `).run(asunto || null, contenido, codigo, canal);
+    
+    ok(res, { success: true, message: 'Plantilla actualizada con éxito' });
+  } catch (e) {
+    console.error('Error updating template:', e);
+    err(res, 'SERVER_ERROR', 'Error al actualizar la plantilla', 500);
+  }
+});
+
+// 4. Restore single template by code and canal
+router.post('/notificaciones/plantillas/:codigo/:canal/restaurar', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const { codigo, canal } = req.params;
+    
+    const codeDefaults = DEFAULT_TEMPLATES[codigo];
+    if (!codeDefaults || !codeDefaults[canal]) {
+      return err(res, 'NOT_FOUND', 'Plantilla por defecto no encontrada para este código/canal', 404);
+    }
+    
+    const db = getDb();
+    
+    const template = db.prepare('SELECT codigo FROM notificaciones_plantillas WHERE codigo = ? AND canal = ?').get(codigo, canal);
+    if (!template) {
+      return err(res, 'NOT_FOUND', 'Plantilla no encontrada en base de datos', 404);
+    }
+    
+    const { asunto, contenido } = codeDefaults[canal];
+    
+    db.prepare(`
+      UPDATE notificaciones_plantillas 
+      SET asunto = ?, contenido = ?, updated_at = datetime('now')
+      WHERE codigo = ? AND canal = ?
+    `).run(asunto, contenido, codigo, canal);
+    
+    ok(res, { success: true, message: 'Plantilla restaurada a los valores predeterminados', asunto, contenido });
+  } catch (e) {
+    console.error('Error restoring template:', e);
+    err(res, 'SERVER_ERROR', 'Error al restaurar la plantilla', 500);
+  }
+});
+
+// Helper for simple replacement
+function renderTemplate(templateBody, context) {
+  if (!templateBody) return '';
+  return templateBody.replace(/\{\{([a-zA-Z0-9_\-]+)\}\}/g, (match, p1) => {
+    return context.hasOwnProperty(p1) ? (context[p1] !== null && context[p1] !== undefined ? context[p1] : '') : match;
+  });
+}
+
+// 5. Preview single template by code and canal with dummy/mock context
+router.post('/notificaciones/plantillas/:codigo/:canal/preview', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const { codigo, canal } = req.params;
+    const { asuntoCustom, contenidoCustom } = req.body;
+    
+    const db = getDb();
+    const config = db.prepare('SELECT * FROM configuracion_sistema WHERE id = 1').get() || {};
+    
+    // Build dummy/mock context
+    const mockContext = {
+      id: 9999,
+      cliente: 'Juan',
+      apellido: 'Pérez',
+      cliente_nombre_completo: 'Juan Pérez',
+      email: 'juan.perez@example.com',
+      telefono: '+507 6123-4567',
+      whatsapp: '+507 6123-4567',
+      check_in: '2026-06-15',
+      check_out: '2026-06-18',
+      check_in_formateado: 'lun, 15 jun 2026',
+      check_out_formateado: 'jue, 18 jun 2026',
+      noches: 3,
+      hora_llegada: '15:30',
+      adultos: 2,
+      menores: 1,
+      mascotas: 0,
+      habitacion: 'Bohío 1',
+      plan: 'Estadía Todo Incluido',
+      plan_codigo: 'TI',
+      subtotal: '$300.00',
+      impuesto_monto: '$30.00',
+      monto_total: '$330.00',
+      monto_pagado: '$150.00',
+      saldo_pendiente: '$180.00',
+      pago_monto: '$150.00',
+      pago_concepto: 'Abono 50% reserva',
+      pago_metodo: 'Transferencia',
+      pago_referencia: 'TXN-98765',
+      pago_fecha: '2026-05-20',
+      dias_restantes: 5,
+      etiqueta_dias: 'en 5 días',
+      fuente: 'Directa',
+      notas: 'Llega tarde, requiere cuna.',
+      
+      // Dynamic property values from configuracion_sistema:
+      hotel_nombre: config.nombre_propiedad || 'Casa Mahana',
+      hotel_url: 'https://casamahana.com',
+      hotel_telefono: config.hotel_telefono || '+507 6000-0000',
+      hotel_correo: config.smtp_from || 'reservas@casamahana.com',
+      hotel_politica_cancelacion: config.hotel_politica_cancelacion || 'Las cancelaciones realizadas hasta 48 horas antes de la llegada no tienen cargo. Las cancelaciones tardías o no-show tienen una penalidad de 1 noche.',
+      hotel_politica_reembolso: config.hotel_politica_reembolso || 'Los reembolsos se procesarán dentro de los 5-7 días hábiles posteriores a la aprobación, utilizando el mismo método de pago original.'
+    };
+    
+    // Load from DB if custom not provided
+    let template = null;
+    if (asuntoCustom === undefined || contenidoCustom === undefined) {
+      template = db.prepare('SELECT asunto, contenido FROM notificaciones_plantillas WHERE codigo = ? AND canal = ?').get(codigo, canal);
+    }
+    
+    const rawSubject = asuntoCustom !== undefined ? asuntoCustom : (template?.asunto || '');
+    const rawBody = contenidoCustom !== undefined ? contenidoCustom : (template?.contenido || '');
+    
+    const renderedSubject = rawSubject ? renderTemplate(rawSubject, mockContext) : '';
+    const renderedBody = renderTemplate(rawBody, mockContext);
+    
+    let finalHtml = '';
+    if (canal === 'email') {
+      finalHtml = baseTemplate(renderedBody, renderedSubject, config);
+    } else {
+      finalHtml = renderedBody;
+    }
+    
+    ok(res, {
+      asunto: renderedSubject,
+      contenido: finalHtml
+    });
+  } catch (e) {
+    console.error('Error previewing template:', e);
+    err(res, 'SERVER_ERROR', 'Error al generar la vista previa', 500);
   }
 });
 

@@ -46,6 +46,20 @@ function getDb() {
       }
     }
 
+    const configSysExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='configuracion_sistema'").get();
+    if (configSysExists) {
+      const sysCols = db.prepare('PRAGMA table_info(configuracion_sistema)').all().map(c => c.name);
+      if (!sysCols.includes('hotel_telefono')) {
+        db.exec('ALTER TABLE configuracion_sistema ADD COLUMN hotel_telefono TEXT');
+      }
+      if (!sysCols.includes('hotel_politica_cancelacion')) {
+        db.exec('ALTER TABLE configuracion_sistema ADD COLUMN hotel_politica_cancelacion TEXT');
+      }
+      if (!sysCols.includes('hotel_politica_reembolso')) {
+        db.exec('ALTER TABLE configuracion_sistema ADD COLUMN hotel_politica_reembolso TEXT');
+      }
+    }
+
     db.exec(schema);
 
     // ── Seed habitaciones ──
@@ -268,8 +282,9 @@ function getDb() {
       db.prepare(`
         INSERT INTO configuracion_sistema (
           id, smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, admin_email, notifications_enabled,
-          wa_api_url, wa_api_token, wa_from_number, wa_enabled
-        ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          wa_api_url, wa_api_token, wa_from_number, wa_enabled,
+          hotel_telefono, hotel_politica_cancelacion, hotel_politica_reembolso
+        ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         process.env.SMTP_HOST || 'smtp.mailtrap.io',
         parseInt(process.env.SMTP_PORT || '587'),
@@ -281,9 +296,290 @@ function getDb() {
         process.env.WA_API_URL || 'https://api.twilio.com',
         process.env.WA_API_TOKEN || '',
         process.env.WA_FROM_NUMBER || '',
-        process.env.WA_ENABLED === 'true' ? 1 : 0
+        process.env.WA_ENABLED === 'true' ? 1 : 0,
+        '+507 6000-0000',
+        'Las cancelaciones realizadas hasta 48 horas antes de la llegada no tienen cargo. Las cancelaciones tardías o no-show tienen una penalidad de 1 noche.',
+        'Los reembolsos se procesarán dentro de los 5-7 días hábiles posteriores a la aprobación, utilizando el mismo método de pago original.'
       );
       console.log('✅ Seeded configuracion_sistema dynamically from environment variables');
+    }
+
+    // Ensure default values are populated for new columns in configuracion_sistema if they are null
+    db.prepare(`
+      UPDATE configuracion_sistema 
+      SET 
+        hotel_telefono = COALESCE(hotel_telefono, '+507 6000-0000'),
+        hotel_politica_cancelacion = COALESCE(hotel_politica_cancelacion, 'Las cancelaciones realizadas hasta 48 horas antes de la llegada no tienen cargo. Las cancelaciones tardías o no-show tienen una penalidad de 1 noche.'),
+        hotel_politica_reembolso = COALESCE(hotel_politica_reembolso, 'Los reembolsos se procesarán dentro de los 5-7 días hábiles posteriores a la aprobación, utilizando el mismo método de pago original.')
+      WHERE id = 1
+    `).run();
+
+    // ── Seed notificaciones_plantillas ──
+    const templatesCount = db.prepare('SELECT COUNT(*) as c FROM notificaciones_plantillas').get();
+    if (templatesCount.c === 0) {
+      const insertTemplate = db.prepare(`
+        INSERT INTO notificaciones_plantillas (codigo, canal, nombre, asunto, contenido, variables)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      
+      const seedTemplates = db.transaction(() => {
+        // 1. Confirmacion - Email
+        insertTemplate.run(
+          'confirmacion', 'email', 'Confirmación de Reserva', '✅ Reserva Confirmada #{{id}} — {{hotel_nombre}}',
+          `<h2>✅ ¡Reserva Confirmada!</h2>
+<p style="color:#4a5568;">Hola <strong>{{cliente_nombre_completo}}</strong>, tu reserva ha sido confirmada. ¡Te esperamos!</p>
+
+<table class="detail-table">
+  <tr><td>📋 Reserva</td><td>#{{id}}</td></tr>
+  <tr><td>📅 Check-in</td><td><strong>{{check_in_formateado}}</strong></td></tr>
+  <tr><td>📅 Check-out</td><td><strong>{{check_out_formateado}}</strong></td></tr>
+  <tr><td>🌙 Noches</td><td>{{noches}}</td></tr>
+  <tr><td>🏠 Habitación</td><td>{{habitacion}}</td></tr>
+  <tr><td>🍽️ Plan</td><td>{{plan}}</td></tr>
+  <tr><td>👥 Huéspedes</td><td>{{adultos}} adultos, {{menores}} menores</td></tr>
+</table>
+
+<div class="highlight">
+  <div class="amount">{{monto_total}}</div>
+  <div class="label">Total de tu estadía</div>
+  <div style="margin-top:8px;font-size:13px;color:#22863a;">✓ Pagado: {{monto_pagado}} | Saldo: {{saldo_pendiente}}</div>
+</div>
+
+<p style="color:#718096;font-size:14px;">
+  <strong>Check-in:</strong> A partir de las 2:00 PM<br>
+  <strong>Check-out:</strong> Antes de las 12:00 PM<br>
+  <strong>Dirección:</strong> Playa El Palmar, Chame, Panamá
+</p>
+
+<p style="text-align:center;">
+  <a href="{{hotel_url}}" class="btn">Ver Detalles</a>
+</p>
+
+<p style="color:#a0aec0;font-size:12px;">Si necesitas hacer cambios, contáctanos por WhatsApp al {{hotel_telefono}} o responde a este correo.</p>`,
+          JSON.stringify(["id", "cliente", "apellido", "cliente_nombre_completo", "check_in_formateado", "check_out_formateado", "noches", "habitacion", "plan", "adultos", "menores", "monto_total", "monto_pagado", "saldo_pendiente", "hotel_nombre", "hotel_telefono", "hotel_url", "hotel_correo"])
+        );
+
+        // 2. Confirmacion - WhatsApp
+        insertTemplate.run(
+          'confirmacion', 'whatsapp', 'Confirmación de Reserva', null,
+          `✅ *Reserva Confirmada* — {{hotel_nombre}}
+
+Hola {{cliente_nombre_completo}} 👋
+
+Tu reserva ha sido confirmada:
+📋 #{{id}}
+📅 {{check_in}} → {{check_out}} ({{noches}} noches)
+🏠 {{habitacion}}
+💰 Total: {{monto_total}}
+
+Check-in: 2:00 PM
+Check-out: 12:00 PM
+
+¡Te esperamos! 🌊🌴`,
+          JSON.stringify(["id", "cliente", "apellido", "cliente_nombre_completo", "check_in", "check_out", "noches", "habitacion", "monto_total", "hotel_nombre", "hotel_telefono", "hotel_url"])
+        );
+
+        // 3. Bienvenida - Email
+        insertTemplate.run(
+          'bienvenida', 'email', 'Bienvenida (Check-In)', '🎉 ¡Bienvenido! Reserva Hospedado #{{id}} — {{hotel_nombre}}',
+          `<h2>🎉 ¡Bienvenido a {{hotel_nombre}}!</h2>
+<p style="color:#4a5568;">Hola <strong>{{cliente_nombre_completo}}</strong>, tu habitación <strong>{{habitacion}}</strong> está lista. ¡Esperamos que disfrutes tu estadía con nosotros!</p>
+
+<table class="detail-table">
+  <tr><td>📋 Reserva</td><td>#{{id}}</td></tr>
+  <tr><td>📅 Check-in</td><td>{{check_in_formateado}}</td></tr>
+  <tr><td>📅 Check-out</td><td>{{check_out_formateado}}</td></tr>
+  <tr><td>🏠 Habitación</td><td>{{habitacion}}</td></tr>
+</table>
+
+<div class="highlight">
+  <div class="label">Información Útil:</div>
+  <p style="margin:8px 0 0;font-size:14px;color:#4a5568;">
+    📶 <strong>WiFi:</strong> Casa Mahana Guest<br>
+    🍽️ <strong>Restaurante:</strong> 7:00 AM - 10:00 PM<br>
+    🌊 ¡Disfruta de la playa y la naturaleza!
+  </p>
+</div>`,
+          JSON.stringify(["id", "cliente", "apellido", "cliente_nombre_completo", "check_in_formateado", "check_out_formateado", "habitacion", "hotel_nombre", "hotel_telefono", "hotel_url", "hotel_correo"])
+        );
+
+        // 4. Bienvenida - WhatsApp
+        insertTemplate.run(
+          'bienvenida', 'whatsapp', 'Bienvenida (Check-In)', null,
+          `🎉 *¡Bienvenido!* — {{hotel_nombre}}
+
+Hola {{cliente_nombre_completo}}, ¡tu check-in ha sido registrado con éxito!
+
+📋 Reserva #{{id}}
+🏠 Habitación: {{habitacion}}
+📅 Check-out: {{check_out}} (12:00 PM)
+
+📶 WiFi: Casa Mahana Guest
+🍽️ Restaurante: 7:00 AM - 10:00 PM
+
+🎉 ¡Disfruta tu estadía con nosotros! 🌴🌊`,
+          JSON.stringify(["id", "cliente", "apellido", "cliente_nombre_completo", "id", "habitacion", "check_out", "hotel_nombre"])
+        );
+
+        // 5. Checkout - Email
+        insertTemplate.run(
+          'checkout', 'email', 'Agradecimiento (Check-Out)', '👋 ¡Gracias por tu visita! Reserva Check-Out #{{id}} — {{hotel_nombre}}',
+          `<h2>👋 ¡Gracias por hospedarte con nosotros!</h2>
+<p style="color:#4a5568;">Hola <strong>{{cliente_nombre_completo}}</strong>, esperamos que hayas tenido un excelente viaje y que hayas disfrutado tu estadía en {{hotel_nombre}}.</p>
+
+<table class="detail-table">
+  <tr><td>📋 Reserva</td><td>#{{id}}</td></tr>
+  <tr><td>🏠 Habitación</td><td>{{habitacion}}</td></tr>
+  <tr><td>📅 Check-out</td><td>{{check_out_formateado}}</td></tr>
+</table>
+
+<div class="highlight">
+  <div class="amount">{{monto_total}}</div>
+  <div class="label">Total de tu estadía</div>
+  <div style="margin-top:8px;font-size:13px;color:#22863a;">✓ Pagado: {{monto_pagado}} | Saldo: {{saldo_pendiente}}</div>
+</div>
+
+<p style="color:#4a5568;font-size:14px;">¿Disfrutaste tu estadía? Tu opinión es muy valiosa para nosotros. Por favor déjanos una reseña en Google o TripAdvisor. ⭐⭐⭐⭐⭐</p>
+<p style="color:#718096;font-size:13px;">¡Esperamos verte pronto de regreso en nuestro pequeño paraíso!</p>`,
+          JSON.stringify(["id", "cliente", "apellido", "cliente_nombre_completo", "check_in_formateado", "check_out_formateado", "habitacion", "monto_total", "monto_pagado", "saldo_pendiente", "hotel_nombre", "hotel_telefono", "hotel_url", "hotel_correo"])
+        );
+
+        // 6. Checkout - WhatsApp
+        insertTemplate.run(
+          'checkout', 'whatsapp', 'Agradecimiento (Check-Out)', null,
+          `👋 *¡Gracias por tu visita!* — {{hotel_nombre}}
+
+Hola {{cliente_nombre_completo}}, tu salida ha sido registrada con éxito.
+
+📋 Reserva #{{id}}
+🏠 Habitación: {{habitacion}}
+💰 Total: {{monto_total}}
+✅ Pagado: {{monto_pagado}}
+⚠️ Saldo pendiente: {{saldo_pendiente}}
+
+🙏 ¡Muchas gracias por hospedarte con nosotros! Esperamos verte de nuevo muy pronto. ¡Buen viaje de regreso! 🌊🌴`,
+          JSON.stringify(["id", "cliente", "apellido", "cliente_nombre_completo", "habitacion", "monto_total", "monto_pagado", "saldo_pendiente", "hotel_nombre"])
+        );
+
+        // 7. Pago - Email
+        insertTemplate.run(
+          'pago', 'email', 'Recibo de Pago', '💳 Pago Registrado con Éxito — Reserva #{{id}}',
+          `<h2>💳 Pago Registrado con Éxito</h2>
+<p style="color:#4a5568;">Hola <strong>{{cliente_nombre_completo}}</strong>, hemos recibido y registrado tu abono a tu estadía en {{hotel_nombre}}.</p>
+
+<div class="highlight">
+  <div class="amount" style="color:#22863a;">+ {{pago_monto}}</div>
+  <div class="label">{{pago_concepto}} — {{pago_metodo}}</div>
+  <div style="font-size:12px;color:#718096;margin-top:4px;">Ref: {{pago_referencia}} | Fecha: {{pago_fecha}}</div>
+</div>
+
+<table class="detail-table">
+  <tr><td>📋 Reserva</td><td>#{{id}}</td></tr>
+  <tr><td>🏠 Habitación</td><td>{{habitacion}}</td></tr>
+  <tr><td>💰 Total estadía</td><td>{{monto_total}}</td></tr>
+  <tr><td>✅ Total pagado</td><td style="color:#22863a;">{{monto_pagado}}</td></tr>
+  <tr><td>📊 Saldo</td><td style="font-weight:bold;color:#e53e3e;">{{saldo_pendiente}}</td></tr>
+</table>
+
+<p style="color:#718096;font-size:12px;margin-top:20px;text-align:center;">Si tienes alguna pregunta sobre este cargo, no dudes en escribirnos por WhatsApp al {{hotel_telefono}}.</p>`,
+          JSON.stringify(["id", "cliente", "apellido", "cliente_nombre_completo", "habitacion", "monto_total", "monto_pagado", "saldo_pendiente", "pago_monto", "pago_concepto", "pago_metodo", "pago_referencia", "pago_fecha", "hotel_nombre", "hotel_telefono", "hotel_url", "hotel_correo"])
+        );
+
+        // 8. Pago - WhatsApp
+        insertTemplate.run(
+          'pago', 'whatsapp', 'Recibo de Pago', null,
+          `💳 *Pago Registrado* — {{hotel_nombre}}
+
+Hola {{cliente_nombre_completo}}, hemos registrado un nuevo pago para tu reserva:
+
+✅ Monto: {{pago_monto}}
+📝 Concepto: {{pago_concepto}}
+💳 Método: {{pago_metodo}}
+
+📋 Reserva: #{{id}}
+💰 Total: {{monto_total}}
+✅ Pagado: {{monto_pagado}}
+⚠️ Saldo pendiente: {{saldo_pendiente}}
+
+¡Muchas gracias! 🙏`,
+          JSON.stringify(["id", "cliente", "apellido", "cliente_nombre_completo", "pago_monto", "pago_concepto", "pago_metodo", "monto_total", "monto_pagado", "saldo_pendiente", "hotel_nombre"])
+        );
+
+        // 9. Recordatorio - Email
+        insertTemplate.run(
+          'recordatorio', 'email', 'Recordatorio de Estadía', '📅 Recordatorio — Tu estadía es {{etiqueta_dias}} — {{hotel_nombre}}',
+          `<h2>📅 ¡Falta poco para tu viaje!</h2>
+<p style="color:#4a5568;">Hola <strong>{{cliente_nombre_completo}}</strong>, te recordamos que tu reserva en {{hotel_nombre}} inicia <strong>{{etiqueta_dias}}</strong>.</p>
+
+<table class="detail-table">
+  <tr><td>📅 Check-in</td><td><strong>{{check_in_formateado}}</strong> (A partir de las 2:00 PM)</td></tr>
+  <tr><td>📅 Check-out</td><td>{{check_out_formateado}} (Antes de las 12:00 PM)</td></tr>
+  <tr><td>🏠 Habitación</td><td>{{habitacion}}</td></tr>
+  <tr><td>🍽️ Plan</td><td>{{plan}}</td></tr>
+</table>
+
+<div class="highlight">
+  <div class="label">Saldo pendiente a tu llegada:</div>
+  <div class="amount" style="color:#e53e3e;">{{saldo_pendiente}}</div>
+</div>
+
+<p style="color:#718096;font-size:14px;">
+  <strong>📍 Dirección:</strong> Playa El Palmar, Chame, Panamá<br>
+  <strong>🅿️ Estacionamiento:</strong> Disponible y gratuito en el hotel<br>
+  <strong>📶 WiFi:</strong> Conexión disponible de alta velocidad
+</p>
+
+<p style="color:#4a5568;">¡El mar, la playa y el sol te esperan! Buen viaje. 🌴🌊🌊</p>`,
+          JSON.stringify(["id", "cliente", "apellido", "cliente_nombre_completo", "check_in_formateado", "check_out_formateado", "habitacion", "plan", "saldo_pendiente", "dias_restantes", "etiqueta_dias", "hotel_nombre", "hotel_telefono", "hotel_url", "hotel_correo"])
+        );
+
+        // 10. Recordatorio - WhatsApp
+        insertTemplate.run(
+          'recordatorio', 'whatsapp', 'Recordatorio de Estadía', null,
+          `📅 *Recordatorio* — {{hotel_nombre}}
+
+Hola {{cliente_nombre_completo}} 👋
+
+Te recordamos que tu estadía inicia *{{etiqueta_dias}}*:
+
+📅 Check-in: {{check_in}} (2:00 PM)
+🏠 Habitación: {{habitacion}}
+💰 Saldo pendiente: {{saldo_pendiente}}
+
+📍 Ubicación: Playa El Palmar, Chame, Panamá
+
+¡Te esperamos con la mejor energía! 🌊🌴`,
+          JSON.stringify(["id", "cliente", "apellido", "cliente_nombre_completo", "check_in", "habitacion", "saldo_pendiente", "etiqueta_dias", "hotel_nombre"])
+        );
+
+        // 11. Admin Notif - Email
+        insertTemplate.run(
+          'admin_notif', 'email', 'Notificación de Nueva Reserva (Admin)', '🔔 Nueva Reserva — {{cliente_nombre_completo}} — {{check_in_formateado}}',
+          `<h2>🔔 Nueva Reserva Recibida</h2>
+<p style="color:#4a5568;">Se ha registrado una nueva reserva en el sistema de Casa Mahana.</p>
+
+<table class="detail-table">
+  <tr><td>👤 Huésped</td><td><strong>{{cliente_nombre_completo}}</strong></td></tr>
+  <tr><td>📧 Email</td><td>{{email}}</td></tr>
+  <tr><td>📱 WhatsApp/Tel</td><td>{{whatsapp}}</td></tr>
+  <tr><td>📅 Check-in</td><td><strong>{{check_in_formateado}}</strong></td></tr>
+  <tr><td>📅 Check-out</td><td><strong>{{check_out_formateado}}</strong></td></tr>
+  <tr><td>🌙 Noches</td><td>{{noches}}</td></tr>
+  <tr><td>🏠 Habitación</td><td>{{habitacion}}</td></tr>
+  <tr><td>🍽️ Plan</td><td>{{plan}}</td></tr>
+  <tr><td>💰 Total</td><td><strong>{{monto_total}}</strong></td></tr>
+  <tr><td>📝 Fuente</td><td>{{fuente}}</td></tr>
+  <tr><td>📝 Notas</td><td>{{notas}}</td></tr>
+</table>
+
+<p style="text-align:center;">
+  <a href="{{hotel_url}}" class="btn">Ir al PMS de Casa Mahana</a>
+</p>`,
+          JSON.stringify(["id", "cliente", "apellido", "cliente_nombre_completo", "email", "telefono", "whatsapp", "check_in_formateado", "check_out_formateado", "noches", "habitacion", "plan", "monto_total", "fuente", "notas", "hotel_nombre", "hotel_url"])
+        );
+      });
+      seedTemplates();
+      console.log('✅ Seeded notificaciones_plantillas database tables successfully');
     }
 
 
@@ -296,7 +592,8 @@ function getDb() {
 const VALID_TABLES = [
   'habitaciones', 'planes_tarifa', 'reservas_hotel', 'folio_hotel', 
   'huespedes_reserva', 'huespedes', 'usuarios', 'config_hotel',
-  'configuracion_sistema', 'reversiones_log', 'solicitudes_modificacion'
+  'configuracion_sistema', 'reversiones_log', 'solicitudes_modificacion',
+  'notificaciones_plantillas'
 ];
 
 

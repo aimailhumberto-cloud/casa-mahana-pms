@@ -268,7 +268,10 @@ CREATE TABLE IF NOT EXISTS configuracion_sistema (
   wa_api_url TEXT,
   wa_api_token TEXT,
   wa_from_number TEXT,
-  wa_enabled INTEGER DEFAULT 0
+  wa_enabled INTEGER DEFAULT 0,
+  hotel_telefono TEXT,
+  hotel_politica_cancelacion TEXT,
+  hotel_politica_reembolso TEXT
 );
 
 -- ═══ AUDITORÍA DE REVERSIONES CONTABLES ═══
@@ -306,6 +309,20 @@ CREATE TABLE IF NOT EXISTS solicitudes_modificacion (
 
 CREATE INDEX IF NOT EXISTS idx_solicitudes_reserva ON solicitudes_modificacion(reserva_id);
 CREATE INDEX IF NOT EXISTS idx_solicitudes_estado ON solicitudes_modificacion(estado);
+
+-- ═══ PLANTILLAS DE NOTIFICACIÓN ═══
+CREATE TABLE IF NOT EXISTS notificaciones_plantillas (
+  codigo TEXT NOT NULL,
+  canal TEXT NOT NULL DEFAULT 'email',
+  nombre TEXT NOT NULL,
+  asunto TEXT,
+  contenido TEXT NOT NULL,
+  variables TEXT,
+  updated_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (codigo, canal)
+);
+
+
 
 
 

@@ -139,7 +139,13 @@ function sendWhatsApp(phone, message) {
 
 // ── Email Templates ──
 
-function baseTemplate(content, preheader = '') {
+function baseTemplate(content, preheader = '', config = null) {
+  const cfg = config || getSystemConfig();
+  const hotelName = HOTEL_NAME;
+  const hotelPhone = cfg.hotel_telefono || HOTEL_PHONE;
+  const hotelEmail = cfg.smtp_from || HOTEL_EMAIL_DISPLAY;
+  const hotelUrl = HOTEL_URL;
+
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><style>
   body { font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; background: #f4f1eb; margin: 0; padding: 0; }
@@ -168,14 +174,14 @@ function baseTemplate(content, preheader = '') {
 <div style="display:none;font-size:1px;color:#f4f1eb;line-height:1px;max-height:0;overflow:hidden;">${preheader}</div>
 <div class="container">
   <div class="header">
-    <h1>🏨 ${HOTEL_NAME}</h1>
+    <h1>🏨 ${hotelName}</h1>
     <p>Playa, Naturaleza y Aventura</p>
   </div>
   <div class="body">${content}</div>
   <div class="footer">
-    <p>${HOTEL_NAME} • Playa El Palmar, Chame, Panamá</p>
-    <p>📞 ${HOTEL_PHONE} • 📧 ${HOTEL_EMAIL_DISPLAY}</p>
-    <p><a href="${HOTEL_URL}">${HOTEL_URL}</a></p>
+    <p>${hotelName} • Playa El Palmar, Chame, Panamá</p>
+    <p>📞 ${hotelPhone} • 📧 ${hotelEmail}</p>
+    <p><a href="${hotelUrl}">${hotelUrl}</a></p>
   </div>
 </div></body></html>`;
 }
@@ -194,6 +200,77 @@ function formatMoney(amount) {
 
 // ── Notification Functions ──
 
+// Helper: robust regex-based template variable substitution
+function renderTemplate(templateBody, context) {
+  if (!templateBody) return '';
+  return templateBody.replace(/\{\{([a-zA-Z0-9_\-]+)\}\}/g, (match, p1) => {
+    return context.hasOwnProperty(p1) ? (context[p1] !== null && context[p1] !== undefined ? context[p1] : '') : match;
+  });
+}
+
+// Helper: load template from database or fall back to defaults, then render
+function renderNotification(codigo, context, fallbackSubject, fallbackBody, canal) {
+  const db = getDb();
+  let template = null;
+  try {
+    template = db.prepare('SELECT asunto, contenido FROM notificaciones_plantillas WHERE codigo = ? AND canal = ?').get(codigo, canal);
+  } catch (err) {
+    console.error(`⚠️ Failed to load template ${codigo}/${canal} from DB, using fallback:`, err.message);
+  }
+
+  const subjectTemplate = template?.asunto || fallbackSubject;
+  const bodyTemplate = template?.contenido || fallbackBody;
+
+  const subject = subjectTemplate ? renderTemplate(subjectTemplate, context) : null;
+  const body = renderTemplate(bodyTemplate, context);
+
+  return { subject, body };
+}
+
+// Helper: build a unified rich variable context for template rendering
+function buildTemplateContext(reserva, habitacion, extra = {}) {
+  const guestName = `${reserva.cliente} ${reserva.apellido || ''}`.trim();
+  const roomName = habitacion?.nombre || reserva.tipo_habitacion || '-';
+  const config = getSystemConfig();
+  
+  return {
+    id: reserva.id,
+    cliente: reserva.cliente || '',
+    apellido: reserva.apellido || '',
+    cliente_nombre_completo: guestName,
+    email: reserva.email || '',
+    telefono: reserva.telefono || '',
+    whatsapp: reserva.whatsapp || '',
+    check_in: reserva.check_in || '',
+    check_out: reserva.check_out || '',
+    check_in_formateado: formatDate(reserva.check_in),
+    check_out_formateado: formatDate(reserva.check_out),
+    noches: reserva.noches || 0,
+    hora_llegada: reserva.hora_llegada || '',
+    adultos: reserva.adultos || 0,
+    menores: reserva.menores || 0,
+    mascotas: reserva.mascotas || 0,
+    habitacion: roomName,
+    plan: reserva.plan_nombre || 'Estándar',
+    plan_codigo: reserva.plan_codigo || '',
+    subtotal: formatMoney(reserva.subtotal),
+    impuesto_monto: formatMoney(reserva.impuesto_monto),
+    monto_total: formatMoney(reserva.monto_total),
+    monto_pagado: formatMoney(reserva.monto_pagado),
+    saldo_pendiente: formatMoney(reserva.saldo_pendiente),
+    fuente: reserva.fuente || 'Teléfono',
+    notas: reserva.notas || '-',
+    // Hotel info
+    hotel_nombre: config.nombre_propiedad || HOTEL_NAME,
+    hotel_url: HOTEL_URL,
+    hotel_telefono: config.hotel_telefono || HOTEL_PHONE,
+    hotel_correo: config.smtp_from || HOTEL_EMAIL_DISPLAY,
+    hotel_politica_cancelacion: config.hotel_politica_cancelacion || '',
+    hotel_politica_reembolso: config.hotel_politica_reembolso || '',
+    ...extra
+  };
+}
+
 /**
  * 1. RESERVATION CONFIRMED — sent when a new reservation is created or confirmed
  */
@@ -204,65 +281,66 @@ async function notifyReservationConfirmed(reserva, habitacion) {
   if (!emailEnabled && !waEnabled) return { email: false, whatsapp: false };
   const results = { email: false, whatsapp: false };
   
-  const guestName = `${reserva.cliente} ${reserva.apellido || ''}`.trim();
-  const roomName = habitacion?.nombre || reserva.tipo_habitacion || '-';
-  
+  const context = buildTemplateContext(reserva, habitacion);
   const db = getDb();
   const tipo = reserva.estado === 'Pendiente' ? 'recibida' : 'confirmacion';
 
   // EMAIL
   if (reserva.email && emailEnabled) {
-    const html = baseTemplate(`
-      <h2>✅ ¡Reserva Confirmada!</h2>
-      <p style="color:#4a5568;">Hola <strong>${guestName}</strong>, tu reserva ha sido confirmada. ¡Te esperamos!</p>
+    const fallbackSubject = `✅ Reserva Confirmada #${reserva.id} — ${context.hotel_nombre}`;
+    const fallbackBody = `<h2>✅ ¡Reserva Confirmada!</h2>
+<p style="color:#4a5568;">Hola <strong>` + context.cliente_nombre_completo + `</strong>, tu reserva ha sido confirmada. ¡Te esperamos!</p>
+
+<table class="detail-table">
+  <tr><td>📋 Reserva</td><td>#` + reserva.id + `</td></tr>
+  <tr><td>📅 Check-in</td><td><strong>` + context.check_in_formateado + `</strong></td></tr>
+  <tr><td>📅 Check-out</td><td><strong>` + context.check_out_formateado + `</strong></td></tr>
+  <tr><td>🌙 Noches</td><td>` + reserva.noches + `</td></tr>
+  <tr><td>🏠 Habitación</td><td>` + context.habitacion + `</td></tr>
+  <tr><td>🍽️ Plan</td><td>` + context.plan + `</td></tr>
+  <tr><td>👥 Huéspedes</td><td>` + reserva.adultos + ` adultos` + (reserva.menores ? ', ' + reserva.menores + ' menores' : '') + `</td></tr>
+</table>
+
+<div class="highlight">
+  <div class="amount">` + context.monto_total + `</div>
+  <div class="label">Total de tu estadía</div>
+  ` + (reserva.monto_pagado > 0 ? `<div style="margin-top:8px;font-size:13px;color:#22863a;">✓ Pagado: ` + context.monto_pagado + ` | Saldo: ` + context.saldo_pendiente + `</div>` : '') + `
+</div>
+
+<p style="color:#718096;font-size:14px;">
+  <strong>Check-in:</strong> A partir de las 2:00 PM<br>
+  <strong>Check-out:</strong> Antes de las 12:00 PM<br>
+  <strong>Dirección:</strong> Playa El Palmar, Chame, Panamá
+</p>
+
+<p style="text-align:center;">
+  <a href="` + HOTEL_URL + `" class="btn">Ver Detalles</a>
+</p>
+
+<p style="color:#a0aec0;font-size:12px;">Si necesitas hacer cambios, contáctanos por WhatsApp al ` + context.hotel_telefono + ` o responde a este correo.</p>`;
       
-      <table class="detail-table">
-        <tr><td>📋 Reserva</td><td>#${reserva.id}</td></tr>
-        <tr><td>📅 Check-in</td><td><strong>${formatDate(reserva.check_in)}</strong></td></tr>
-        <tr><td>📅 Check-out</td><td><strong>${formatDate(reserva.check_out)}</strong></td></tr>
-        <tr><td>🌙 Noches</td><td>${reserva.noches}</td></tr>
-        <tr><td>🏠 Habitación</td><td>${roomName}</td></tr>
-        <tr><td>🍽️ Plan</td><td>${reserva.plan_nombre || 'Estándar'}</td></tr>
-        <tr><td>👥 Huéspedes</td><td>${reserva.adultos} adultos${reserva.menores ? ', ' + reserva.menores + ' menores' : ''}</td></tr>
-      </table>
-      
-      <div class="highlight">
-        <div class="amount">${formatMoney(reserva.monto_total)}</div>
-        <div class="label">Total de tu estadía</div>
-        ${reserva.monto_pagado > 0 ? `<div style="margin-top:8px;font-size:13px;color:#22863a;">✓ Pagado: ${formatMoney(reserva.monto_pagado)} | Saldo: ${formatMoney(reserva.saldo_pendiente)}</div>` : ''}
-      </div>
-      
-      <p style="color:#718096;font-size:14px;">
-        <strong>Check-in:</strong> A partir de las 2:00 PM<br>
-        <strong>Check-out:</strong> Antes de las 12:00 PM<br>
-        <strong>Dirección:</strong> Playa El Palmar, Chame, Panamá
-      </p>
-      
-      <p style="text-align:center;">
-        <a href="${HOTEL_URL}" class="btn">Ver Detalles</a>
-      </p>
-      
-      <p style="color:#a0aec0;font-size:12px;">Si necesitas hacer cambios, contáctanos por WhatsApp al ${HOTEL_PHONE} o responde a este correo.</p>
-    `, `Tu reserva #${reserva.id} en ${HOTEL_NAME} está confirmada`);
+    const rendered = renderNotification('confirmacion', context, fallbackSubject, fallbackBody, 'email');
+    const finalHtml = baseTemplate(rendered.body, `Tu reserva #${reserva.id} en ${context.hotel_nombre} está confirmada`, config);
     
-    results.email = await sendEmail(reserva.email, `✅ Reserva Confirmada #${reserva.id} — ${HOTEL_NAME}`, html);
-    logNotification(db, reserva.id, tipo, 'email', reserva.email, results.email, html);
+    results.email = await sendEmail(reserva.email, rendered.subject, finalHtml);
+    logNotification(db, reserva.id, tipo, 'email', reserva.email, results.email, finalHtml);
   }
   
   // WHATSAPP
   if ((reserva.whatsapp || reserva.telefono) && waEnabled) {
-    const msg = `✅ *Reserva Confirmada* — ${HOTEL_NAME}\n\n` +
-      `Hola ${guestName} 👋\n\n` +
+    const fallbackMsg = `✅ *Reserva Confirmada* — ` + context.hotel_nombre + `\n\n` +
+      `Hola ` + context.cliente_nombre_completo + ` 👋\n\n` +
       `Tu reserva ha sido confirmada:\n` +
-      `📋 #${reserva.id}\n` +
-      `📅 ${reserva.check_in} → ${reserva.check_out} (${reserva.noches} noches)\n` +
-      `🏠 ${roomName}\n` +
-      `💰 Total: ${formatMoney(reserva.monto_total)}\n\n` +
+      `📋 #` + reserva.id + `\n` +
+      `📅 ` + reserva.check_in + ` → ` + reserva.check_out + ` (` + reserva.noches + ` noches)\n` +
+      `🏠 ` + context.habitacion + `\n` +
+      `💰 Total: ` + context.monto_total + `\n\n` +
       `Check-in: 2:00 PM\nCheck-out: 12:00 PM\n\n` +
       `¡Te esperamos! 🌊🌴`;
-    
-    results.whatsapp = await sendWhatsApp(reserva.whatsapp || reserva.telefono, msg);
-    logNotification(db, reserva.id, tipo, 'whatsapp', reserva.whatsapp || reserva.telefono, results.whatsapp, msg);
+      
+    const rendered = renderNotification('confirmacion', context, null, fallbackMsg, 'whatsapp');
+    results.whatsapp = await sendWhatsApp(reserva.whatsapp || reserva.telefono, rendered.body);
+    logNotification(db, reserva.id, tipo, 'whatsapp', reserva.whatsapp || reserva.telefono, results.whatsapp, rendered.body);
   }
   
   return results;
@@ -278,8 +356,8 @@ async function notifyStatusChange(reserva, oldStatus, newStatus, habitacion) {
   if (!emailEnabled && !waEnabled) return { email: false, whatsapp: false };
   const results = { email: false, whatsapp: false };
   
-  const guestName = `${reserva.cliente} ${reserva.apellido || ''}`.trim();
-  const roomName = habitacion?.nombre || reserva.tipo_habitacion || '-';
+  const context = buildTemplateContext(reserva, habitacion);
+  const db = getDb();
   
   const statusConfig = {
     'Confirmada': { emoji: '✅', badge: 'badge-green', label: 'Confirmada', msg: 'Tu reserva ha sido confirmada.' },
@@ -291,34 +369,29 @@ async function notifyStatusChange(reserva, oldStatus, newStatus, habitacion) {
   
   const configObj = statusConfig[newStatus] || { emoji: '📋', badge: 'badge-blue', label: newStatus, msg: `Tu reserva cambió a ${newStatus}.` };
   
-  let tipo = 'estado';
-  if (newStatus === 'Confirmada') tipo = 'confirmacion';
-  else if (newStatus === 'Hospedado') tipo = 'bienvenida';
-  else if (newStatus === 'Check-Out') tipo = 'checkout';
-
-  const db = getDb();
+  let codigo = 'estado';
+  if (newStatus === 'Confirmada') codigo = 'confirmacion';
+  else if (newStatus === 'Hospedado') codigo = 'bienvenida';
+  else if (newStatus === 'Check-Out') codigo = 'checkout';
 
   // EMAIL
   if (reserva.email && emailEnabled) {
-    let extraContent = '';
-    
+    let fallbackExtraContent = '';
     if (newStatus === 'Check-Out') {
-      extraContent = `
+      fallbackExtraContent = `
         <div class="highlight">
-          <div class="amount">${formatMoney(reserva.monto_total)}</div>
+          <div class="amount">` + context.monto_total + `</div>
           <div class="label">Total de tu estadía</div>
-          <div style="margin-top:8px;font-size:13px;color:${reserva.saldo_pendiente > 0 ? '#e53e3e' : '#22863a'};">
-            Pagado: ${formatMoney(reserva.monto_pagado)} 
-            ${reserva.saldo_pendiente > 0 ? `| <strong>Saldo pendiente: ${formatMoney(reserva.saldo_pendiente)}</strong>` : '| ✓ Cuenta saldada'}
+          <div style="margin-top:8px;font-size:13px;color:` + (reserva.saldo_pendiente > 0 ? '#e53e3e' : '#22863a') + `;">
+            Pagado: ` + context.monto_pagado + ` 
+            ` + (reserva.saldo_pendiente > 0 ? `| <strong>Saldo pendiente: ` + context.saldo_pendiente + `</strong>` : '| ✓ Cuenta saldada') + `
           </div>
         </div>
-        <p style="color:#4a5568;font-size:14px;">🙏 ¡Gracias por hospedarte con nosotros! Esperamos verte pronto.</p>
+        <p style="color:#4a5568;font-size:14px;">🙏 ¡Gracias por hospedarte con nosotros! Esperamos verle pronto.</p>
         <p style="color:#718096;font-size:13px;">¿Disfrutaste tu estadía? Déjanos una reseña en Google o TripAdvisor. ⭐⭐⭐⭐⭐</p>`;
-    }
-    
-    if (newStatus === 'Hospedado') {
-      extraContent = `
-        <p style="color:#4a5568;font-size:14px;">🎉 ¡Bienvenido a ${HOTEL_NAME}! Tu habitación <strong>${roomName}</strong> está lista.</p>
+    } else if (newStatus === 'Hospedado') {
+      fallbackExtraContent = `
+        <p style="color:#4a5568;font-size:14px;">🎉 ¡Bienvenido a ` + context.hotel_nombre + `! Tu habitación <strong>` + context.habitacion + `</strong> está lista.</p>
         <p style="color:#718096;font-size:13px;">
           📶 WiFi: Casa Mahana Guest<br>
           🍽️ Restaurante: 7am - 10pm<br>
@@ -326,40 +399,43 @@ async function notifyStatusChange(reserva, oldStatus, newStatus, habitacion) {
         </p>`;
     }
     
-    const html = baseTemplate(`
-      <h2>${configObj.emoji} Reserva ${configObj.label}</h2>
-      <p style="color:#4a5568;">Hola <strong>${guestName}</strong>, ${configObj.msg}</p>
+    const fallbackSubject = configObj.emoji + ` ` + configObj.label + ` — Reserva #` + reserva.id + ` — ` + context.hotel_nombre;
+    const fallbackBody = `
+      <h2>` + configObj.emoji + ` Reserva ` + configObj.label + `</h2>
+      <p style="color:#4a5568;">Hola <strong>` + context.cliente_nombre_completo + `</strong>, ` + configObj.msg + `</p>
       
       <table class="detail-table">
-        <tr><td>📋 Reserva</td><td>#${reserva.id}</td></tr>
-        <tr><td>📊 Estado</td><td><span class="badge ${configObj.badge}">${configObj.emoji} ${configObj.label}</span></td></tr>
-        <tr><td>📅 Check-in</td><td>${formatDate(reserva.check_in)}</td></tr>
-        <tr><td>📅 Check-out</td><td>${formatDate(reserva.check_out)}</td></tr>
-        <tr><td>🏠 Habitación</td><td>${roomName}</td></tr>
+        <tr><td>📋 Reserva</td><td>#` + reserva.id + `</td></tr>
+        <tr><td>📊 Estado</td><td><span class="badge ` + configObj.badge + `">` + configObj.emoji + ` ` + configObj.label + `</span></td></tr>
+        <tr><td>📅 Check-in</td><td>` + context.check_in_formateado + `</td></tr>
+        <tr><td>📅 Check-out</td><td>` + context.check_out_formateado + `</td></tr>
+        <tr><td>🏠 Habitación</td><td>` + context.habitacion + `</td></tr>
       </table>
-      ${extraContent}
-    `, `${configObj.emoji} Reserva ${configObj.label} #${reserva.id} — ${HOTEL_NAME}`);
+      ` + fallbackExtraContent;
+      
+    const rendered = renderNotification(codigo, context, fallbackSubject, fallbackBody, 'email');
+    const finalHtml = baseTemplate(rendered.body, configObj.emoji + ` Reserva ` + configObj.label + ` #` + reserva.id + ` — ` + context.hotel_nombre, config);
     
-    results.email = await sendEmail(reserva.email, `${configObj.emoji} ${configObj.label} — Reserva #${reserva.id} — ${HOTEL_NAME}`, html);
-    logNotification(db, reserva.id, tipo, 'email', reserva.email, results.email, html);
+    results.email = await sendEmail(reserva.email, rendered.subject, finalHtml);
+    logNotification(db, reserva.id, codigo, 'email', reserva.email, results.email, finalHtml);
   }
   
   // WHATSAPP
   if ((reserva.whatsapp || reserva.telefono) && waEnabled) {
-    let msg = `${configObj.emoji} *${configObj.label}* — ${HOTEL_NAME}\n\nHola ${guestName}, ${configObj.msg}\n\n📋 Reserva #${reserva.id}\n📅 ${reserva.check_in} → ${reserva.check_out}\n🏠 ${roomName}`;
-    
+    let fallbackMsg = configObj.emoji + ` *` + configObj.label + `* — ` + context.hotel_nombre + `\n\nHola ` + context.cliente_nombre_completo + `, ` + configObj.msg + `\n\n📋 Reserva #` + reserva.id + `\n📅 ` + reserva.check_in + ` → ` + reserva.check_out + `\n🏠 ` + context.habitacion;
     if (newStatus === 'Check-Out' && reserva.saldo_pendiente > 0) {
-      msg += `\n\n💰 Saldo pendiente: ${formatMoney(reserva.saldo_pendiente)}\nPor favor contáctanos para saldar tu cuenta.`;
+      fallbackMsg += `\n\n💰 Saldo pendiente: ` + context.saldo_pendiente + `\nPor favor contáctanos para saldar tu cuenta.`;
     }
     if (newStatus === 'Check-Out') {
-      msg += '\n\n🙏 ¡Gracias por tu visita! Esperamos verte pronto. 🌊';
+      fallbackMsg += '\n\n🙏 ¡Gracias por tu visita! Esperamos verte pronto. 🌊';
     }
     if (newStatus === 'Hospedado') {
-      msg += '\n\n🎉 ¡Bienvenido! Disfruta tu estadía. 🌴';
+      fallbackMsg += '\n\n🎉 ¡Bienvenido! Disfruta tu estadía. 🌴';
     }
     
-    results.whatsapp = await sendWhatsApp(reserva.whatsapp || reserva.telefono, msg);
-    logNotification(db, reserva.id, tipo, 'whatsapp', reserva.whatsapp || reserva.telefono, results.whatsapp, msg);
+    const rendered = renderNotification(codigo, context, null, fallbackMsg, 'whatsapp');
+    results.whatsapp = await sendWhatsApp(reserva.whatsapp || reserva.telefono, rendered.body);
+    logNotification(db, reserva.id, codigo, 'whatsapp', reserva.whatsapp || reserva.telefono, results.whatsapp, rendered.body);
   }
   
   return results;
@@ -375,50 +451,60 @@ async function notifyPaymentReceived(reserva, payment, habitacion) {
   if (!emailEnabled && !waEnabled) return { email: false, whatsapp: false };
   const results = { email: false, whatsapp: false };
   
-  const guestName = `${reserva.cliente} ${reserva.apellido || ''}`.trim();
-  const roomName = habitacion?.nombre || reserva.tipo_habitacion || '-';
+  const paymentExtras = {
+    pago_monto: formatMoney(payment.monto),
+    pago_concepto: payment.concepto || 'Pago',
+    pago_metodo: payment.metodo_pago || 'N/D',
+    pago_referencia: payment.referencia || '-',
+    pago_fecha: payment.fecha || new Date().toISOString().split('T')[0]
+  };
   
+  const context = buildTemplateContext(reserva, habitacion, paymentExtras);
   const db = getDb();
-
+  
   // EMAIL
   if (reserva.email && emailEnabled) {
-    const html = baseTemplate(`
+    const fallbackSubject = `💳 Pago Recibido ` + context.pago_monto + ` — Reserva #` + reserva.id;
+    const fallbackBody = `
       <h2>💳 Pago Registrado</h2>
-      <p style="color:#4a5568;">Hola <strong>${guestName}</strong>, hemos recibido tu pago. ¡Gracias!</p>
+      <p style="color:#4a5568;">Hola <strong>` + context.cliente_nombre_completo + `</strong>, hemos recibido tu pago. ¡Gracias!</p>
       
       <div class="highlight">
-        <div class="amount" style="color:#22863a;">+ ${formatMoney(payment.monto)}</div>
-        <div class="label">${payment.concepto || 'Pago'} — ${payment.metodo_pago || 'N/D'}</div>
+        <div class="amount" style="color:#22863a;">+ ` + context.pago_monto + `</div>
+        <div class="label">` + context.pago_concepto + ` — ` + context.pago_metodo + `</div>
       </div>
       
       <table class="detail-table">
-        <tr><td>📋 Reserva</td><td>#${reserva.id}</td></tr>
-        <tr><td>🏠 Habitación</td><td>${roomName}</td></tr>
-        <tr><td>💰 Total estadía</td><td>${formatMoney(reserva.monto_total)}</td></tr>
-        <tr><td>✅ Total pagado</td><td style="color:#22863a;">${formatMoney(reserva.monto_pagado)}</td></tr>
-        <tr><td>📊 Saldo</td><td style="color:${reserva.saldo_pendiente > 0 ? '#e53e3e' : '#22863a'};">
-          ${reserva.saldo_pendiente > 0 ? formatMoney(reserva.saldo_pendiente) : '✓ Saldado'}
+        <tr><td>📋 Reserva</td><td>#` + reserva.id + `</td></tr>
+        <tr><td>🏠 Habitación</td><td>` + context.habitacion + `</td></tr>
+        <tr><td>💰 Total estadía</td><td>` + context.monto_total + `</td></tr>
+        <tr><td>✅ Total pagado</td><td style="color:#22863a;">` + context.monto_pagado + `</td></tr>
+        <tr><td>📊 Saldo</td><td style="color:` + (reserva.saldo_pendiente > 0 ? '#e53e3e' : '#22863a') + `;">
+          ` + (reserva.saldo_pendiente > 0 ? context.saldo_pendiente : '✓ Saldado') + `
         </td></tr>
-      </table>
-    `, `Pago de ${formatMoney(payment.monto)} recibido — Reserva #${reserva.id}`);
+      </table>`;
+      
+    const rendered = renderNotification('pago', context, fallbackSubject, fallbackBody, 'email');
+    const finalHtml = baseTemplate(rendered.body, `Pago de ` + context.pago_monto + ` recibido — Reserva #` + reserva.id, config);
     
-    results.email = await sendEmail(reserva.email, `💳 Pago Recibido ${formatMoney(payment.monto)} — Reserva #${reserva.id}`, html);
-    logNotification(db, reserva.id, 'pago', 'email', reserva.email, results.email, html);
+    results.email = await sendEmail(reserva.email, rendered.subject, finalHtml);
+    logNotification(db, reserva.id, 'pago', 'email', reserva.email, results.email, finalHtml);
   }
   
   // WHATSAPP
   if ((reserva.whatsapp || reserva.telefono) && waEnabled) {
-    const msg = `💳 *Pago Registrado* — ${HOTEL_NAME}\n\n` +
-      `Hola ${guestName}, recibimos tu pago:\n\n` +
-      `✅ Monto: ${formatMoney(payment.monto)}\n` +
-      `📋 Reserva: #${reserva.id}\n` +
-      `💰 Total: ${formatMoney(reserva.monto_total)}\n` +
-      `✅ Pagado: ${formatMoney(reserva.monto_pagado)}\n` +
-      (reserva.saldo_pendiente > 0 ? `⚠️ Saldo: ${formatMoney(reserva.saldo_pendiente)}` : '🎉 ¡Cuenta saldada!') +
+    const fallbackMsg = `💳 *Pago Registrado* — ` + context.hotel_nombre + `\n\n` +
+      `Hola ` + context.cliente_nombre_completo + `, recibimos tu pago:\n\n` +
+      `✅ Monto: ` + context.pago_monto + `\n` +
+      `📋 Reserva: #` + reserva.id + `\n` +
+      `💰 Total: ` + context.monto_total + `\n` +
+      `✅ Pagado: ` + context.monto_pagado + `\n` +
+      (reserva.saldo_pendiente > 0 ? `⚠️ Saldo: ` + context.saldo_pendiente : '🎉 ¡Cuenta saldada!') +
       `\n\n¡Gracias! 🙏`;
-    
-    results.whatsapp = await sendWhatsApp(reserva.whatsapp || reserva.telefono, msg);
-    logNotification(db, reserva.id, 'pago', 'whatsapp', reserva.whatsapp || reserva.telefono, results.whatsapp, msg);
+      
+    const rendered = renderNotification('pago', context, null, fallbackMsg, 'whatsapp');
+    results.whatsapp = await sendWhatsApp(reserva.whatsapp || reserva.telefono, rendered.body);
+    logNotification(db, reserva.id, 'pago', 'whatsapp', reserva.whatsapp || reserva.telefono, results.whatsapp, rendered.body);
   }
   
   return results;
@@ -435,36 +521,37 @@ async function notifyAdminNewBooking(reserva, habitacion) {
   const adminEmail = config.admin_email || process.env.ADMIN_EMAIL;
   if (!adminEmail) return { email: false };
   
-  const guestName = `${reserva.cliente} ${reserva.apellido || ''}`.trim();
-  const roomName = habitacion?.nombre || reserva.tipo_habitacion || '-';
-  
+  const context = buildTemplateContext(reserva, habitacion);
   const db = getDb();
-
-  const html = baseTemplate(`
+  
+  const fallbackSubject = `🔔 Nueva Reserva — ` + context.cliente_nombre_completo + ` — ` + context.check_in_formateado;
+  const fallbackBody = `
     <h2>🔔 Nueva Reserva Recibida</h2>
     <p style="color:#4a5568;">Se ha registrado una nueva reserva en el sistema.</p>
     
     <table class="detail-table">
-      <tr><td>👤 Huésped</td><td><strong>${guestName}</strong></td></tr>
-      <tr><td>📧 Email</td><td>${reserva.email || 'N/D'}</td></tr>
-      <tr><td>📱 WhatsApp</td><td>${reserva.whatsapp || reserva.telefono || 'N/D'}</td></tr>
-      <tr><td>📅 Check-in</td><td><strong>${formatDate(reserva.check_in)}</strong></td></tr>
-      <tr><td>📅 Check-out</td><td><strong>${formatDate(reserva.check_out)}</strong></td></tr>
-      <tr><td>🌙 Noches</td><td>${reserva.noches}</td></tr>
-      <tr><td>🏠 Habitación</td><td>${roomName}</td></tr>
-      <tr><td>🍽️ Plan</td><td>${reserva.plan_nombre || 'N/D'}</td></tr>
-      <tr><td>💰 Total</td><td><strong>${formatMoney(reserva.monto_total)}</strong></td></tr>
-      <tr><td>📝 Fuente</td><td>${reserva.fuente || 'Directa'}</td></tr>
-      <tr><td>📝 Notas</td><td>${reserva.notes || '-'}</td></tr>
+      <tr><td>👤 Huésped</td><td><strong>` + context.cliente_nombre_completo + `</strong></td></tr>
+      <tr><td>📧 Email</td><td>` + (reserva.email || 'N/D') + `</td></tr>
+      <tr><td>📱 WhatsApp</td><td>` + (reserva.whatsapp || reserva.telefono || 'N/D') + `</td></tr>
+      <tr><td>📅 Check-in</td><td><strong>` + context.check_in_formateado + `</strong></td></tr>
+      <tr><td>📅 Check-out</td><td><strong>` + context.check_out_formateado + `</strong></td></tr>
+      <tr><td>🌙 Noches</td><td>` + reserva.noches + `</td></tr>
+      <tr><td>🏠 Habitación</td><td>` + context.habitacion + `</td></tr>
+      <tr><td>🍽️ Plan</td><td>` + (reserva.plan_nombre || 'N/D') + `</td></tr>
+      <tr><td>💰 Total</td><td><strong>` + context.monto_total + `</strong></td></tr>
+      <tr><td>📝 Fuente</td><td>` + (reserva.fuente || 'Directa') + `</td></tr>
+      <tr><td>📝 Notas</td><td>` + (reserva.notas || '-') + `</td></tr>
     </table>
     
     <p style="text-align:center;">
-      <a href="${HOTEL_URL}" class="btn">Ir al PMS</a>
-    </p>
-  `, `Nueva reserva de ${guestName} — ${reserva.check_in}`);
+      <a href="` + HOTEL_URL + `" class="btn">Ir al PMS</a>
+    </p>`;
+    
+  const rendered = renderNotification('admin_notif', context, fallbackSubject, fallbackBody, 'email');
+  const finalHtml = baseTemplate(rendered.body, `Nueva reserva de ` + context.cliente_nombre_completo + ` — ` + reserva.check_in, config);
   
-  const emailResult = await sendEmail(adminEmail, `🔔 Nueva Reserva — ${guestName} — ${formatDate(reserva.check_in)}`, html);
-  logNotification(db, reserva.id, 'admin_notif', 'email', adminEmail, emailResult, html);
+  const emailResult = await sendEmail(adminEmail, rendered.subject, finalHtml);
+  logNotification(db, reserva.id, 'admin_notif', 'email', adminEmail, emailResult, finalHtml);
   return { email: emailResult };
 }
 
@@ -478,32 +565,35 @@ async function notifyReminder(reserva, habitacion, daysUntil) {
   if (!emailEnabled && !waEnabled) return { email: false, whatsapp: false };
   const results = { email: false, whatsapp: false };
   
-  const guestName = `${reserva.cliente} ${reserva.apellido || ''}`.trim();
-  const roomName = habitacion?.nombre || reserva.tipo_habitacion || '-';
+  const dayLabel = daysUntil === 1 ? 'mañana' : `en ` + daysUntil + ` días`;
+  const reminderExtras = {
+    dias_restantes: daysUntil,
+    etiqueta_dias: dayLabel
+  };
   
-  const dayLabel = daysUntil === 1 ? 'mañana' : `en ${daysUntil} días`;
-  
+  const context = buildTemplateContext(reserva, habitacion, reminderExtras);
   const db = getDb();
-
+  
   // EMAIL
   if (reserva.email && emailEnabled) {
-    const html = baseTemplate(`
-      <h2>📅 Tu estadía es ${dayLabel}</h2>
-      <p style="color:#4a5568;">Hola <strong>${guestName}</strong>, te recordamos que tu reserva en ${HOTEL_NAME} es ${dayLabel}.</p>
+    const fallbackSubject = `📅 Recordatorio — Tu estadía es ` + dayLabel + ` — ` + context.hotel_nombre;
+    const fallbackBody = `
+      <h2>📅 Tu estadía es ` + dayLabel + `</h2>
+      <p style="color:#4a5568;">Hola <strong>` + context.cliente_nombre_completo + `</strong>, te recordamos que tu reserva en ` + context.hotel_nombre + ` es ` + dayLabel + `.</p>
       
       <table class="detail-table">
-        <tr><td>📅 Check-in</td><td><strong>${formatDate(reserva.check_in)}</strong> (2:00 PM)</td></tr>
-        <tr><td>📅 Check-out</td><td>${formatDate(reserva.check_out)} (12:00 PM)</td></tr>
-        <tr><td>🏠 Habitación</td><td>${roomName}</td></tr>
-        <tr><td>🍽️ Plan</td><td>${reserva.plan_nombre || 'Estándar'}</td></tr>
+        <tr><td>📅 Check-in</td><td><strong>` + context.check_in_formateado + `</strong> (2:00 PM)</td></tr>
+        <tr><td>📅 Check-out</td><td>` + context.check_out_formateado + ` (12:00 PM)</td></tr>
+        <tr><td>🏠 Habitación</td><td>` + context.habitacion + `</td></tr>
+        <tr><td>🍽️ Plan</td><td>` + context.plan + `</td></tr>
       </table>
       
-      ${reserva.saldo_pendiente > 0 ? `
+      ` + (reserva.saldo_pendiente > 0 ? `
         <div class="highlight">
           <div class="label">Saldo pendiente</div>
-          <div class="amount" style="color:#e53e3e;">${formatMoney(reserva.saldo_pendiente)}</div>
+          <div class="amount" style="color:#e53e3e;">` + context.saldo_pendiente + `</div>
         </div>
-      ` : ''}
+      ` : '') + `
       
       <p style="color:#718096;font-size:14px;">
         <strong>📍 Dirección:</strong> Playa El Palmar, Chame, Panamá<br>
@@ -511,25 +601,28 @@ async function notifyReminder(reserva, habitacion, daysUntil) {
         <strong>📶 WiFi:</strong> Disponible en todo el recinto
       </p>
       
-      <p style="color:#4a5568;">¡Te esperamos! 🌊🌴</p>
-    `, `Recordatorio: tu estadía en ${HOTEL_NAME} es ${dayLabel}`);
+      <p style="color:#4a5568;">¡Te esperamos! 🌊🌴</p>`;
+      
+    const rendered = renderNotification('recordatorio', context, fallbackSubject, fallbackBody, 'email');
+    const finalHtml = baseTemplate(rendered.body, `Recordatorio: tu estadía en ` + context.hotel_nombre + ` es ` + dayLabel, config);
     
-    results.email = await sendEmail(reserva.email, `📅 Recordatorio — Tu estadía es ${dayLabel} — ${HOTEL_NAME}`, html);
-    logNotification(db, reserva.id, 'recordatorio', 'email', reserva.email, results.email, html);
+    results.email = await sendEmail(reserva.email, rendered.subject, finalHtml);
+    logNotification(db, reserva.id, 'recordatorio', 'email', reserva.email, results.email, finalHtml);
   }
   
   // WHATSAPP
   if ((reserva.whatsapp || reserva.telefono) && waEnabled) {
-    const msg = `📅 *Recordatorio* — ${HOTEL_NAME}\n\n` +
-      `Hola ${guestName} 👋\n\n` +
-      `Te recordamos que tu estadía es *${dayLabel}*:\n\n` +
-      `📅 Check-in: ${reserva.check_in} (2:00 PM)\n` +
-      `🏠 ${roomName}\n` +
-      (reserva.saldo_pendiente > 0 ? `💰 Saldo pendiente: ${formatMoney(reserva.saldo_pendiente)}\n` : '') +
+    const fallbackMsg = `📅 *Recordatorio* — ` + context.hotel_nombre + `\n\n` +
+      `Hola ` + context.cliente_nombre_completo + ` 👋\n\n` +
+      `Te recordamos que tu estadía es *` + dayLabel + `*:\n\n` +
+      `📅 Check-in: ` + reserva.check_in + ` (2:00 PM)\n` +
+      `🏠 ` + context.habitacion + `\n` +
+      (reserva.saldo_pendiente > 0 ? `💰 Saldo pendiente: ` + context.saldo_pendiente + `\n` : '') +
       `\n📍 Playa El Palmar, Chame, Panamá\n\n¡Te esperamos! 🌊🌴`;
-    
-    results.whatsapp = await sendWhatsApp(reserva.whatsapp || reserva.telefono, msg);
-    logNotification(db, reserva.id, 'recordatorio', 'whatsapp', reserva.whatsapp || reserva.telefono, results.whatsapp, msg);
+      
+    const rendered = renderNotification('recordatorio', context, null, fallbackMsg, 'whatsapp');
+    results.whatsapp = await sendWhatsApp(reserva.whatsapp || reserva.telefono, rendered.body);
+    logNotification(db, reserva.id, 'recordatorio', 'whatsapp', reserva.whatsapp || reserva.telefono, results.whatsapp, rendered.body);
   }
   
   return results;
@@ -614,6 +707,7 @@ module.exports = {
   sendEmail,
   sendWhatsApp,
   logNotification,
+  baseTemplate,
   get ENABLED() {
     try {
       const config = getSystemConfig();
