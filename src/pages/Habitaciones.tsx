@@ -25,6 +25,7 @@ export default function Habitaciones() {
   const [editForm, setEditForm] = useState({ asignado_a: '', no_molestar: 0, comentarios: '' });
   const [catFilter, setCatFilter] = useState('');
   const [limpiezaFilter, setLimpiezaFilter] = useState('');
+  const [activeDropdownRoomId, setActiveDropdownRoomId] = useState<number | null>(null);
 
   const load = () => { api.get('/habitaciones').then(r => { setRooms(r.data); setLoading(false); }); };
   useEffect(() => { load(); }, []);
@@ -157,14 +158,62 @@ export default function Habitaciones() {
                           <span className="font-bold text-gray-800 text-sm">{room.nombre}</span>
                         </div>
                         <div className="flex items-center gap-1">
+                          {room.comentarios && (
+                            <div className="relative group/tooltip inline-block mr-1">
+                              <span className="cursor-pointer text-xs hover:scale-110 transition duration-150" title="Ver Comentarios">💬</span>
+                              <div className="absolute bottom-full right-0 mb-2 hidden group-hover/tooltip:block w-48 p-2.5 bg-gray-900/95 backdrop-blur-md border border-white/10 text-white text-[11px] leading-relaxed rounded-xl shadow-xl z-30 pointer-events-none text-left">
+                                <p className="font-bold text-ocean-400 text-[9px] uppercase tracking-wider mb-0.5">Notas del Personal:</p>
+                                <p className="font-medium text-gray-200">{room.comentarios}</p>
+                                <div className="absolute top-full right-2 border-4 border-transparent border-t-gray-900/95" />
+                              </div>
+                            </div>
+                          )}
                           <span className={`text-[10px] ${estadoHabColors[room.estado_habitacion] || ''}`}>{room.estado_habitacion}</span>
                           <button onClick={() => openEdit(room)} className="text-gray-300 hover:text-gray-500 text-xs" title="Editar">⚙️</button>
                         </div>
                       </div>
-                      <button onClick={() => toggleLimpieza(room.id, room.estado_limpieza)}
-                        className={`w-full px-2 py-1.5 rounded-md text-xs font-medium border transition hover:opacity-80 ${limpiezaColors[room.estado_limpieza] || 'bg-gray-100'}`}>
-                        {limpiezaEmoji[room.estado_limpieza] || '⚪'} {room.estado_limpieza}
-                      </button>
+                      
+                      <div className="relative">
+                        <button
+                          onClick={() => setActiveDropdownRoomId(activeDropdownRoomId === room.id ? null : room.id)}
+                          className={`w-full px-2.5 py-1.5 rounded-xl text-xs font-bold border transition duration-150 flex items-center justify-between shadow-sm ${
+                            room.estado_limpieza === 'Limpia'
+                              ? 'bg-gradient-to-r from-emerald-50 to-teal-50 border-emerald-200 text-emerald-800 hover:from-emerald-100 hover:to-teal-100'
+                              : room.estado_limpieza === 'Inspeccionada'
+                              ? 'bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200 text-blue-800 hover:from-blue-100 hover:to-indigo-100'
+                              : 'bg-gradient-to-r from-rose-50 to-pink-50 border-rose-200 text-rose-800 hover:from-rose-100 hover:to-pink-100'
+                          }`}
+                        >
+                          <span>{limpiezaEmoji[room.estado_limpieza] || '⚪'} {room.estado_limpieza}</span>
+                          <span className="text-[9px] opacity-60">▼</span>
+                        </button>
+                        {activeDropdownRoomId === room.id && (
+                          <>
+                            <div className="fixed inset-0 z-10" onClick={() => setActiveDropdownRoomId(null)} />
+                            <div className="absolute left-0 right-0 mt-1 bg-white border border-gray-100 rounded-xl shadow-xl z-20 p-1 flex flex-col gap-0.5 animate-in fade-in slide-in-from-top-1 duration-150">
+                              {[
+                                { id: 'Limpia', label: 'Limpia', emoji: '🟢', color: 'hover:bg-green-50 hover:text-green-700' },
+                                { id: 'Inspeccionada', label: 'Inspeccionada', emoji: '🔵', color: 'hover:bg-blue-50 hover:text-blue-700' },
+                                { id: 'Sucia', label: 'Sucia', emoji: '🔴', color: 'hover:bg-red-50 hover:text-red-700' },
+                              ].map(opt => (
+                                <button
+                                  key={opt.id}
+                                  onClick={async () => {
+                                    setActiveDropdownRoomId(null);
+                                    await api.patch(`/habitaciones/${room.id}/limpieza`, { estado_limpieza: opt.id });
+                                    load();
+                                  }}
+                                  className={`w-full px-2.5 py-1.5 rounded-lg text-left text-xs font-semibold text-gray-700 transition ${opt.color} flex items-center gap-1.5`}
+                                >
+                                  <span>{opt.emoji}</span>
+                                  <span>{opt.label}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </div>
+
                       {(room.no_molestar === 1 || room.asignado_a) && (
                         <div className="mt-1.5 space-y-0.5">
                           {room.no_molestar === 1 && <div className="text-[10px] text-red-500 font-medium">🚫 No Molestar</div>}

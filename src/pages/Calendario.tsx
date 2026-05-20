@@ -1,7 +1,13 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { api } from '../api/client';
 import { ChevronLeft, ChevronRight, CalendarDays } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
+import InteractivePopover from '../components/InteractivePopover';
+import { useContextMenu } from '../hooks/useContextMenu';
+import ContextMenu from '../components/ContextMenu';
+import RoomRow from '../components/RoomRow';
+
+
 
 const estadoColors: Record<string, string> = {
   'Confirmada': 'bg-blue-400',
@@ -41,6 +47,19 @@ export default function Calendario() {
   const [loading, setLoading] = useState(true);
   const [tooltip, setTooltip] = useState<{ reserva: any; x: number; y: number } | null>(null);
   const [catFilter, setCatFilter] = useState('');
+  const [userRole, setUserRole] = useState('receptionist');
+
+  // Quick Payment Modal States
+  const [quickPayReservaId, setQuickPayReservaId] = useState<number | null>(null);
+  const [quickPayForm, setQuickPayForm] = useState({ monto: '', concepto: '', metodo_pago: 'efectivo', referencia: '' });
+  const [quickPayLoading, setQuickPayLoading] = useState(false);
+
+  // Hover references to prevent high-frequency re-renders & flickering
+  const leaveTimeoutRef = useRef<any>(null);
+  const enterTimeoutRef = useRef<any>(null);
+
+  const { contextMenu, handleContextMenu, closeMenu } = useContextMenu();
+
 
   const dates = useMemo(() => {
     return Array.from({ length: DAYS_TO_SHOW }, (_, i) => addDays(startDate, i));
@@ -49,11 +68,24 @@ export default function Calendario() {
   const desde = formatDate(dates[0]);
   const hasta = formatDate(addDays(dates[dates.length - 1], 1));
 
+  // Retrieve user role on mount
   useEffect(() => {
+    api.get('/auth/me')
+      .then(r => {
+        if (r.data && r.data.rol) setUserRole(r.data.rol);
+      })
+      .catch(() => {});
+  }, []);
+
+  const load = () => {
     setLoading(true);
     api.get(`/hotel/calendario?desde=${desde}&hasta=${hasta}`)
       .then(r => setData(r.data))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    load();
   }, [desde, hasta]);
 
   const prev = () => setStartDate(d => addDays(d, -7));
@@ -89,43 +121,152 @@ export default function Calendario() {
       }));
   }, [data?.habitaciones, catFilter]);
 
-  const getReservationsForRoom = (roomId: number) => {
+  const getReservationsForRoom = useCallback((roomId: number) => {
     if (!data?.reservas) return [];
     return data.reservas.filter((r: any) => r.habitacion_id === roomId);
-  };
+  }, [data?.reservas]);
 
-  const getBarStyle = (reserva: any) => {
-    const resStart = new Date(reserva.check_in + 'T12:00:00');
-    const resEnd = new Date(reserva.check_out + 'T12:00:00');
-    const viewStart = dates[0];
-    const viewEnd = addDays(dates[dates.length - 1], 1);
-    const barStart = resStart < viewStart ? viewStart : resStart;
-    const barEnd = resEnd > viewEnd ? viewEnd : resEnd;
-    const totalViewDays = DAYS_TO_SHOW;
-    const startOffset = daysBetween(formatDate(viewStart), formatDate(barStart));
-    const barDays = daysBetween(formatDate(barStart), formatDate(barEnd));
-    const left = (startOffset / totalViewDays) * 100;
-    const width = (barDays / totalViewDays) * 100;
-    return { left: `${left}%`, width: `${Math.min(width, 100 - left)}%` };
-  };
+  // Callbacks for memoized RoomRow
+  const handleCellClick = useCallback((roomId: number, dateStr: string) => {
+    const d = new Date(dateStr + 'T12:00:00');
+    const nextDay = new Date(d);
+    nextDay.setDate(nextDay.getDate() + 1);
+    const nextDayStr = nextDay.toISOString().split('T')[0];
+    navigate(`/reservas/nueva?check_in=${dateStr}&check_out=${nextDayStr}&habitacion_id=${roomId}`);
+  }, [navigate]);
 
-  // Cloudbeds-style: show a small checkout indicator on the checkout day
-  const getCheckoutIndicator = (reserva: any) => {
-    const coDate = new Date(reserva.check_out + 'T12:00:00');
-    const viewStart = dates[0];
-    const viewEnd = addDays(dates[dates.length - 1], 1);
-    if (coDate < viewStart || coDate >= viewEnd) return null;
-    const offset = daysBetween(formatDate(viewStart), reserva.check_out);
-    const left = (offset / DAYS_TO_SHOW) * 100;
-    const w = (1 / DAYS_TO_SHOW) * 100 * 0.4; // 40% of the checkout day column
-    return { left: `${left}%`, width: `${w}%` };
-  };
+  const handleCellContextMenu = useCallback((e: React.MouseEvent, room: any, date: string) => {
+    handleContextMenu(e, { type: 'empty_cell', room, date });
+  }, [handleContextMenu]);
+
+  const handleReservaMouseEnter = useCallback((e: React.MouseEvent, res: any) => {
+    if (leaveTimeoutRef.current) clearTimeout(leaveTimeoutRef.current);
+    if (enterTimeoutRef.current) clearTimeout(enterTimeoutRef.current);
+    const clientX = e.clientX;
+    const clientY = e.clientY;
+    enterTimeoutRef.current = setTimeout(() => {
+      setTooltip({ reserva: res, x: clientX, y: clientY });
+    }, 150);
+  }, []);
+
+  const handleReservaMouseLeave = useCallback(() => {
+    if (enterTimeoutRef.current) clearTimeout(enterTimeoutRef.current);
+    leaveTimeoutRef.current = setTimeout(() => {
+      setTooltip(null);
+    }, 200);
+  }, []);
+
+  const handleReservaContextMenu = useCallback((e: React.MouseEvent, res: any) => {
+    setTooltip(null);
+    handleContextMenu(e, { type: 'reserva', reserva: res });
+  }, [handleContextMenu]);
 
   const isToday = (d: Date) => formatDate(d) === formatDate(new Date());
   const isWeekend = (d: Date) => d.getDay() === 0 || d.getDay() === 6;
 
   const dayNames = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
   const monthNames = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+
+  // Handle actions executed from inside the interactive popover
+  const handlePopoverAction = async (actionType: string, reservaId: number) => {
+    setTooltip(null);
+    if (actionType === 'view_details') {
+      navigate(`/reservas/${reservaId}`);
+    } else if (actionType === 'check_in') {
+      try {
+        await api.patch(`/hotel/reservas/${reservaId}/status`, { estado: 'Hospedado' });
+        load();
+      } catch (err: any) {
+        alert(err?.response?.data?.error?.message || 'Error al hacer Check-In');
+      }
+    } else if (actionType === 'check_out') {
+      try {
+        await api.patch(`/hotel/reservas/${reservaId}/status`, { estado: 'Check-Out' });
+        load();
+      } catch (err: any) {
+        alert(err?.response?.data?.error?.message || 'Error al hacer Check-Out');
+      }
+    } else if (actionType === 'register_payment') {
+      setQuickPayReservaId(reservaId);
+      const resObj = data?.reservas?.find((r: any) => r.id === reservaId);
+      if (resObj) {
+        setQuickPayForm({
+          monto: resObj.saldo_pendiente ? String(resObj.saldo_pendiente) : '',
+          concepto: 'Abono rápido desde Calendario',
+          metodo_pago: 'efectivo',
+          referencia: '',
+        });
+      }
+    }
+  };
+
+  const handleContextMenuAction = async (actionType: string, payload: any) => {
+    closeMenu();
+    if (actionType === 'view_details') {
+      navigate(`/reservas/${payload.reserva.id}`);
+    } else if (actionType === 'check_in') {
+      try {
+        await api.patch(`/hotel/reservas/${payload.reserva.id}/status`, { estado: 'Hospedado' });
+        load();
+      } catch (err: any) {
+        alert(err?.response?.data?.error?.message || 'Error al hacer Check-In');
+      }
+    } else if (actionType === 'check_out') {
+      try {
+        await api.patch(`/hotel/reservas/${payload.reserva.id}/status`, { estado: 'Check-Out' });
+        load();
+      } catch (err: any) {
+        alert(err?.response?.data?.error?.message || 'Error al hacer Check-Out');
+      }
+    } else if (actionType === 'register_payment') {
+      setQuickPayReservaId(payload.reserva.id);
+      setQuickPayForm({
+        monto: payload.reserva.saldo_pendiente ? String(payload.reserva.saldo_pendiente) : '',
+        concepto: 'Abono rápido desde Calendario',
+        metodo_pago: 'efectivo',
+        referencia: '',
+      });
+    } else if (actionType === 'cancel_reserva') {
+      if (confirm(`¿Estás seguro de que deseas cancelar la reserva de ${payload.reserva.cliente}?`)) {
+        try {
+          await api.patch(`/hotel/reservas/${payload.reserva.id}/status`, { estado: 'Cancelada' });
+          load();
+        } catch (err: any) {
+          alert(err?.response?.data?.error?.message || 'Error al cancelar la reserva');
+        }
+      }
+    } else if (actionType === 'create_booking') {
+      navigate(`/reservas/nueva?check_in=${payload.date}&check_out=${formatDate(addDays(new Date(payload.date + 'T12:00:00'), 1))}&habitacion_id=${payload.room.id}`);
+    } else if (actionType === 'set_clean' || actionType === 'set_dirty' || actionType === 'set_inspected') {
+      const cleanState = actionType === 'set_clean' ? 'Limpia' : actionType === 'set_dirty' ? 'Sucia' : 'Inspeccionada';
+      try {
+        await api.patch(`/habitaciones/${payload.room.id}/limpieza`, { estado_limpieza: cleanState });
+        load();
+      } catch (err: any) {
+        alert(err?.response?.data?.error?.message || 'Error al actualizar limpieza');
+      }
+    }
+  };
+
+
+  const submitQuickPay = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickPayReservaId || !quickPayForm.monto || parseFloat(quickPayForm.monto) <= 0) return;
+    setQuickPayLoading(true);
+    try {
+      await api.post(`/hotel/reservas/${quickPayReservaId}/folio`, {
+        ...quickPayForm,
+        monto: parseFloat(quickPayForm.monto),
+        tipo: 'credito',
+      });
+      setQuickPayReservaId(null);
+      load();
+    } catch (err: any) {
+      alert(err?.response?.data?.error?.message || 'Error al registrar pago');
+    } finally {
+      setQuickPayLoading(false);
+    }
+  };
 
   if (loading && !data) return <div className="animate-pulse text-gray-400 p-8">Cargando calendario...</div>;
 
@@ -200,47 +341,17 @@ export default function Calendario() {
                 {group.rooms.map((room: any) => {
                   const reservations = getReservationsForRoom(room.id);
                   return (
-                    <div key={room.id} className="flex border-b border-gray-100 hover:bg-gray-50/50 group" style={{ minHeight: '40px' }}>
-                      {/* Room Name */}
-                      <div className={`${ROOM_COL_W} flex-shrink-0 border-r border-gray-200 px-3 py-1.5 flex items-center gap-2`}>
-                        <span className="text-sm font-medium text-gray-700">{room.nombre}</span>
-                        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${room.estado_limpieza === 'Limpia' ? 'bg-green-400' : room.estado_limpieza === 'Inspeccionada' ? 'bg-blue-400' : 'bg-red-400'}`} title={room.estado_limpieza} />
-                        {room.estado_habitacion === 'Ocupada' && <span className="text-[10px] text-orange-500">●</span>}
-                      </div>
-
-                      {/* Grid cells + Reservation bars */}
-                      <div className="flex-1 relative">
-                        <div className="flex absolute inset-0">
-                          {dates.map((d, i) => (
-                            <div key={i} className={`flex-1 min-w-[50px] border-r border-gray-50 cursor-pointer hover:bg-ocean-50/30 transition ${isToday(d) ? 'bg-ocean-50/20' : isWeekend(d) ? 'bg-gray-50/50' : ''}`}
-                              onClick={() => navigate(`/reservas/nueva?check_in=${formatDate(d)}&check_out=${formatDate(addDays(d, 1))}&habitacion_id=${room.id}`)}
-                              title={`Nueva reserva: ${room.nombre} — ${formatDate(d)}`}
-                            />
-                          ))}
-                        </div>
-                        {reservations.map((res: any) => {
-                          const style = getBarStyle(res);
-                          const coStyle = getCheckoutIndicator(res);
-                          const colorClass = estadoColors[res.estado] || 'bg-gray-400';
-                          return (
-                            <div key={res.id}>
-                              <Link to={`/reservas/${res.id}`}
-                                className={`absolute top-1 bottom-1 ${colorClass} rounded-md flex items-center px-2 text-white text-xs font-medium shadow-sm hover:shadow-md hover:brightness-110 transition cursor-pointer overflow-hidden whitespace-nowrap z-10`}
-                                style={style}
-                                onMouseEnter={(e) => setTooltip({ reserva: res, x: e.clientX, y: e.clientY })}
-                                onMouseLeave={() => setTooltip(null)}
-                              >
-                                <span className="truncate">{res.cliente} {res.plan_nombre ? `• ${res.plan_nombre}` : ''}</span>
-                              </Link>
-                              {coStyle && (
-                                <div className={`absolute top-1 bottom-1 ${colorClass} opacity-40 rounded-r-md z-[9]`}
-                                  style={coStyle} title={`Check-out: ${res.check_out}`} />
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
+                    <RoomRow
+                      key={room.id}
+                      room={room}
+                      dates={dates}
+                      reservations={reservations}
+                      onCellClick={handleCellClick}
+                      onCellContextMenu={handleCellContextMenu}
+                      onReservaMouseEnter={handleReservaMouseEnter}
+                      onReservaMouseLeave={handleReservaMouseLeave}
+                      onReservaContextMenu={handleReservaContextMenu}
+                    />
                   );
                 })}
               </div>
@@ -249,15 +360,136 @@ export default function Calendario() {
         ))}
       </div>
 
-      {/* Tooltip */}
+      {/* Interactive Popover */}
       {tooltip && (
-        <div className="fixed z-50 bg-gray-900 text-white text-xs rounded-lg px-3 py-2 shadow-xl max-w-xs pointer-events-none"
-          style={{ left: tooltip.x + 12, top: tooltip.y - 10 }}>
-          <div className="font-semibold">{tooltip.reserva.cliente}</div>
-          <div>{tooltip.reserva.check_in} → {tooltip.reserva.check_out} ({tooltip.reserva.noches}n)</div>
-          <div>{tooltip.reserva.plan_nombre} • {tooltip.reserva.adultos}A {tooltip.reserva.menores > 0 ? `+ ${tooltip.reserva.menores}M` : ''}</div>
-          <div className="text-green-300">${tooltip.reserva.monto_total?.toFixed(2)} • Saldo: ${tooltip.reserva.saldo_pendiente?.toFixed(2)}</div>
+        <div
+          onMouseEnter={() => {
+            if (leaveTimeoutRef.current) clearTimeout(leaveTimeoutRef.current);
+          }}
+          onMouseLeave={() => {
+            if (enterTimeoutRef.current) clearTimeout(enterTimeoutRef.current);
+            leaveTimeoutRef.current = setTimeout(() => {
+              setTooltip(null);
+            }, 200);
+          }}
+        >
+          <InteractivePopover
+            reserva={tooltip.reserva}
+            x={tooltip.x}
+            y={tooltip.y}
+            onClose={() => setTooltip(null)}
+            onAction={handlePopoverAction}
+            userRole={userRole}
+          />
         </div>
+      )}
+
+      {/* Quick Payment Modal */}
+      {quickPayReservaId && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setQuickPayReservaId(null)}>
+          <form onSubmit={submitQuickPay} className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-lg font-bold text-gray-800">Registrar Pago Rápido</h2>
+              <button type="button" onClick={() => setQuickPayReservaId(null)} className="text-gray-400 hover:text-gray-600">✕</button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Monto *</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2.5 text-gray-400 font-bold">$</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    value={quickPayForm.monto}
+                    onChange={e => setQuickPayForm(f => ({ ...f, monto: e.target.value }))}
+                    required
+                    className="w-full pl-7 pr-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 outline-none font-medium"
+                    placeholder="0.00"
+                    autoFocus
+                  />
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Concepto</label>
+                <input
+                  type="text"
+                  value={quickPayForm.concepto}
+                  onChange={e => setQuickPayForm(f => ({ ...f, concepto: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 outline-none text-sm"
+                  placeholder="Ej: Abono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Método de Pago</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: 'efectivo', label: '💵 Efectivo' },
+                    { id: 'transferencia', label: '🏦 Transfer' },
+                    { id: 'yappy', label: '📱 Yappy' },
+                    { id: 'tarjeta', label: '💳 Tarjeta' },
+                  ].map(method => (
+                    <button
+                      key={method.id}
+                      type="button"
+                      onClick={() => setQuickPayForm(f => ({ ...f, metodo_pago: method.id }))}
+                      className={`py-2 rounded-xl text-xs font-semibold border transition ${
+                        quickPayForm.metodo_pago === method.id
+                          ? 'border-green-500 bg-green-50 text-green-700 font-bold ring-2 ring-green-100'
+                          : 'border-gray-200 hover:bg-gray-50 text-gray-600'
+                      }`}
+                    >
+                      {method.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Referencia</label>
+                <input
+                  type="text"
+                  value={quickPayForm.referencia}
+                  onChange={e => setQuickPayForm(f => ({ ...f, referencia: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 outline-none text-sm"
+                  placeholder="Número de control o comprobante"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-2.5 mt-6">
+              <button
+                type="submit"
+                disabled={quickPayLoading}
+                className="flex-1 py-2.5 bg-green-500 text-white rounded-xl font-bold text-sm hover:bg-green-600 transition shadow-lg shadow-green-100 flex items-center justify-center gap-1.5 disabled:opacity-50"
+              >
+                {quickPayLoading ? 'Procesando...' : 'Aplicar Abono'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setQuickPayReservaId(null)}
+                className="px-4 py-2.5 text-gray-500 hover:bg-gray-100 rounded-xl text-sm font-semibold transition"
+              >
+                Cancelar
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Context Menu */}
+      {contextMenu.visible && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          data={contextMenu.data}
+          onAction={handleContextMenuAction}
+          onClose={closeMenu}
+          userRole={userRole}
+        />
       )}
 
       {/* Legend */}
@@ -274,3 +506,4 @@ export default function Calendario() {
     </div>
   );
 }
+

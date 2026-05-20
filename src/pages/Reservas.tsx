@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { api } from '../api/client';
-import { Link } from 'react-router-dom';
-import { Plus, Search } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Plus, Search, MoreHorizontal } from 'lucide-react';
+import { useContextMenu } from '../hooks/useContextMenu';
+import ContextMenu from '../components/ContextMenu';
 
 const estadoColor: Record<string, string> = {
   'Confirmada': 'bg-blue-100 text-blue-700',
@@ -13,11 +15,30 @@ const estadoColor: Record<string, string> = {
 };
 
 export default function Reservas() {
+  const navigate = useNavigate();
   const [reservas, setReservas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [filtroEstado, setFiltroEstado] = useState('');
   const [filtroCliente, setFiltroCliente] = useState('');
   const [filtroCategoria, setFiltroCategoria] = useState('');
+  const [userRole, setUserRole] = useState('receptionist');
+
+  // Quick Payment Modal States
+  const [quickPayReservaId, setQuickPayReservaId] = useState<number | null>(null);
+  const [quickPayForm, setQuickPayForm] = useState({ monto: '', concepto: '', metodo_pago: 'efectivo', referencia: '' });
+  const [quickPayLoading, setQuickPayLoading] = useState(false);
+
+  // Initialize context menu
+  const { contextMenu, handleContextMenu, closeMenu } = useContextMenu();
+
+  // Retrieve user role on mount
+  useEffect(() => {
+    api.get('/auth/me')
+      .then(r => {
+        if (r.data && r.data.rol) setUserRole(r.data.rol);
+      })
+      .catch(() => {});
+  }, []);
 
   const load = () => {
     setLoading(true);
@@ -28,6 +49,63 @@ export default function Reservas() {
   };
 
   useEffect(() => { load(); }, [filtroEstado]);
+
+  const handleContextMenuAction = async (actionType: string, payload: any) => {
+    closeMenu();
+    if (actionType === 'view_details') {
+      navigate(`/reservas/${payload.reserva.id}`);
+    } else if (actionType === 'check_in') {
+      try {
+        await api.patch(`/hotel/reservas/${payload.reserva.id}/status`, { estado: 'Hospedado' });
+        load();
+      } catch (err: any) {
+        alert(err?.response?.data?.error?.message || 'Error al hacer Check-In');
+      }
+    } else if (actionType === 'check_out') {
+      try {
+        await api.patch(`/hotel/reservas/${payload.reserva.id}/status`, { estado: 'Check-Out' });
+        load();
+      } catch (err: any) {
+        alert(err?.response?.data?.error?.message || 'Error al hacer Check-Out');
+      }
+    } else if (actionType === 'register_payment') {
+      setQuickPayReservaId(payload.reserva.id);
+      setQuickPayForm({
+        monto: payload.reserva.saldo_pendiente ? String(payload.reserva.saldo_pendiente) : '',
+        concepto: 'Abono rápido desde listado',
+        metodo_pago: 'efectivo',
+        referencia: '',
+      });
+    } else if (actionType === 'cancel_reserva') {
+      if (confirm(`¿Estás seguro de que deseas cancelar la reserva de ${payload.reserva.cliente}?`)) {
+        try {
+          await api.patch(`/hotel/reservas/${payload.reserva.id}/status`, { estado: 'Cancelada' });
+          load();
+        } catch (err: any) {
+          alert(err?.response?.data?.error?.message || 'Error al cancelar la reserva');
+        }
+      }
+    }
+  };
+
+  const submitQuickPay = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickPayReservaId || !quickPayForm.monto || parseFloat(quickPayForm.monto) <= 0) return;
+    setQuickPayLoading(true);
+    try {
+      await api.post(`/hotel/reservas/${quickPayReservaId}/folio`, {
+        ...quickPayForm,
+        monto: parseFloat(quickPayForm.monto),
+        tipo: 'credito',
+      });
+      setQuickPayReservaId(null);
+      load();
+    } catch (err: any) {
+      alert(err?.response?.data?.error?.message || 'Error al registrar pago');
+    } finally {
+      setQuickPayLoading(false);
+    }
+  };
 
   // Filter by category client-side (reserva has habitacion info)
   const filteredReservas = filtroCategoria
@@ -91,11 +169,18 @@ export default function Reservas() {
                     <th className="px-4 py-3 text-right">Total</th>
                     <th className="px-4 py-3 text-right">Saldo</th>
                     <th className="px-4 py-3 text-center">Estado</th>
+                    <th className="px-4 py-3 text-center">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {filteredReservas.map((r: any) => (
-                    <tr key={r.id} className="hover:bg-gray-50 cursor-pointer">
+                    <tr
+                      key={r.id}
+                      className="hover:bg-gray-50 cursor-pointer"
+                      onContextMenu={(e) => {
+                        handleContextMenu(e, { type: 'reserva', reserva: r });
+                      }}
+                    >
                       <td className="px-4 py-3 text-gray-400 text-xs">{r.id}</td>
                       <td className="px-4 py-3 font-medium">
                         <Link to={`/reservas/${r.id}`} className="text-ocean-600 hover:underline">
@@ -119,12 +204,131 @@ export default function Reservas() {
                       <td className="px-4 py-3 text-center">
                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${estadoColor[r.estado] || 'bg-gray-100'}`}>{r.estado}</span>
                       </td>
+                      <td className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>
+                        <button
+                          onClick={(e) => {
+                            handleContextMenu(e, { type: 'reserva', reserva: r });
+                          }}
+                          className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition"
+                          title="Opciones"
+                        >
+                          <MoreHorizontal size={18} />
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Context Menu */}
+      {contextMenu.visible && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          data={contextMenu.data}
+          onAction={handleContextMenuAction}
+          onClose={closeMenu}
+          userRole={userRole}
+        />
+      )}
+
+      {/* Quick Payment Modal */}
+      {quickPayReservaId && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setQuickPayReservaId(null)}>
+          <form onSubmit={submitQuickPay} className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-lg font-bold text-gray-800">Registrar Pago Rápido</h2>
+              <button type="button" onClick={() => setQuickPayReservaId(null)} className="text-gray-400 hover:text-gray-600">✕</button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Monto *</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2.5 text-gray-400 font-bold">$</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    value={quickPayForm.monto}
+                    onChange={e => setQuickPayForm(f => ({ ...f, monto: e.target.value }))}
+                    required
+                    className="w-full pl-7 pr-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 outline-none font-medium"
+                    placeholder="0.00"
+                    autoFocus
+                  />
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Concepto</label>
+                <input
+                  type="text"
+                  value={quickPayForm.concepto}
+                  onChange={e => setQuickPayForm(f => ({ ...f, concepto: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 outline-none text-sm"
+                  placeholder="Ej: Abono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Método de Pago</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: 'efectivo', label: '💵 Efectivo' },
+                    { id: 'transferencia', label: '🏦 Transfer' },
+                    { id: 'yappy', label: '📱 Yappy' },
+                    { id: 'tarjeta', label: '💳 Tarjeta' },
+                  ].map(method => (
+                    <button
+                      key={method.id}
+                      type="button"
+                      onClick={() => setQuickPayForm(f => ({ ...f, metodo_pago: method.id }))}
+                      className={`py-2 rounded-xl text-xs font-semibold border transition ${
+                        quickPayForm.metodo_pago === method.id
+                          ? 'border-green-500 bg-green-50 text-green-700 font-bold ring-2 ring-green-100'
+                          : 'border-gray-200 hover:bg-gray-50 text-gray-600'
+                      }`}
+                    >
+                      {method.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Referencia</label>
+                <input
+                  type="text"
+                  value={quickPayForm.referencia}
+                  onChange={e => setQuickPayForm(f => ({ ...f, referencia: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 outline-none text-sm"
+                  placeholder="Número de control o comprobante"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-2.5 mt-6">
+              <button
+                type="submit"
+                disabled={quickPayLoading}
+                className="flex-1 py-2.5 bg-green-500 text-white rounded-xl font-bold text-sm hover:bg-green-600 transition shadow-lg shadow-green-100 flex items-center justify-center gap-1.5 disabled:opacity-50"
+              >
+                {quickPayLoading ? 'Procesando...' : 'Aplicar Abono'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setQuickPayReservaId(null)}
+                className="px-4 py-2.5 text-gray-500 hover:bg-gray-100 rounded-xl text-sm font-semibold transition"
+              >
+                Cancelar
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>
