@@ -594,6 +594,77 @@ router.put('/configuracion/sistema', requireAuth, requireRole('admin'), (req, re
   }
 });
 
+// GET Hotel general and payment configuration (admin)
+router.get('/configuracion/hotel', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const db = getDb();
+    const rows = db.prepare('SELECT clave, valor, descripcion FROM config_hotel').all();
+    const config = {};
+    for (const r of rows) {
+      config[r.clave] = r.valor;
+    }
+    ok(res, config);
+  } catch (e) {
+    console.error('Error fetching hotel config:', e);
+    err(res, 'SERVER_ERROR', 'Error al obtener configuración de hotel', 500);
+  }
+});
+
+// PUT Hotel general and payment configuration (admin)
+router.put('/configuracion/hotel', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const db = getDb();
+    const allowed = [
+      'nombre_propiedad',
+      'impuesto_turismo_pct',
+      'deposito_sugerido_pct',
+      'moneda',
+      'paypal_client_id',
+      'paypal_secret',
+      'paypal_mode'
+    ];
+    
+    // Validations
+    if (req.body.impuesto_turismo_pct !== undefined) {
+      const pct = parseFloat(req.body.impuesto_turismo_pct);
+      if (isNaN(pct) || pct < 0 || pct > 100) {
+        return err(res, 'VALIDATION_ERROR', 'El porcentaje de impuesto de turismo debe estar entre 0% y 100%');
+      }
+    }
+    
+    if (req.body.deposito_sugerido_pct !== undefined) {
+      const pct = parseFloat(req.body.deposito_sugerido_pct);
+      if (isNaN(pct) || pct < 0 || pct > 100) {
+        return err(res, 'VALIDATION_ERROR', 'El porcentaje de depósito sugerido debe estar entre 0% y 100%');
+      }
+    }
+    
+    if (req.body.paypal_mode !== undefined && !['sandbox', 'live'].includes(req.body.paypal_mode)) {
+      return err(res, 'VALIDATION_ERROR', 'Modo de PayPal inválido (debe ser sandbox o live)');
+    }
+
+    db.transaction(() => {
+      for (const key of allowed) {
+        if (req.body[key] !== undefined) {
+          const val = req.body[key] === null ? '' : String(req.body[key]).trim();
+          db.prepare('UPDATE config_hotel SET valor = ? WHERE clave = ?').run(val, key);
+        }
+      }
+    })();
+    
+    // Return updated config
+    const rows = db.prepare('SELECT clave, valor FROM config_hotel').all();
+    const config = {};
+    for (const r of rows) {
+      config[r.clave] = r.valor;
+    }
+    ok(res, config);
+  } catch (e) {
+    console.error('Error updating hotel config:', e);
+    err(res, 'SERVER_ERROR', 'Error al actualizar la configuración de hotel', 500);
+  }
+});
+
 // Route for SMTP Test Diagnostics
 router.post('/configuracion/test-smtp', requireAuth, requireRole('admin'), async (req, res) => {
   try {

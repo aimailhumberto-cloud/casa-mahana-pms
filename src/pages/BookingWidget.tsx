@@ -32,18 +32,41 @@ function PayPalButtons({ clientId, mode, monto, descripcion, onSuccess, onError 
     ;(window as any).paypal.Buttons({
       style: { layout: 'vertical', color: 'gold', shape: 'rect', label: 'paypal', height: 50 },
       createOrder: async () => {
-        const resp = await fetch(`${API}/paypal/create-order`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ monto, descripcion }) })
-        const data = await resp.json()
-        if (data.success) return data.data.orderId
-        throw new Error(data.error?.message || 'Error creando orden')
+        try {
+          const resp = await fetch(`${API}/paypal/create-order`, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ monto, descripcion }) 
+          })
+          const data = await resp.json()
+          if (data.success && data.data?.orderId) return data.data.orderId
+          throw new Error(data.error?.message || 'Error al generar la orden de cobro')
+        } catch (err: any) {
+          onError(err.message || 'Error al conectar con la pasarela de PayPal')
+          throw err
+        }
       },
       onApprove: async (data: any) => {
-        const resp = await fetch(`${API}/paypal/capture-order`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId: data.orderID }) })
-        const result = await resp.json()
-        if (result.success && result.data.status === 'COMPLETED') { onSuccess(data.orderID) }
-        else { onError('Pago no completado') }
+        try {
+          const resp = await fetch(`${API}/paypal/capture-order`, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ orderId: data.orderID }) 
+          })
+          const result = await resp.json()
+          if (result.success && result.data?.status === 'COMPLETED') { 
+            onSuccess(data.orderID) 
+          } else { 
+            throw new Error(result.error?.message || 'La captura del pago no fue completada por PayPal') 
+          }
+        } catch (err: any) {
+          onError(err.message || 'Error al capturar el pago en el servidor')
+        }
       },
-      onError: () => onError('Error en PayPal')
+      onError: (err: any) => {
+        console.error('PayPal SDK error:', err)
+        onError('Fallo o cancelación en la pasarela de PayPal')
+      }
     }).render(containerRef.current)
   }, [sdkReady, monto])
 
@@ -1266,7 +1289,7 @@ export default function BookingWidget() {
               <div className="flex bg-amber-50/50 p-1.5 rounded-2xl border border-amber-200/50 mb-6 gap-2">
                 <button
                   type="button"
-                  onClick={() => setPaymentMethod('paypal')}
+                  onClick={() => { setPaymentMethod('paypal'); setError(''); }}
                   className={`flex-1 py-3 text-sm font-semibold rounded-xl transition flex items-center justify-center gap-2 ${
                     paymentMethod === 'paypal'
                       ? 'bg-amber-700 text-white shadow-md'
@@ -1278,7 +1301,7 @@ export default function BookingWidget() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setPaymentMethod('transferencia')}
+                  onClick={() => { setPaymentMethod('transferencia'); setError(''); }}
                   className={`flex-1 py-3 text-sm font-semibold rounded-xl transition flex items-center justify-center gap-2 ${
                     paymentMethod !== 'paypal'
                       ? 'bg-amber-700 text-white shadow-md'

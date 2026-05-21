@@ -107,7 +107,7 @@ const formatWhatsAppText = (text: string) => {
 
 export default function Configuracion({ user }: { user: User }) {
   const isAdmin = user?.rol === 'admin';
-  const [activeTab, setActiveTab] = useState<'notificaciones' | 'logs' | 'reversiones' | 'plantillas'>('notificaciones');
+  const [activeTab, setActiveTab] = useState<'notificaciones' | 'logs' | 'reversiones' | 'plantillas' | 'propiedad'>('notificaciones');
   
   // Tab 1: Configuración de Notificaciones
   const [smtpHost, setSmtpHost] = useState('');
@@ -135,6 +135,69 @@ export default function Configuracion({ user }: { user: User }) {
   const [savingConfig, setSavingConfig] = useState(false);
   const [configSuccessMsg, setConfigSuccessMsg] = useState('');
   const [configErrorMsg, setConfigErrorMsg] = useState('');
+
+  // Hotel Property & Gateway config
+  const [nombrePropiedad, setNombrePropiedad] = useState('');
+  const [impuestoTurismoPct, setImpuestoTurismoPct] = useState(0);
+  const [depositoSugeridoPct, setDepositoSugeridoPct] = useState(50);
+  const [paypalClientId, setPaypalClientId] = useState('');
+  const [paypalSecret, setPaypalSecret] = useState('');
+  const [paypalMode, setPaypalMode] = useState<'sandbox' | 'live'>('sandbox');
+  const [showPaypalSecret, setShowPaypalSecret] = useState(false);
+  
+  const [loadingHotelConfig, setLoadingHotelConfig] = useState(false);
+  const [savingHotelConfig, setSavingHotelConfig] = useState(false);
+  const [hotelConfigSuccessMsg, setHotelConfigSuccessMsg] = useState('');
+  const [hotelConfigErrorMsg, setHotelConfigErrorMsg] = useState('');
+
+  const loadHotelConfig = () => {
+    setLoadingHotelConfig(true);
+    setHotelConfigSuccessMsg('');
+    setHotelConfigErrorMsg('');
+    api.get('/admin/configuracion/hotel')
+      .then(r => {
+        const c = r.data;
+        if (c) {
+          setNombrePropiedad(c.nombre_propiedad || '');
+          setImpuestoTurismoPct(c.impuesto_turismo_pct !== undefined ? parseFloat(c.impuesto_turismo_pct) : 0);
+          setDepositoSugeridoPct(c.deposito_sugerido_pct !== undefined ? parseFloat(c.deposito_sugerido_pct) : 50);
+          setPaypalClientId(c.paypal_client_id || '');
+          setPaypalSecret(c.paypal_secret || '');
+          setPaypalMode(c.paypal_mode || 'sandbox');
+        }
+      })
+      .catch((err) => {
+        console.error('Error loading hotel config:', err);
+      })
+      .finally(() => setLoadingHotelConfig(false));
+  };
+
+  const handleSaveHotelConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isAdmin) return;
+    setSavingHotelConfig(true);
+    setHotelConfigSuccessMsg('');
+    setHotelConfigErrorMsg('');
+    
+    try {
+      const payload = {
+        nombre_propiedad: nombrePropiedad || null,
+        impuesto_turismo_pct: impuestoTurismoPct !== undefined ? Number(impuestoTurismoPct) : 0,
+        deposito_sugerido_pct: depositoSugeridoPct !== undefined ? Number(depositoSugeridoPct) : 50,
+        paypal_client_id: paypalClientId || null,
+        paypal_secret: paypalSecret || null,
+        paypal_mode: paypalMode
+      };
+      
+      await api.put('/admin/configuracion/hotel', payload);
+      setHotelConfigSuccessMsg('Configuración de la propiedad y pasarela guardada exitosamente.');
+      loadHotelConfig();
+    } catch (err: any) {
+      setHotelConfigErrorMsg(err.response?.data?.error?.message || 'Error al guardar la configuración de hotel');
+    } finally {
+      setSavingHotelConfig(false);
+    }
+  };
 
   // SMTP Test states
   const [testEmail, setTestEmail] = useState('');
@@ -372,6 +435,8 @@ export default function Configuracion({ user }: { user: User }) {
       loadReversiones();
     } else if (activeTab === 'plantillas') {
       loadPlantillas();
+    } else if (activeTab === 'propiedad') {
+      loadHotelConfig();
     }
   }, [activeTab, logsPage, reversionesPage, filterType, filterChannel]);
 
@@ -627,6 +692,14 @@ export default function Configuracion({ user }: { user: User }) {
             className={`px-5 py-3 text-sm font-semibold border-b-2 transition flex items-center gap-2 ${activeTab === 'plantillas' ? 'border-mahana-500 text-mahana-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}
           >
             <Edit3 size={16} /> Plantillas de Mensajes
+          </button>
+        )}
+        {isAdmin && (
+          <button
+            onClick={() => { setActiveTab('propiedad'); }}
+            className={`px-5 py-3 text-sm font-semibold border-b-2 transition flex items-center gap-2 ${activeTab === 'propiedad' ? 'border-mahana-500 text-mahana-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}
+          >
+            <Settings size={16} /> Propiedad y Pasarela
           </button>
         )}
       </div>
@@ -1090,6 +1163,239 @@ export default function Configuracion({ user }: { user: User }) {
                     className="px-6 py-2.5 bg-gradient-to-r from-mahana-500 to-mahana-600 text-white font-semibold rounded-xl hover:shadow-lg transform hover:-translate-y-0.5 transition disabled:opacity-50"
                   >
                     {savingConfig ? 'Guardando...' : 'Guardar Configuración'}
+                  </button>
+                </div>
+              )}
+            </form>
+          )}
+        </div>
+      )}
+
+      {/* Tab 5 Content: Hotel Property and PayPal settings */}
+      {activeTab === 'propiedad' && (
+        <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden p-6 space-y-6 animate-fadeIn">
+          {!isAdmin ? (
+            <div className="bg-amber-50 text-amber-800 p-4 rounded-xl border border-amber-200 flex items-start gap-3">
+              <AlertCircle size={20} className="text-amber-600 mt-0.5 shrink-0" />
+              <div>
+                <h3 className="font-bold text-sm">Acceso de Solo Lectura</h3>
+                <p className="text-xs text-amber-700 mt-0.5">
+                  Como Recepcionista, puedes visualizar esta configuración pero no cuentas con permisos para modificarla.
+                  Por favor, contacta a un Administrador si requieres realizar cambios.
+                </p>
+              </div>
+            </div>
+          ) : null}
+
+          {loadingHotelConfig ? (
+            <div className="p-12 text-center text-gray-400 animate-pulse font-sans">Cargando configuración de propiedad y pasarela...</div>
+          ) : (
+            <form onSubmit={handleSaveHotelConfig} className="space-y-8">
+              {hotelConfigSuccessMsg && (
+                <div className="bg-green-50 text-green-700 text-sm px-4 py-3 rounded-xl border border-green-200 flex items-center gap-2 font-sans">
+                  <CheckCircle2 size={18} /> {hotelConfigSuccessMsg}
+                </div>
+              )}
+              {hotelConfigErrorMsg && (
+                <div className="bg-red-50 text-red-700 text-sm px-4 py-3 rounded-xl border border-red-200 flex items-center gap-2 font-sans">
+                  <XCircle size={18} /> {hotelConfigErrorMsg}
+                </div>
+              )}
+
+              {/* Seccion 1: Datos de la Propiedad */}
+              <div className="space-y-4">
+                <div className="border-b border-gray-100 pb-2">
+                  <h2 className="font-bold text-gray-800 text-base flex items-center gap-2">
+                    <Settings size={18} className="text-mahana-600" /> Información Comercial de la Propiedad
+                  </h2>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Parámetros fundamentales de cobro e identidad comercial del hotel.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="md:col-span-1">
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1 font-sans">
+                      Nombre de la Propiedad
+                    </label>
+                    <input
+                      type="text"
+                      disabled={!isAdmin}
+                      value={nombrePropiedad}
+                      onChange={e => setNombrePropiedad(e.target.value)}
+                      className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm disabled:bg-gray-50 disabled:text-gray-400 font-sans"
+                      placeholder="Casa Mahana"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1 font-sans">
+                      Impuesto de Turismo (%)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      disabled={!isAdmin}
+                      value={impuestoTurismoPct}
+                      onChange={e => setImpuestoTurismoPct(parseFloat(e.target.value) || 0)}
+                      className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm disabled:bg-gray-50 disabled:text-gray-400 font-sans"
+                      placeholder="10"
+                      min="0"
+                      max="100"
+                      required
+                    />
+                    <p className="text-[10px] text-gray-400 mt-1">Porcentaje de impuesto turístico gubernamental aplicado a reservas.</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1 font-sans">
+                      Porcentaje de Depósito Sugerido (%)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      disabled={!isAdmin}
+                      value={depositoSugeridoPct}
+                      onChange={e => setDepositoSugeridoPct(parseFloat(e.target.value) || 0)}
+                      className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm disabled:bg-gray-50 disabled:text-gray-400 font-sans"
+                      placeholder="50"
+                      min="0"
+                      max="100"
+                      required
+                    />
+                    <p className="text-[10px] text-gray-400 mt-1">Porcentaje del total cobrado al cliente como garantía inicial.</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Seccion 2: Pasarela PayPal */}
+              <div className="space-y-4 pt-4 border-t border-gray-100">
+                <div className="border-b border-gray-100 pb-2">
+                  <h2 className="font-bold text-gray-800 text-base flex items-center gap-2">
+                    <Shield size={18} className="text-ocean-600" /> Pasarela de Pagos Online (PayPal)
+                  </h2>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Conecte y administre la cuenta de PayPal para cobros automatizados con tarjeta de crédito en la web.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="md:col-span-3">
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 font-sans">
+                      Entorno de Operación
+                    </label>
+                    <div className="flex gap-4">
+                      <label className="inline-flex items-center cursor-pointer">
+                        <input
+                          type="radio"
+                          disabled={!isAdmin}
+                          name="paypalMode"
+                          value="sandbox"
+                          checked={paypalMode === 'sandbox'}
+                          onChange={() => setPaypalMode('sandbox')}
+                          className="text-ocean-600 focus:ring-ocean-500 mr-2"
+                        />
+                        <span className="text-sm text-gray-700 font-semibold flex items-center gap-1 font-sans">
+                          🧪 Sandbox (Pruebas)
+                          <span className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.2 rounded border border-blue-100 font-medium">Recomendado</span>
+                        </span>
+                      </label>
+                      <label className="inline-flex items-center cursor-pointer">
+                        <input
+                          type="radio"
+                          disabled={!isAdmin}
+                          name="paypalMode"
+                          value="live"
+                          checked={paypalMode === 'live'}
+                          onChange={() => setPaypalMode('live')}
+                          className="text-ocean-600 focus:ring-ocean-500 mr-2"
+                        />
+                        <span className="text-sm text-gray-700 font-semibold flex items-center gap-1 font-sans">
+                          🟢 Live (Producción / Dinero Real)
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1 font-sans">
+                      PayPal Client ID
+                    </label>
+                    <input
+                      type="text"
+                      disabled={!isAdmin}
+                      value={paypalClientId}
+                      onChange={e => setPaypalClientId(e.target.value)}
+                      className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm disabled:bg-gray-50 disabled:text-gray-400 font-sans"
+                      placeholder="Identificador del cliente público de PayPal..."
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1 font-sans">
+                      PayPal Secret Key
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showPaypalSecret ? 'text' : 'password'}
+                        disabled={!isAdmin}
+                        value={paypalSecret}
+                        onChange={e => setPaypalSecret(e.target.value)}
+                        className="w-full pl-4 pr-10 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm disabled:bg-gray-50 disabled:text-gray-400 font-sans"
+                        placeholder="••••••••••••••••••••••••••••••••"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPaypalSecret(!showPaypalSecret)}
+                        className="absolute right-3 top-3.5 text-gray-400 hover:text-gray-600 outline-none"
+                      >
+                        <Eye size={16} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Glassmorphic PayPal Guide Card */}
+                <div className="bg-gradient-to-br from-blue-50/40 via-white to-blue-50/20 border border-blue-100 rounded-2xl p-5 mt-6 space-y-4 shadow-xs">
+                  <div className="flex items-center gap-2">
+                    <HelpCircle size={18} className="text-blue-600" />
+                    <h3 className="font-bold text-gray-800 text-sm">
+                      ¿Cómo obtener tus credenciales API de PayPal?
+                    </h3>
+                  </div>
+                  <p className="text-xs text-gray-500 leading-relaxed font-sans">
+                    Para conectar los cobros de tus huéspedes a tu cuenta bancaria a través de PayPal, debes generar tus claves de desarrollador:
+                  </p>
+                  <ol className="text-xs text-gray-600 list-decimal pl-5 space-y-2 font-sans">
+                    <li>
+                      Ingresa al panel oficial de <a href="https://developer.paypal.com" target="_blank" rel="noopener noreferrer" className="text-blue-600 font-bold hover:underline inline-flex items-center gap-0.5">PayPal Developer <ExternalLink size={10} /></a> e inicia sesión con tus credenciales comerciales de PayPal.
+                    </li>
+                    <li>
+                      Dirígete a la pestaña de **"Apps & Credentials"** en el menú lateral.
+                    </li>
+                    <li>
+                      Asegúrate de alternar el switch superior según tus necesidades (**Sandbox** para realizar pruebas sin transacciones reales o **Live** para recibir dinero real).
+                    </li>
+                    <li>
+                      Presiona el botón **"Create App"** y ponle un nombre representativo (ej: <code className="bg-gray-100 px-1 py-0.5 rounded text-gray-600 font-mono text-[10px]">Casa Mahana PMS</code>).
+                    </li>
+                    <li>
+                      Copia el **Client ID** y presiona **"Show"** bajo *Secret Key* para copiar la clave secreta. Pégalas en los campos superiores y guarda la configuración.
+                    </li>
+                  </ol>
+                </div>
+              </div>
+
+              {/* Submit Button */}
+              {isAdmin && (
+                <div className="flex justify-end pt-4 border-t border-gray-100">
+                  <button
+                    type="submit"
+                    disabled={savingHotelConfig}
+                    className="px-6 py-2.5 bg-gradient-to-r from-mahana-500 to-mahana-600 text-white font-semibold rounded-xl hover:shadow-lg transform hover:-translate-y-0.5 transition disabled:opacity-50"
+                  >
+                    {savingHotelConfig ? 'Guardando...' : 'Guardar Propiedad y Pasarela'}
                   </button>
                 </div>
               )}

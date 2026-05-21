@@ -150,13 +150,24 @@ router.post('/paypal/create-order', async (req, res) => {
     const mode = getConfig('paypal_mode') || process.env.PAYPAL_MODE || 'sandbox';
     if (!clientId || !secret) return err(res, 'CONFIG_ERROR', 'PayPal no configurado');
     const baseUrl = mode === 'live' ? 'https://api-m.paypal.com' : 'https://api-m.sandbox.paypal.com';
+    
     // Get access token
     const authResp = await fetch(`${baseUrl}/v1/oauth2/token`, {
-      method: 'POST', headers: { 'Authorization': `Basic ${Buffer.from(`${clientId}:${secret}`).toString('base64')}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+      method: 'POST', 
+      headers: { 
+        'Authorization': `Basic ${Buffer.from(`${clientId}:${secret}`).toString('base64')}`, 
+        'Content-Type': 'application/x-www-form-urlencoded' 
+      },
       body: 'grant_type=client_credentials'
     });
+    
     const authData = await authResp.json();
-    if (!authData.access_token) return err(res, 'PAYPAL_ERROR', 'Error autenticando con PayPal', 500);
+    if (!authResp.ok || !authData.access_token) {
+      console.error('PayPal Auth Failure:', authData);
+      const errMsg = authData.error_description || authData.error || 'Credenciales de PayPal inválidas o incorrectas.';
+      return err(res, 'PAYPAL_ERROR', `Fallo de autenticación con PayPal: ${errMsg}`, 401);
+    }
+    
     // Create order
     const orderResp = await fetch(`${baseUrl}/v2/checkout/orders`, {
       method: 'POST',
@@ -166,9 +177,19 @@ router.post('/paypal/create-order', async (req, res) => {
         purchase_units: [{ amount: { currency_code: 'USD', value: String(monto) }, description: descripcion || 'Reserva Casa Mahana' }]
       })
     });
+    
     const order = await orderResp.json();
+    if (!orderResp.ok) {
+      console.error('PayPal Create Order Failure:', order);
+      const errMsg = order.message || (order.details && order.details[0]?.description) || 'No se pudo generar la orden de cobro.';
+      return err(res, 'PAYPAL_ERROR', `Error al crear orden en PayPal: ${errMsg}`, orderResp.status);
+    }
+    
     ok(res, { orderId: order.id, status: order.status });
-  } catch (e) { console.error('PayPal create-order error:', e); err(res, 'SERVER_ERROR', 'Error creando orden PayPal', 500); }
+  } catch (e) { 
+    console.error('PayPal create-order error:', e); 
+    err(res, 'SERVER_ERROR', 'Error interno al procesar orden de PayPal', 500); 
+  }
 });
 
 // PayPal capture order
@@ -179,18 +200,48 @@ router.post('/paypal/capture-order', async (req, res) => {
     const clientId = getConfig('paypal_client_id') || process.env.PAYPAL_CLIENT_ID;
     const secret = getConfig('paypal_secret') || process.env.PAYPAL_CLIENT_SECRET;
     const mode = getConfig('paypal_mode') || process.env.PAYPAL_MODE || 'sandbox';
+    if (!clientId || !secret) return err(res, 'CONFIG_ERROR', 'PayPal no configurado');
     const baseUrl = mode === 'live' ? 'https://api-m.paypal.com' : 'https://api-m.sandbox.paypal.com';
+    
+    // Get access token
     const authResp = await fetch(`${baseUrl}/v1/oauth2/token`, {
-      method: 'POST', headers: { 'Authorization': `Basic ${Buffer.from(`${clientId}:${secret}`).toString('base64')}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+      method: 'POST', 
+      headers: { 
+        'Authorization': `Basic ${Buffer.from(`${clientId}:${secret}`).toString('base64')}`, 
+        'Content-Type': 'application/x-www-form-urlencoded' 
+      },
       body: 'grant_type=client_credentials'
     });
+    
     const authData = await authResp.json();
+    if (!authResp.ok || !authData.access_token) {
+      console.error('PayPal Auth Failure on Capture:', authData);
+      const errMsg = authData.error_description || authData.error || 'Credenciales de PayPal inválidas.';
+      return err(res, 'PAYPAL_ERROR', `Fallo de autenticación con PayPal: ${errMsg}`, 401);
+    }
+    
+    // Capture order
     const captureResp = await fetch(`${baseUrl}/v2/checkout/orders/${orderId}/capture`, {
-      method: 'POST', headers: { 'Authorization': `Bearer ${authData.access_token}`, 'Content-Type': 'application/json' }
+      method: 'POST', 
+      headers: { 'Authorization': `Bearer ${authData.access_token}`, 'Content-Type': 'application/json' }
     });
+    
     const capture = await captureResp.json();
+    if (!captureResp.ok) {
+      console.error('PayPal Capture Failure:', capture);
+      const errMsg = capture.message || (capture.details && capture.details[0]?.description) || 'El pago no pudo ser capturado por PayPal.';
+      return err(res, 'PAYPAL_ERROR', `Error al capturar pago en PayPal: ${errMsg}`, captureResp.status);
+    }
+    
+    if (capture.status !== 'COMPLETED') {
+      return err(res, 'PAYPAL_ERROR', `El pago no pudo completarse. Estado actual: ${capture.status}`, 400);
+    }
+    
     ok(res, { status: capture.status, orderId: capture.id, payer: capture.payer });
-  } catch (e) { console.error('PayPal capture error:', e); err(res, 'SERVER_ERROR', 'Error capturando pago PayPal', 500); }
+  } catch (e) { 
+    console.error('PayPal capture error:', e); 
+    err(res, 'SERVER_ERROR', 'Error interno al capturar pago de PayPal', 500); 
+  }
 });
 
 // Public reservation creation (with PayPal or manual payment)

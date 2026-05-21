@@ -29,6 +29,8 @@ describe('Admin CRUD and Deactivated User Security Endpoints', () => {
   let getNotifLogsHandler;
   let getReversionesLogsHandler;
   let postTestResendHandler;
+  let getHotelConfigHandler;
+  let putHotelConfigHandler;
 
   beforeAll(() => {
     resetDb();
@@ -56,6 +58,8 @@ describe('Admin CRUD and Deactivated User Security Endpoints', () => {
     getNotifLogsHandler = findRouteHandler(adminRouter, '/configuracion/logs', 'get');
     getReversionesLogsHandler = findRouteHandler(adminRouter, '/configuracion/reversiones', 'get');
     postTestResendHandler = findRouteHandler(adminRouter, '/configuracion/test-resend', 'post');
+    getHotelConfigHandler = findRouteHandler(adminRouter, '/configuracion/hotel', 'get');
+    putHotelConfigHandler = findRouteHandler(adminRouter, '/configuracion/hotel', 'put');
   });
 
   describe('Deactivated User Security Blocking', () => {
@@ -453,6 +457,127 @@ describe('Admin CRUD and Deactivated User Security Endpoints', () => {
       expect(resData.error.message).toContain('Invalid API Key');
 
       mockRequest.mockRestore();
+    });
+  });
+
+  describe('Hotel Property and PayPal Payment Configuration', () => {
+    it('should allow admin to retrieve current hotel configuration', () => {
+      const req = {
+        user: { rol: 'admin' }
+      };
+      let resStatus = 200;
+      let resData = null;
+      const res = {
+        status: (code) => { resStatus = code; return res; },
+        json: (data) => { resData = data; return res; }
+      };
+
+      getHotelConfigHandler(req, res);
+      expect(resStatus).toBe(200);
+      expect(resData.success).toBe(true);
+      expect(resData.data.nombre_propiedad).toBeDefined();
+      expect(resData.data.impuesto_turismo_pct).toBeDefined();
+      expect(resData.data.deposito_sugerido_pct).toBeDefined();
+      expect(resData.data.paypal_client_id).toBeDefined();
+      expect(resData.data.paypal_secret).toBeDefined();
+      expect(resData.data.paypal_mode).toBeDefined();
+    });
+
+    it('should allow admin to update hotel configuration settings', () => {
+      const req = {
+        user: { rol: 'admin' },
+        body: {
+          nombre_propiedad: 'Casa Mahana Luxury Eco-Resort',
+          impuesto_turismo_pct: 7,
+          deposito_sugerido_pct: 60,
+          paypal_client_id: 'NEW_CLIENT_ID_123',
+          paypal_secret: 'NEW_SECRET_KEY_456',
+          paypal_mode: 'live'
+        }
+      };
+      let resStatus = 200;
+      let resData = null;
+      const res = {
+        status: (code) => { resStatus = code; return res; },
+        json: (data) => { resData = data; return res; }
+      };
+
+      putHotelConfigHandler(req, res);
+      expect(resStatus).toBe(200);
+      expect(resData.success).toBe(true);
+      expect(resData.data.nombre_propiedad).toBe('Casa Mahana Luxury Eco-Resort');
+      expect(resData.data.impuesto_turismo_pct).toBe('7');
+      expect(resData.data.deposito_sugerido_pct).toBe('60');
+      expect(resData.data.paypal_client_id).toBe('NEW_CLIENT_ID_123');
+      expect(resData.data.paypal_secret).toBe('NEW_SECRET_KEY_456');
+      expect(resData.data.paypal_mode).toBe('live');
+
+      // Verify directly in DB
+      const dbRow = db.prepare("SELECT valor FROM config_hotel WHERE clave = 'nombre_propiedad'").get();
+      expect(dbRow.valor).toBe('Casa Mahana Luxury Eco-Resort');
+    });
+
+    it('should validate tourism tax percentage limits (0% to 100%)', () => {
+      const req = {
+        user: { rol: 'admin' },
+        body: {
+          impuesto_turismo_pct: 120
+        }
+      };
+      let resStatus = 200;
+      let resData = null;
+      const res = {
+        status: (code) => { resStatus = code; return res; },
+        json: (data) => { resData = data; return res; }
+      };
+
+      putHotelConfigHandler(req, res);
+      expect(resStatus).toBe(400);
+      expect(resData.success).toBe(false);
+      expect(resData.error.code).toBe('VALIDATION_ERROR');
+      expect(resData.error.message).toContain('porcentaje de impuesto');
+    });
+
+    it('should validate suggested deposit percentage limits (0% to 100%)', () => {
+      const req = {
+        user: { rol: 'admin' },
+        body: {
+          deposito_sugerido_pct: -5
+        }
+      };
+      let resStatus = 200;
+      let resData = null;
+      const res = {
+        status: (code) => { resStatus = code; return res; },
+        json: (data) => { resData = data; return res; }
+      };
+
+      putHotelConfigHandler(req, res);
+      expect(resStatus).toBe(400);
+      expect(resData.success).toBe(false);
+      expect(resData.error.code).toBe('VALIDATION_ERROR');
+      expect(resData.error.message).toContain('porcentaje de depósito');
+    });
+
+    it('should validate paypal mode options (sandbox or live)', () => {
+      const req = {
+        user: { rol: 'admin' },
+        body: {
+          paypal_mode: 'invalid_mode'
+        }
+      };
+      let resStatus = 200;
+      let resData = null;
+      const res = {
+        status: (code) => { resStatus = code; return res; },
+        json: (data) => { resData = data; return res; }
+      };
+
+      putHotelConfigHandler(req, res);
+      expect(resStatus).toBe(400);
+      expect(resData.success).toBe(false);
+      expect(resData.error.code).toBe('VALIDATION_ERROR');
+      expect(resData.error.message).toContain('Modo de PayPal inválido');
     });
   });
 });
