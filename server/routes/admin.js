@@ -525,6 +525,12 @@ router.get('/configuracion/sistema', requireAuth, requireRole('admin'), (req, re
     if (!config) {
       return err(res, 'NOT_FOUND', 'Configuración de sistema no encontrada', 404);
     }
+    
+    // Mask sensitive fields
+    if (config.smtp_pass) config.smtp_pass = '******';
+    if (config.wa_api_token) config.wa_api_token = '******';
+    if (config.resend_api_key) config.resend_api_key = '******';
+    
     ok(res, config);
   } catch (e) {
     console.error(e);
@@ -553,6 +559,11 @@ router.put('/configuracion/sistema', requireAuth, requireRole('admin'), (req, re
     for (const field of allowed) {
       if (req.body[field] !== undefined) {
         let val = req.body[field];
+        
+        // Skip updating sensitive fields if they contain the masked placeholder
+        if (['smtp_pass', 'wa_api_token', 'resend_api_key'].includes(field) && val === '******') {
+          continue;
+        }
         
         // Validations
         if (field === 'smtp_port' && val !== null) {
@@ -587,6 +598,11 @@ router.put('/configuracion/sistema', requireAuth, requireRole('admin'), (req, re
     db.prepare(query).run(...params);
     
     const updated = db.prepare('SELECT * FROM configuracion_sistema WHERE id = 1').get();
+    if (updated) {
+      if (updated.smtp_pass) updated.smtp_pass = '******';
+      if (updated.wa_api_token) updated.wa_api_token = '******';
+      if (updated.resend_api_key) updated.resend_api_key = '******';
+    }
     ok(res, updated);
   } catch (e) {
     console.error(e);
@@ -601,7 +617,11 @@ router.get('/configuracion/hotel', requireAuth, requireRole('admin'), (req, res)
     const rows = db.prepare('SELECT clave, valor, descripcion FROM config_hotel').all();
     const config = {};
     for (const r of rows) {
-      config[r.clave] = r.valor;
+      if (r.clave === 'paypal_secret' && r.valor) {
+        config[r.clave] = '******';
+      } else {
+        config[r.clave] = r.valor;
+      }
     }
     ok(res, config);
   } catch (e) {
@@ -647,6 +667,10 @@ router.put('/configuracion/hotel', requireAuth, requireRole('admin'), (req, res)
       for (const key of allowed) {
         if (req.body[key] !== undefined) {
           const val = req.body[key] === null ? '' : String(req.body[key]).trim();
+          // Skip updating paypal_secret if it is the masked placeholder
+          if (key === 'paypal_secret' && val === '******') {
+            continue;
+          }
           db.prepare(`
             INSERT INTO config_hotel (clave, valor)
             VALUES (?, ?)
@@ -660,7 +684,11 @@ router.put('/configuracion/hotel', requireAuth, requireRole('admin'), (req, res)
     const rows = db.prepare('SELECT clave, valor FROM config_hotel').all();
     const config = {};
     for (const r of rows) {
-      config[r.clave] = r.valor;
+      if (r.clave === 'paypal_secret' && r.valor) {
+        config[r.clave] = '******';
+      } else {
+        config[r.clave] = r.valor;
+      }
     }
     ok(res, config);
   } catch (e) {

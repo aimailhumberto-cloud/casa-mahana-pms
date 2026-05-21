@@ -256,8 +256,14 @@ describe('Admin CRUD and Deactivated User Security Endpoints', () => {
       expect(resData.data.wa_api_url).toBe('https://graph.facebook.com/v19.0/12345/messages');
       expect(resData.data.wa_enabled).toBe(1);
       expect(resData.data.email_provider).toBe('resend');
-      expect(resData.data.resend_api_key).toBe('re_secret123');
+      expect(resData.data.resend_api_key).toBe('******');
       expect(resData.data.resend_from_email).toBe('noreply@casamahana.com');
+
+      // Verify directly in DB
+      const dbRow = db.prepare("SELECT * FROM configuracion_sistema WHERE id = 1").get();
+      expect(dbRow.smtp_pass).toBe('pass456');
+      expect(dbRow.wa_api_token).toBe('token789');
+      expect(dbRow.resend_api_key).toBe('re_secret123');
     });
 
     it('should validate SMTP port during updates', () => {
@@ -509,12 +515,15 @@ describe('Admin CRUD and Deactivated User Security Endpoints', () => {
       expect(resData.data.impuesto_turismo_pct).toBe('7');
       expect(resData.data.deposito_sugerido_pct).toBe('60');
       expect(resData.data.paypal_client_id).toBe('NEW_CLIENT_ID_123');
-      expect(resData.data.paypal_secret).toBe('NEW_SECRET_KEY_456');
+      expect(resData.data.paypal_secret).toBe('******');
       expect(resData.data.paypal_mode).toBe('live');
 
       // Verify directly in DB
       const dbRow = db.prepare("SELECT valor FROM config_hotel WHERE clave = 'nombre_propiedad'").get();
       expect(dbRow.valor).toBe('Casa Mahana Luxury Eco-Resort');
+
+      const dbSecretRow = db.prepare("SELECT valor FROM config_hotel WHERE clave = 'paypal_secret'").get();
+      expect(dbSecretRow.valor).toBe('NEW_SECRET_KEY_456');
     });
 
     it('should dynamically insert a new config key if missing in database', () => {
