@@ -306,7 +306,7 @@ export default function Configuracion({ user }: { user: User }) {
       return;
     }
     try {
-      const res = await api.post(`/admin/notificaciones/plantillas/${codigo}/${canal}/restaurar`);
+      const res = await api.post(`/admin/notificaciones/plantillas/${codigo}/${canal}/restaurar`, {});
       alert('Plantilla restaurada exitosamente.');
       loadPlantillas();
       if (selectedPlantilla && selectedPlantilla.codigo === codigo && selectedPlantilla.canal === canal) {
@@ -552,7 +552,7 @@ export default function Configuracion({ user }: { user: User }) {
   const handleResendNotif = async (logId: number) => {
     setResendingLogId(logId);
     try {
-      await api.post(`/hotel/notificaciones/${logId}/reenviar`);
+      await api.post(`/hotel/notificaciones/${logId}/reenviar`, {});
       alert('Notificación reenviada exitosamente');
       loadLogs();
       // If the selected log is currently open, update its representation

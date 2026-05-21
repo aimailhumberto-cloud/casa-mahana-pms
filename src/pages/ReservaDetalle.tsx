@@ -165,7 +165,7 @@ export default function ReservaDetalle() {
   const handleResendNotif = async (logId: number) => {
     setResendingId(logId);
     try {
-      await api.post(`/hotel/notificaciones/${logId}/reenviar`);
+      await api.post(`/hotel/notificaciones/${logId}/reenviar`, {});
       alert('Notificación reenviada exitosamente');
       loadNotificaciones();
     } catch (e: any) {
@@ -242,7 +242,7 @@ export default function ReservaDetalle() {
     }
     setReversalLoading(folioId);
     try {
-      await api.post(`/hotel/reservas/${id}/folio/${folioId}/reversar`);
+      await api.post(`/hotel/reservas/${id}/folio/${folioId}/reversar`, {});
       load();
     } catch (err: any) {
       alert(err?.response?.data?.error?.message || 'Error al reversar el movimiento');
