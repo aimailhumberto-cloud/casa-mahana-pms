@@ -270,9 +270,10 @@ export default function NuevaReserva() {
         const promises = selectedGroupRooms.map(roomId => {
           const config = roomConfigs[roomId] || {};
           const plan = config.plan_codigo || form.plan_codigo;
-          const adults = config.adultos !== undefined ? config.adultos : form.adultos;
-          const minors = config.menores !== undefined ? config.menores : form.menores;
-          const pets = config.mascotas !== undefined ? config.mascotas : form.mascotas;
+          const isLeader = roomId === selectedGroupRooms[0];
+          const adults = config.adultos !== undefined ? config.adultos : (isLeader ? form.adultos : 0);
+          const minors = config.menores !== undefined ? config.menores : (isLeader ? form.menores : 0);
+          const pets = config.mascotas !== undefined ? config.mascotas : (isLeader ? form.mascotas : 0);
           if (!plan) return Promise.resolve(null);
           return api.get(`/hotel/cotizar?plan=${plan}&adultos=${adults}&menores=${minors}&mascotas=${pets}&check_in=${form.check_in}&check_out=${form.check_out}`)
             .then(res => res.data)
@@ -307,9 +308,10 @@ export default function NuevaReserva() {
             const config = roomConfigs[roomId] || {};
             // If the room has a custom plan that differs from the main selected plan, keep it; otherwise use alternative plan `p.codigo`
             const plan = config.plan_codigo && config.plan_codigo !== form.plan_codigo ? config.plan_codigo : p.codigo;
-            const adults = config.adultos !== undefined ? config.adultos : form.adultos;
-            const minors = config.menores !== undefined ? config.menores : form.menores;
-            const pets = config.mascotas !== undefined ? config.mascotas : form.mascotas;
+            const isLeader = roomId === selectedGroupRooms[0];
+            const adults = config.adultos !== undefined ? config.adultos : (isLeader ? form.adultos : 0);
+            const minors = config.menores !== undefined ? config.menores : (isLeader ? form.menores : 0);
+            const pets = config.mascotas !== undefined ? config.mascotas : (isLeader ? form.mascotas : 0);
             return api.get(`/hotel/cotizar?plan=${plan}&adultos=${adults}&menores=${minors}&mascotas=${pets}&check_in=${form.check_in}&check_out=${form.check_out}`)
               .then(res => res.data)
               .catch(() => null);
@@ -426,9 +428,9 @@ export default function NuevaReserva() {
           [id]: {
             cliente: curr[id]?.cliente || (prev.length === 0 ? form.cliente : ''),
             apellido: curr[id]?.apellido || (prev.length === 0 ? form.apellido : ''),
-            adultos: curr[id]?.adultos || (prev.length === 0 ? form.adultos : 0),
-            menores: curr[id]?.menores || (prev.length === 0 ? form.menores : 0),
-            mascotas: curr[id]?.mascotas || (prev.length === 0 ? form.mascotas : 0),
+            adultos: curr[id]?.adultos ?? (prev.length === 0 ? form.adultos : 0),
+            menores: curr[id]?.menores ?? (prev.length === 0 ? form.menores : 0),
+            mascotas: curr[id]?.mascotas ?? (prev.length === 0 ? form.mascotas : 0),
             plan_codigo: curr[id]?.plan_codigo || form.plan_codigo || ''
           }
         }));
@@ -663,9 +665,9 @@ ${altRatesStr}
           check_in: form.check_in,
           check_out: form.check_out,
           hora_llegada: form.hora_llegada || null,
-          adultos: config.adultos !== undefined ? Number(config.adultos) : Number(form.adultos),
-          menores: config.menores !== undefined ? Number(config.menores) : Number(form.menores),
-          mascotas: config.mascotas !== undefined ? Number(config.mascotas) : Number(form.mascotas),
+          adultos: config.adultos !== undefined ? Number(config.adultos) : (idx === 0 ? Number(form.adultos) : 0),
+          menores: config.menores !== undefined ? Number(config.menores) : (idx === 0 ? Number(form.menores) : 0),
+          mascotas: config.mascotas !== undefined ? Number(config.mascotas) : (idx === 0 ? Number(form.mascotas) : 0),
           plan_codigo: config.plan_codigo || form.plan_codigo,
           fuente: form.fuente || 'Teléfono',
           notes: form.notas || '',
@@ -768,9 +770,9 @@ ${altRatesStr}
             check_in: form.check_in,
             check_out: form.check_out,
             hora_llegada: form.hora_llegada || null,
-            adultos: config.adultos !== undefined ? Number(config.adultos) : Number(form.adultos),
-            menores: config.menores !== undefined ? Number(config.menores) : Number(form.menores),
-            mascotas: config.mascotas !== undefined ? Number(config.mascotas) : Number(form.mascotas),
+            adultos: config.adultos !== undefined ? Number(config.adultos) : (idx === 0 ? Number(form.adultos) : 0),
+            menores: config.menores !== undefined ? Number(config.menores) : (idx === 0 ? Number(form.menores) : 0),
+            mascotas: config.mascotas !== undefined ? Number(config.mascotas) : (idx === 0 ? Number(form.mascotas) : 0),
             plan_codigo: config.plan_codigo || form.plan_codigo,
             fuente: form.fuente || 'Teléfono',
             notas: form.notas || '',
@@ -1166,11 +1168,11 @@ ${altRatesStr}
               {selectedGroupRooms.map((roomId, index) => {
                 const room = rooms.find(rm => rm.id === roomId);
                 const config = roomConfigs[roomId] || {
-                  cliente: form.cliente,
-                  apellido: form.apellido,
-                  adultos: form.adultos || 1,
-                  menores: form.menores || 0,
-                  mascotas: form.mascotas || 0,
+                  cliente: index === 0 ? form.cliente : '',
+                  apellido: index === 0 ? form.apellido : '',
+                  adultos: index === 0 ? (form.adultos || 1) : 0,
+                  menores: index === 0 ? (form.menores || 0) : 0,
+                  mascotas: index === 0 ? (form.mascotas || 0) : 0,
                   plan_codigo: form.plan_codigo || ''
                 };
 

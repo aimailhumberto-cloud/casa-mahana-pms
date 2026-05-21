@@ -130,14 +130,14 @@ describe('Group Bookings and Folio Billing Consolidation', () => {
       expect(child).toBeDefined();
       expect(child.parent_reserva_id).toBe(master.id);
 
-      // Pricing check for consolidated billing (Estadía flat room rate):
-      // Master room cost: 100 * 2 nights = 200. Tax = 20. Total = 220
-      // Child room cost: 100 * 2 nights = 200. Tax = 20. Total = 220
-      // Aggregate: subtotal = 400, impuesto_monto = 40, monto_total = 440
-      expect(master.subtotal).toBe(400);
-      expect(master.impuesto_monto).toBe(40);
-      expect(master.monto_total).toBe(440);
-      expect(master.saldo_pendiente).toBe(440);
+      // Pricing check for consolidated billing (Estadía per person rate):
+      // Master room cost: 2 adults * 100 * 2 nights = 400. Tax = 40. Total = 440
+      // Child room cost: 1 adult * 100 * 2 nights = 200. Tax = 20. Total = 220
+      // Aggregate: subtotal = 600, impuesto_monto = 60, monto_total = 660
+      expect(master.subtotal).toBe(600);
+      expect(master.impuesto_monto).toBe(60);
+      expect(master.monto_total).toBe(660);
+      expect(master.saldo_pendiente).toBe(660);
 
       // Child must be stored with $0
       expect(child.subtotal).toBe(0);
@@ -148,8 +148,8 @@ describe('Group Bookings and Folio Billing Consolidation', () => {
       // Folio entries on Master
       const folioEntries = db.prepare("SELECT * FROM folio_hotel WHERE reserva_id = ?").all(master.id);
       expect(folioEntries.length).toBe(4);
-      expect(folioEntries.some(f => f.monto === 200 && f.concepto.includes('Lead Group'))).toBe(true);
-      expect(folioEntries.some(f => f.monto === 20 && f.concepto.includes('Lead Group'))).toBe(true);
+      expect(folioEntries.some(f => f.monto === 400 && f.concepto.includes('Lead Group'))).toBe(true);
+      expect(folioEntries.some(f => f.monto === 40 && f.concepto.includes('Lead Group'))).toBe(true);
       expect(folioEntries.some(f => f.monto === 200 && f.concepto.includes('Child One Guest'))).toBe(true);
       expect(folioEntries.some(f => f.monto === 20 && f.concepto.includes('Child One Guest'))).toBe(true);
     });
@@ -204,10 +204,10 @@ describe('Group Bookings and Folio Billing Consolidation', () => {
       const master = db.prepare("SELECT * FROM reservas_hotel WHERE grupo_codigo = ? AND es_maestra = 1").get(groupCode);
       const child = db.prepare("SELECT * FROM reservas_hotel WHERE grupo_codigo = ? AND es_maestra = 0").get(groupCode);
 
-      // Separate accounts check (Estadía flat room rate)
-      expect(master.subtotal).toBe(225);
-      expect(master.impuesto_monto).toBe(22.5);
-      expect(master.monto_total).toBe(247.5);
+      // Separate accounts check (Estadía per person rate)
+      expect(master.subtotal).toBe(450);
+      expect(master.impuesto_monto).toBe(45);
+      expect(master.monto_total).toBe(495);
 
       expect(child.subtotal).toBe(225);
       expect(child.impuesto_monto).toBe(22.5);
@@ -302,10 +302,10 @@ describe('Group Bookings and Folio Billing Consolidation', () => {
       expect(resData.data.id).toBe(master.id);
 
       // Master totals should increase by 50 + 5 (tax) = 55
-      // Old Master total: 440. New Master total: 495
+      // Old Master total: 660. New Master total: 715
       expect(resData.data.productos_adicionales).toBe(50);
-      expect(resData.data.monto_total).toBe(495);
-      expect(resData.data.saldo_pendiente).toBe(495);
+      expect(resData.data.monto_total).toBe(715);
+      expect(resData.data.saldo_pendiente).toBe(715);
 
       // Verify folio entry is recorded on Master's folio
       const redirectedFolio = db.prepare("SELECT * FROM folio_hotel WHERE reserva_id = ? AND tipo = 'debito' AND concepto LIKE '%Servicio al cuarto%'").get(master.id);
@@ -343,9 +343,9 @@ describe('Group Bookings and Folio Billing Consolidation', () => {
       expect(resData.data.id).toBe(master.id);
 
       // Master paid amount must be 200, outstanding balance should decrease by 200
-      // Previous total: 495. paid: 200. pending: 295
+      // Previous total: 715. paid: 200. pending: 515
       expect(resData.data.monto_pagado).toBe(200);
-      expect(resData.data.saldo_pendiente).toBe(295);
+      expect(resData.data.saldo_pendiente).toBe(515);
 
       // Verify payment recorded on Master's folio
       const paymentFolio = db.prepare("SELECT * FROM folio_hotel WHERE reserva_id = ? AND tipo = 'credito' AND concepto LIKE '%Pago de estadía%'").get(master.id);

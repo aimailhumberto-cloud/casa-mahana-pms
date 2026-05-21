@@ -94,7 +94,7 @@ function calcReservation(data) {
   const esPasadia = plan && plan.categoria === 'Pasadía';
   const subtotalMultiplier = esPasadia ? 1 : noches;
 
-  const baseAdultosMonto = esPasadia ? (adultos * precioAdulto) : precioAdulto;
+  const baseAdultosMonto = adultos * precioAdulto;
   const subtotal = Math.round((baseAdultosMonto + (menores * precioMenor) + (mascotas * precioMascota)) * subtotalMultiplier * 100) / 100;
   const impuestoMonto = Math.round((subtotal + extras) * (impuestoPct / 100) * 100) / 100;
   const montoTotal = Math.round((subtotal + extras + impuestoMonto) * 100) / 100;
@@ -164,7 +164,7 @@ function calcReservationWithRates(planId, checkIn, checkOut, adultos, menores, m
       pMascota = plan ? plan.precio_mascota_noche : 0;
     }
 
-    const baseAdultosMonto = esPasadia ? (adultos * pAdulto) : pAdulto;
+    const baseAdultosMonto = adultos * pAdulto;
     const nightTotal = Math.round((baseAdultosMonto + (menores * pMenor) + (mascotas * pMascota)) * 100) / 100;
     subtotal += nightTotal;
 
@@ -210,5 +210,6 @@ module.exports = {
   getRateForDay,
   calcReservation,
   calcReservationWithRates,
-  calcNoches
+  calcNoches,
+  parseDateToUTC
 };

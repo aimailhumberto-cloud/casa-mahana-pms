@@ -111,6 +111,58 @@ export default function ReservaDetalle() {
   const [pagoDragActive, setPagoDragActive] = useState(false);
   const [paypalConfig, setPaypalConfig] = useState<any>({ paypal_enabled: false, paypal_client_id: '', paypal_mode: 'sandbox' });
 
+  // Extra Person Charge form states
+  const [showPersonaExtra, setShowPersonaExtra] = useState(false);
+  const [personaExtraForm, setPersonaExtraForm] = useState({
+    precioPorNoche: '25',
+    noches: '1',
+    monto: '25',
+    concepto: 'Persona Extra - Cargo al Folio (1 noches)'
+  });
+  const [personaExtraLoading, setPersonaExtraLoading] = useState(false);
+
+  const lastPrecioNoche = useRef(personaExtraForm.precioPorNoche);
+  const lastNoches = useRef(personaExtraForm.noches);
+
+  // Synchronize nights default for persona extra
+  useEffect(() => {
+    if (reserva) {
+      const defaultNoches = reserva.noches === 0 ? 1 : (reserva.noches || 1);
+      const defaultMonto = (25 * defaultNoches).toString();
+      const defaultConcepto = `Persona Extra - Cargo al Folio (${defaultNoches} noches)`;
+      setPersonaExtraForm({
+        precioPorNoche: '25',
+        noches: defaultNoches.toString(),
+        monto: defaultMonto,
+        concepto: defaultConcepto
+      });
+      lastPrecioNoche.current = '25';
+      lastNoches.current = defaultNoches.toString();
+    }
+  }, [reserva]);
+
+  // Sync monto and concepto when precioPorNoche or noches changes
+  useEffect(() => {
+    const currentPrecio = personaExtraForm.precioPorNoche;
+    const currentNoches = personaExtraForm.noches;
+
+    if (currentPrecio !== lastPrecioNoche.current || currentNoches !== lastNoches.current) {
+      lastPrecioNoche.current = currentPrecio;
+      lastNoches.current = currentNoches;
+
+      const pVal = parseFloat(currentPrecio) || 0;
+      const nVal = parseInt(currentNoches) || 0;
+      const computedMonto = (pVal * nVal).toString();
+      const computedConcepto = `Persona Extra - Cargo al Folio (${nVal} noches)`;
+
+      setPersonaExtraForm(prev => ({
+        ...prev,
+        monto: computedMonto,
+        concepto: computedConcepto
+      }));
+    }
+  }, [personaExtraForm.precioPorNoche, personaExtraForm.noches]);
+
   useEffect(() => {
     api.get('/public/paypal-config')
       .then(r => {
@@ -307,6 +359,43 @@ export default function ReservaDetalle() {
       load();
     } catch (err: any) { alert(err.message); }
     finally { setPagoLoading(false); }
+  };
+
+  const submitPersonaExtra = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const montoVal = parseFloat(personaExtraForm.monto);
+    if (isNaN(montoVal) || montoVal <= 0) {
+      alert("El monto debe ser un número mayor a 0.");
+      return;
+    }
+    if (!personaExtraForm.concepto.trim()) {
+      alert("Por favor, ingrese el concepto.");
+      return;
+    }
+    setPersonaExtraLoading(true);
+    try {
+      await api.post(`/hotel/reservas/${id}/folio`, {
+        monto: montoVal,
+        concepto: personaExtraForm.concepto.trim(),
+        tipo: 'debito',
+        metodo_pago: null,
+        referencia: ''
+      });
+      // Reset form and close
+      const defaultNoches = reserva?.noches === 0 ? 1 : (reserva?.noches || 1);
+      setPersonaExtraForm({
+        precioPorNoche: '25',
+        noches: defaultNoches.toString(),
+        monto: (25 * defaultNoches).toString(),
+        concepto: `Persona Extra - Cargo al Folio (${defaultNoches} noches)`
+      });
+      setShowPersonaExtra(false);
+      load();
+    } catch (err: any) {
+      alert(err.message || "Error al registrar persona extra");
+    } finally {
+      setPersonaExtraLoading(false);
+    }
   };
 
   const startEdit = () => {
@@ -705,11 +794,20 @@ export default function ReservaDetalle() {
           {/* Folio */}
           <div className="bg-white rounded-xl p-5 shadow-sm">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-gray-700">Resumen de Cuenta (Folio)</h3>
+              <h3 className="font-semibold text-gray-700 font-sans">Resumen de Cuenta (Folio)</h3>
               {!isClosed && (
-                <button onClick={() => setShowPago(!showPago)} className="flex items-center gap-1 text-sm text-ocean-600 hover:text-ocean-700">
-                  <Plus size={16} /> Registrar Pago
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowPersonaExtra(!showPersonaExtra)}
+                    className="flex items-center gap-1 text-sm text-purple-700 bg-purple-100/60 hover:bg-purple-200/60 backdrop-blur-sm px-3 py-1.5 rounded-xl border border-purple-200/50 transition font-medium shadow-sm font-sans"
+                  >
+                    ➕ Persona Extra
+                  </button>
+                  <button onClick={() => setShowPago(!showPago)} className="flex items-center gap-1 text-sm text-ocean-600 hover:text-ocean-700 font-sans font-medium">
+                    <Plus size={16} /> Registrar Pago
+                  </button>
+                </div>
               )}
             </div>
 
@@ -860,6 +958,91 @@ export default function ReservaDetalle() {
                     </button>
                   )}
                   <button type="button" onClick={() => { setShowPago(false); setPagoFile(null); }} className="px-4 py-2 text-gray-500 text-sm">Cancelar</button>
+                </div>
+              </form>
+            )}
+
+            {showPersonaExtra && (
+              <form onSubmit={submitPersonaExtra} className="bg-purple-50 border border-purple-200 rounded-xl p-4 mb-4 space-y-3">
+                <div className="flex items-center gap-2 text-purple-800 font-bold text-sm mb-1 font-sans">
+                  <span>➕ Registrar Persona Extra</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="md:col-span-2">
+                    <label className="text-xs text-purple-700 font-medium font-sans">Concepto *</label>
+                    <input
+                      type="text"
+                      value={personaExtraForm.concepto}
+                      onChange={e => setPersonaExtraForm(p => ({ ...p, concepto: e.target.value }))}
+                      required
+                      className="input bg-white border-purple-200 focus:border-purple-400 focus:ring-purple-200 w-full font-sans"
+                      placeholder="Concepto de cargo"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-purple-700 font-medium font-sans">Precio por noche *</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={personaExtraForm.precioPorNoche}
+                      onChange={e => setPersonaExtraForm(p => ({ ...p, precioPorNoche: e.target.value }))}
+                      required
+                      className="input bg-white border-purple-200 focus:border-purple-400 focus:ring-purple-200 w-full"
+                      placeholder="25.00"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-purple-700 font-medium font-sans">Noches *</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={personaExtraForm.noches}
+                      onChange={e => setPersonaExtraForm(p => ({ ...p, noches: e.target.value }))}
+                      required
+                      className="input bg-white border-purple-200 focus:border-purple-400 focus:ring-purple-200 w-full"
+                      placeholder="1"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="text-xs text-purple-700 font-medium font-sans">Monto Total *</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      value={personaExtraForm.monto}
+                      onChange={e => setPersonaExtraForm(p => ({ ...p, monto: e.target.value }))}
+                      required
+                      className="input bg-white border-purple-200 focus:border-purple-400 focus:ring-purple-200 w-full font-mono font-bold"
+                      placeholder="0.00"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-2 justify-end">
+                  <button
+                    type="submit"
+                    disabled={personaExtraLoading}
+                    className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm transition disabled:opacity-50 font-medium shadow-sm shadow-purple-100 font-sans"
+                  >
+                    {personaExtraLoading ? 'Cargando...' : 'Cargar Cargo'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowPersonaExtra(false);
+                      const defaultNoches = reserva?.noches === 0 ? 1 : (reserva?.noches || 1);
+                      setPersonaExtraForm({
+                        precioPorNoche: '25',
+                        noches: defaultNoches.toString(),
+                        monto: (25 * defaultNoches).toString(),
+                        concepto: `Persona Extra - Cargo al Folio (${defaultNoches} noches)`
+                      });
+                    }}
+                    className="px-4 py-2 text-purple-700 hover:text-purple-900 hover:bg-purple-100/50 rounded-lg text-sm transition font-sans"
+                  >
+                    Cancelar
+                  </button>
                 </div>
               </form>
             )}
