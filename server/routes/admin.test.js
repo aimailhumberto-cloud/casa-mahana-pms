@@ -517,6 +517,33 @@ describe('Admin CRUD and Deactivated User Security Endpoints', () => {
       expect(dbRow.valor).toBe('Casa Mahana Luxury Eco-Resort');
     });
 
+    it('should dynamically insert a new config key if missing in database', () => {
+      // Manually delete a configuration row to simulate missing keys
+      db.prepare("DELETE FROM config_hotel WHERE clave = 'paypal_client_id'").run();
+
+      const req = {
+        user: { rol: 'admin' },
+        body: {
+          paypal_client_id: 'DYNAMICALLY_INSERTED_CLIENT_ID'
+        }
+      };
+      let resStatus = 200;
+      let resData = null;
+      const res = {
+        status: (code) => { resStatus = code; return res; },
+        json: (data) => { resData = data; return res; }
+      };
+
+      putHotelConfigHandler(req, res);
+      expect(resStatus).toBe(200);
+      expect(resData.success).toBe(true);
+      expect(resData.data.paypal_client_id).toBe('DYNAMICALLY_INSERTED_CLIENT_ID');
+
+      // Verify directly in DB that the row was re-created
+      const dbRow = db.prepare("SELECT valor FROM config_hotel WHERE clave = 'paypal_client_id'").get();
+      expect(dbRow.valor).toBe('DYNAMICALLY_INSERTED_CLIENT_ID');
+    });
+
     it('should validate tourism tax percentage limits (0% to 100%)', () => {
       const req = {
         user: { rol: 'admin' },

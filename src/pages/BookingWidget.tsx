@@ -16,11 +16,28 @@ function PayPalButtons({ clientId, mode, monto, descripcion, onSuccess, onError 
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const existing = document.getElementById('paypal-sdk')
-    if (existing) { setSdkReady(true); setLoading(false); return }
+    const existing = document.getElementById('paypal-sdk') as HTMLScriptElement | null
+    const expectedSrc = `https://www.paypal.com/sdk/js?client-id=${clientId}&currency=USD&intent=capture&enable-funding=card`
+    
+    if (existing) {
+      if (existing.src === expectedSrc) {
+        setSdkReady(true)
+        setLoading(false)
+        return
+      } else {
+        // Las credenciales cambiaron: remover tag de script obsoleto e instancia global
+        existing.remove()
+        if ((window as any).paypal) {
+          delete (window as any).paypal
+        }
+        setSdkReady(false)
+        setLoading(true)
+      }
+    }
+    
     const script = document.createElement('script')
     script.id = 'paypal-sdk'
-    script.src = `https://www.paypal.com/sdk/js?client-id=${clientId}&currency=USD&intent=capture&enable-funding=card`
+    script.src = expectedSrc
     script.onload = () => { setSdkReady(true); setLoading(false) }
     script.onerror = () => { onError('Error cargando PayPal'); setLoading(false) }
     document.head.appendChild(script)

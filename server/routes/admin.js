@@ -647,7 +647,11 @@ router.put('/configuracion/hotel', requireAuth, requireRole('admin'), (req, res)
       for (const key of allowed) {
         if (req.body[key] !== undefined) {
           const val = req.body[key] === null ? '' : String(req.body[key]).trim();
-          db.prepare('UPDATE config_hotel SET valor = ? WHERE clave = ?').run(val, key);
+          db.prepare(`
+            INSERT INTO config_hotel (clave, valor)
+            VALUES (?, ?)
+            ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor
+          `).run(key, val);
         }
       }
     })();

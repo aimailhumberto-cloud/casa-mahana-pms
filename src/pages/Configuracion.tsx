@@ -159,8 +159,8 @@ export default function Configuracion({ user }: { user: User }) {
         const c = r.data;
         if (c) {
           setNombrePropiedad(c.nombre_propiedad || '');
-          setImpuestoTurismoPct(c.impuesto_turismo_pct !== undefined ? parseFloat(c.impuesto_turismo_pct) : 0);
-          setDepositoSugeridoPct(c.deposito_sugerido_pct !== undefined ? parseFloat(c.deposito_sugerido_pct) : 50);
+          setImpuestoTurismoPct(c.impuesto_turismo_pct ? (parseFloat(c.impuesto_turismo_pct) || 0) : 0);
+          setDepositoSugeridoPct(c.deposito_sugerido_pct ? (parseFloat(c.deposito_sugerido_pct) || 50) : 50);
           setPaypalClientId(c.paypal_client_id || '');
           setPaypalSecret(c.paypal_secret || '');
           setPaypalMode(c.paypal_mode || 'sandbox');
@@ -175,17 +175,41 @@ export default function Configuracion({ user }: { user: User }) {
   const handleSaveHotelConfig = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isAdmin) return;
-    setSavingHotelConfig(true);
+    
     setHotelConfigSuccessMsg('');
     setHotelConfigErrorMsg('');
-    
+
+    // Validaciones explícitas de negocio
+    if (!nombrePropiedad || !nombrePropiedad.trim()) {
+      setHotelConfigErrorMsg('El nombre de la propiedad es requerido.');
+      return;
+    }
+
+    const tax = Number(impuestoTurismoPct);
+    if (isNaN(tax) || tax < 0 || tax > 100) {
+      setHotelConfigErrorMsg('El porcentaje de impuesto de turismo debe estar entre 0% y 100%.');
+      return;
+    }
+
+    const deposit = Number(depositoSugeridoPct);
+    if (isNaN(deposit) || deposit < 0 || deposit > 100) {
+      setHotelConfigErrorMsg('El porcentaje de depósito sugerido debe estar entre 0% y 100%.');
+      return;
+    }
+
+    if (paypalMode === 'live' && (!paypalClientId || !paypalClientId.trim())) {
+      setHotelConfigErrorMsg('El PayPal Client ID es requerido para el entorno Live (Producción).');
+      return;
+    }
+
+    setSavingHotelConfig(true);
     try {
       const payload = {
-        nombre_propiedad: nombrePropiedad || null,
-        impuesto_turismo_pct: impuestoTurismoPct !== undefined ? Number(impuestoTurismoPct) : 0,
-        deposito_sugerido_pct: depositoSugeridoPct !== undefined ? Number(depositoSugeridoPct) : 50,
-        paypal_client_id: paypalClientId || null,
-        paypal_secret: paypalSecret || null,
+        nombre_propiedad: nombrePropiedad.trim(),
+        impuesto_turismo_pct: tax,
+        deposito_sugerido_pct: deposit,
+        paypal_client_id: paypalClientId ? paypalClientId.trim() : null,
+        paypal_secret: paypalSecret ? paypalSecret.trim() : null,
         paypal_mode: paypalMode
       };
       
@@ -1225,7 +1249,6 @@ export default function Configuracion({ user }: { user: User }) {
                       onChange={e => setNombrePropiedad(e.target.value)}
                       className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm disabled:bg-gray-50 disabled:text-gray-400 font-sans"
                       placeholder="Casa Mahana"
-                      required
                     />
                   </div>
 
@@ -1243,7 +1266,6 @@ export default function Configuracion({ user }: { user: User }) {
                       placeholder="10"
                       min="0"
                       max="100"
-                      required
                     />
                     <p className="text-[10px] text-gray-400 mt-1">Porcentaje de impuesto turístico gubernamental aplicado a reservas.</p>
                   </div>
@@ -1262,7 +1284,6 @@ export default function Configuracion({ user }: { user: User }) {
                       placeholder="50"
                       min="0"
                       max="100"
-                      required
                     />
                     <p className="text-[10px] text-gray-400 mt-1">Porcentaje del total cobrado al cliente como garantía inicial.</p>
                   </div>
