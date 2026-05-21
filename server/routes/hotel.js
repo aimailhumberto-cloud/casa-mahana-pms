@@ -337,6 +337,14 @@ router.post('/hotel/reservas/grupo', requireAuth, (req, res) => {
       return err(res, 'VALIDATION_ERROR', 'Se requiere un array de reservas no vacío');
     }
 
+    // Verify adultos >= 1 for all rooms before entering transaction
+    for (const [index, r] of reservas.entries()) {
+      const adultosVal = parseInt(r.adultos);
+      if (isNaN(adultosVal) || adultosVal < 1) {
+        return err(res, 'VALIDATION_ERROR', `Cada habitación debe tener al menos 1 adulto. Conflicto en la habitación en el índice ${index}.`);
+      }
+    }
+
     const db = getDb();
     const factConsolidadaVal = (facturacion_consolidada === 0 || facturacion_consolidada === false) ? 0 : 1;
 

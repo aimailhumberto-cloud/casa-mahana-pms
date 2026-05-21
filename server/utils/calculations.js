@@ -14,7 +14,8 @@ function parseDateToUTC(dateInput) {
     return Date.UTC(dateInput.getUTCFullYear(), dateInput.getUTCMonth(), dateInput.getUTCDate());
   }
   if (typeof dateInput === 'string') {
-    const dateStr = dateInput.includes('T') ? dateInput.split('T')[0] : dateInput;
+    const sanitizedInput = dateInput.replace(/\//g, '-');
+    const dateStr = sanitizedInput.includes('T') ? sanitizedInput.split('T')[0] : sanitizedInput;
     const parts = dateStr.split('-');
     if (parts.length === 3) {
       const year = parseInt(parts[0], 10);
@@ -52,14 +53,14 @@ function getRateForDay(planId, tipoDia) {
 
 // Calculate reservation totals (day-aware and category-aware)
 function calcReservation(data) {
-  const adultos = parseInt(data.adultos) || 1;
-  const menores = parseInt(data.menores) || 0;
-  const mascotas = parseInt(data.mascotas) || 0;
-  const noches = parseInt(data.noches) || 1;
-  const precioAdulto = parseFloat(data.precio_adulto_noche) || 0;
-  const precioMenor = parseFloat(data.precio_menor_noche) || 0;
-  const precioMascota = parseFloat(data.precio_mascota_noche) || 0;
-  const extras = parseFloat(data.productos_adicionales) || 0;
+  const adultos = Math.max(1, parseInt(data.adultos) || 1);
+  const menores = Math.max(0, parseInt(data.menores) || 0);
+  const mascotas = Math.max(0, parseInt(data.mascotas) || 0);
+  const noches = Math.max(1, parseInt(data.noches) || 1);
+  const precioAdulto = Math.max(0, parseFloat(data.precio_adulto_noche) || 0);
+  const precioMenor = Math.max(0, parseFloat(data.precio_menor_noche) || 0);
+  const precioMascota = Math.max(0, parseFloat(data.precio_mascota_noche) || 0);
+  const extras = Math.max(0, parseFloat(data.productos_adicionales) || 0);
 
   let impuestoPct = parseFloat(getConfig('impuesto_turismo_pct')) || 10;
   
@@ -99,7 +100,7 @@ function calcReservation(data) {
   const impuestoMonto = Math.round((subtotal + extras) * (impuestoPct / 100) * 100) / 100;
   const montoTotal = Math.round((subtotal + extras + impuestoMonto) * 100) / 100;
   const depositoSugerido = Math.round(montoTotal * (depositoPct / 100) * 100) / 100;
-  const montoPagado = parseFloat(data.monto_pagado) || 0;
+  const montoPagado = Math.max(0, parseFloat(data.monto_pagado) || 0);
   const saldoPendiente = Math.round((montoTotal - montoPagado) * 100) / 100;
 
   return {
@@ -117,7 +118,10 @@ function calcReservation(data) {
 // Calculate with day-based rates (strictly timezone-proof and category-aware)
 function calcReservationWithRates(planId, checkIn, checkOut, adultos, menores, mascotas) {
   const db = getDb();
-  const noches = calcNoches(checkIn, checkOut);
+  const clAdultos = Math.max(1, parseInt(adultos) || 1);
+  const clMenores = Math.max(0, parseInt(menores) || 0);
+  const clMascotas = Math.max(0, parseInt(mascotas) || 0);
+  const noches = Math.max(1, calcNoches(checkIn, checkOut));
   const plan = findById('planes_tarifa', planId);
 
   let impuestoPct = parseFloat(getConfig('impuesto_turismo_pct')) || 10;
@@ -154,18 +158,18 @@ function calcReservationWithRates(planId, checkIn, checkOut, adultos, menores, m
 
     let pAdulto, pMenor, pMascota;
     if (rate) {
-      pAdulto = rate.precio_adulto;
-      pMenor = rate.precio_menor;
-      pMascota = rate.precio_mascota;
+      pAdulto = Math.max(0, rate.precio_adulto);
+      pMenor = Math.max(0, rate.precio_menor);
+      pMascota = Math.max(0, rate.precio_mascota);
     } else {
       // Fallback to plan base price
-      pAdulto = plan ? plan.precio_adulto_noche : 0;
-      pMenor = plan ? plan.precio_menor_noche : 0;
-      pMascota = plan ? plan.precio_mascota_noche : 0;
+      pAdulto = plan ? Math.max(0, plan.precio_adulto_noche) : 0;
+      pMenor = plan ? Math.max(0, plan.precio_menor_noche) : 0;
+      pMascota = plan ? Math.max(0, plan.precio_mascota_noche) : 0;
     }
 
-    const baseAdultosMonto = adultos * pAdulto;
-    const nightTotal = Math.round((baseAdultosMonto + (menores * pMenor) + (mascotas * pMascota)) * 100) / 100;
+    const baseAdultosMonto = clAdultos * pAdulto;
+    const nightTotal = Math.round((baseAdultosMonto + (clMenores * pMenor) + (clMascotas * pMascota)) * 100) / 100;
     subtotal += nightTotal;
 
     // Check if holiday

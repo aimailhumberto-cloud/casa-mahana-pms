@@ -415,9 +415,26 @@ export default function NuevaReserva() {
       const exists = prev.includes(id);
       if (exists) {
         const next = prev.filter(x => x !== id);
+        const isLeaderBeingRemoved = prev[0] === id;
+        const newLeaderId = isLeaderBeingRemoved ? next[0] : null;
+
         setRoomConfigs(curr => {
           const updated = { ...curr };
           delete updated[id];
+          if (newLeaderId !== undefined && newLeaderId !== null) {
+            const currentLeaderConfig = updated[newLeaderId];
+            if (!currentLeaderConfig || currentLeaderConfig.adultos === 0) {
+              updated[newLeaderId] = {
+                ...currentLeaderConfig,
+                cliente: form.cliente,
+                apellido: form.apellido,
+                adultos: form.adultos,
+                menores: form.menores,
+                mascotas: form.mascotas,
+                plan_codigo: form.plan_codigo
+              };
+            }
+          }
           return updated;
         });
         return next;

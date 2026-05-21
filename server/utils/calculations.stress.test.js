@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
 
 const database = require('../db/database');
 
@@ -126,18 +129,16 @@ describe('Stress Test Suite for calculations.js', () => {
       };
       const res = calcReservation(data);
       // If adultos is forced to 1, the subtotal is: ((1 * 100) + (2 * 50) + 0) * 2 = 400
-      // If adultos could be 0, the subtotal would be: ((0 * 100) + (2 * 50) + 0) * 2 = 200
       expect(res.subtotal).toBe(400); // Confirms forcing 0 adults to 1
     });
 
-    it('calcReservationWithRates DOES NOT default to 1 adult when 0 adults is passed', () => {
+    it('calcReservationWithRates defaults to 1 adult when 0 adults is passed due to clamping', () => {
       // 1 night: entre_semana (Sunday 2026-05-24 to Monday 2026-05-25)
       // Rate: adult = 100, minor = 50, pet = 20
       const res = calcReservationWithRates(1, '2026-05-24', '2026-05-25', 0, 2, 0);
       
-      // If adultos is 0, subtotal is: (0 * 100) + (2 * 50) = 100
-      // If adultos is forced to 1, subtotal would be: (1 * 100) + (2 * 50) = 200
-      expect(res.subtotal).toBe(100); // It allows 0 adults!
+      // If adultos is forced to 1, subtotal is: (1 * 100) + (2 * 50) = 200
+      expect(res.subtotal).toBe(200); // Clamped adults >= 1
     });
   });
 
@@ -177,7 +178,7 @@ describe('Stress Test Suite for calculations.js', () => {
         impuesto_pct: 10
       };
       const res = calcReservation(data);
-      // subtotalMultiplier is forced to 1 because parseInt(noches) || 1 is 1.
+      // noches is clamped to Math.max(1, 0) = 1.
       expect(res.subtotal).toBe(100);
     });
   });
@@ -201,7 +202,7 @@ describe('Stress Test Suite for calculations.js', () => {
   });
 
   describe('Edge Case: Negative and Invalid inputs', () => {
-    it('calcReservation allows negative numbers of guests, nights, and prices', () => {
+    it('calcReservation clamps negative numbers of guests, nights, and prices to 0/1, yielding 0 total', () => {
       const data = {
         adultos: -2,       // Negative adults
         menores: -1,       // Negative minors
@@ -216,80 +217,61 @@ describe('Stress Test Suite for calculations.js', () => {
       
       const res = calcReservation(data);
       
-      // adultos is -2 (non-zero is truthy, so it doesn't fall back to 1)
-      // menores is -1
-      // mascotas is -1
-      // noches is -3 (non-zero is truthy, so it doesn't fall back to 1)
-      // Base per night: (-2 * -100) + (-1 * -50) + (-1 * -20) = 200 + 50 + 20 = 270
-      // Multiplied by noches (-3): 270 * -3 = -810
-      expect(res.subtotal).toBe(-810);
-      // Impuesto: (subtotal + extras) * 10% = (-810 + -50) * 0.1 = -860 * 0.1 = -86
-      expect(res.impuesto_monto).toBe(-86);
-      // Total: -810 + -50 + -86 = -946
-      expect(res.monto_total).toBe(-946);
+      // adultos clamped to Math.max(1, -2) = 1
+      // menores clamped to 0
+      // mascotas clamped to 0
+      // noches clamped to Math.max(1, -3) = 1
+      // precio_adulto clamped to 0
+      // Subtotal should be 0
+      expect(res.subtotal).toBe(0);
+      expect(res.monto_total).toBe(0);
     });
 
-    it('calcReservationWithRates allows negative guest counts and produces negative totals', () => {
+    it('calcReservationWithRates clamps negative guest counts and produces positive totals', () => {
       const res = calcReservationWithRates(1, '2026-05-24', '2026-05-25', -2, -1, 0);
       
       // 1 night entre_semana: adult = 100, minor = 50
-      // Total: (-2 * 100) + (-1 * 50) = -250
-      expect(res.subtotal).toBe(-250);
-      expect(res.monto_total).toBe(-275); // -250 - 25
+      // -2 adults clamped to 1 adult
+      // -1 minor clamped to 0 minor
+      // Total: (1 * 100) + (0 * 50) = 100
+      expect(res.subtotal).toBe(100);
+      expect(res.monto_total).toBe(110); // 100 + 10
     });
 
-    it('calcReservationWithRates returns NaN when guests are undefined or non-numeric', () => {
+    it('calcReservationWithRates clamps undefined or non-numeric guest counts to default values', () => {
       const res = calcReservationWithRates(1, '2026-05-24', '2026-05-25', undefined, 'invalid', null);
-      // baseAdultosMonto = undefined * 100 -> NaN
-      // menores * pMenor = 'invalid' * 50 -> NaN
-      // mascotas * pMascota = null * 20 -> 0
-      // nightTotal = Math.round(NaN + NaN + 0) -> NaN
-      expect(res.subtotal).toBeNaN();
-      expect(res.monto_total).toBeNaN();
+      // undefined adults -> clamped to 1
+      // 'invalid' minors -> clamped to 0
+      // null mascotas -> clamped to 0
+      expect(res.subtotal).toBe(100);
+      expect(res.monto_total).toBe(110);
     });
   });
 
   describe('Edge Case: Timezone/Day-Shifting & Date formats', () => {
     it('parseDateToUTC causes day shifting if local Date object is used in a positive offset timezone', () => {
-      // We can mock or simulate what happens when a local Date object is passed.
-      // In timezone like UTC+10:
-      // A local Date object representing 2026-05-22 00:00:00 local time
-      // is actually 2026-05-21 14:00:00 UTC.
-      const mockDate = {
-        instanceof: Date,
-        getUTCFullYear: () => 2026,
-        getUTCMonth: () => 4, // May is 4
-        getUTCDate: () => 21,  // Shifter day
-        // Standard check for instanceof Date trick
-      };
-      
-      // Let's create an actual Date object that represents 2026-05-22 in some local time.
-      // E.g., we can test the behavior of parseDateToUTC directly on a Date object:
       const d = new Date(Date.UTC(2026, 4, 21, 14, 0, 0)); // represents May 21st 14:00 UTC
-      // If this Date is passed to parseDateToUTC:
       const timestamp = parseDateToUTC(d);
-      // It returns Date.UTC(2026, 4, 21), which represents 2026-05-21.
-      // But if the local time zone of the server is UTC+10, this Date object was created locally as 2026-05-22 00:00:00.
-      // Thus, the local date was May 22, but the calculated UTC time shifts it to May 21!
       expect(new Date(timestamp).getUTCDate()).toBe(21);
     });
 
-    it('parseDateToUTC parses slash-separated dates locally, risking timezone shifts', () => {
-      // If we pass '2026/05/22', it falls through to new Date('2026/05/22').
-      // Let's test the return value of parseDateToUTC('2026/05/22')
+    it('parseDateToUTC parses slash-separated dates safely due to hyphen conversion', () => {
       const timestamp = parseDateToUTC('2026/05/22');
       const d = new Date(timestamp);
-      // Since it's parsed as local, d.getUTCDate() could be different from 22 depending on the system timezone!
-      // In a UTC-based execution environment or specific timezone, it could shift.
-      // To prove the fall-through, let's trace:
-      // '2026/05/22' has length 10 but does not split by '-', so parts.length is not 3.
-      // It falls through to new Date('2026/05/22') and uses its UTC components, which depend on local timezone.
-      // This is a confirmed vulnerability.
+      // Conversing to hyphen enables direct UTC parse in parts.length === 3 block, returning exact UTC midnight
+      expect(d.getUTCDate()).toBe(22);
+      expect(d.getUTCMonth()).toBe(4); // May
     });
 
     it('parseDateToUTC with invalid date string returns NaN', () => {
       const timestamp = parseDateToUTC('invalid-date-string');
       expect(timestamp).toBeNaN();
+    });
+
+    it('parseDateToUTC is timezone-safe for slash-separated dates and yields same timestamp as hyphen-separated', () => {
+      const slashTimestamp = parseDateToUTC('2026/05/22');
+      const hyphenTimestamp = parseDateToUTC('2026-05-22');
+      expect(slashTimestamp).toBe(hyphenTimestamp);
     });
   });
 });

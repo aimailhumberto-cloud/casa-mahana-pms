@@ -154,6 +154,55 @@ describe('Group Bookings and Folio Billing Consolidation', () => {
       expect(folioEntries.some(f => f.monto === 20 && f.concepto.includes('Child One Guest'))).toBe(true);
     });
 
+    it('should reject group bookings if any room has 0 adults', () => {
+      const req = {
+        user: { nombre: 'Admin User', email: 'admin@casamahana.com' },
+        body: {
+          facturacion_consolidada: 1,
+          reservas: [
+            {
+              cliente: 'Lead',
+              apellido: 'Group',
+              email: 'lead@group.com',
+              habitacion_id: 101,
+              check_in: '2026-07-01',
+              check_out: '2026-07-03',
+              adultos: 2,
+              menores: 0,
+              plan_codigo: 'oferta_simple',
+              precio_adulto_noche: 100
+            },
+            {
+              cliente: 'Child One',
+              apellido: 'Guest',
+              email: 'child1@group.com',
+              habitacion_id: 102,
+              check_in: '2026-07-01',
+              check_out: '2026-07-03',
+              adultos: 0,
+              menores: 2,
+              plan_codigo: 'oferta_simple',
+              precio_adulto_noche: 100
+            }
+          ]
+        }
+      };
+
+      let resStatus = 200;
+      let resData = null;
+      const res = {
+        status: (code) => { resStatus = code; return res; },
+        json: (data) => { resData = data; return res; }
+      };
+
+      postGrupoHandler(req, res);
+
+      expect(resStatus).toBe(400);
+      expect(resData.success).toBe(false);
+      expect(resData.error.code).toBe('VALIDATION_ERROR');
+      expect(resData.error.message).toContain('debe tener al menos 1 adulto');
+    });
+
     it('should create group bookings with separate billing successfully', () => {
       const req = {
         user: { nombre: 'Admin User', email: 'admin@casamahana.com' },

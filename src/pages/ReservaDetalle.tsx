@@ -187,8 +187,10 @@ export default function ReservaDetalle() {
     }
   }, [pagoFile]);
 
-  const load = () => {
-    setLoading(true);
+  const load = (silent?: boolean) => {
+    if (!silent) {
+      setLoading(true);
+    }
     api.get(`/hotel/reservas/${id}`)
       .then(async (r) => {
         setReserva(r.data);
@@ -202,9 +204,15 @@ export default function ReservaDetalle() {
         } else {
           setGroupReservations([]);
         }
-        setLoading(false);
+        if (!silent) {
+          setLoading(false);
+        }
       })
-      .catch(() => setLoading(false));
+      .catch(() => {
+        if (!silent) {
+          setLoading(false);
+        }
+      });
   };
   const loadNotificaciones = () => {
     setLoadingNotifs(true);
@@ -363,20 +371,40 @@ export default function ReservaDetalle() {
 
   const submitPersonaExtra = async (e: React.FormEvent) => {
     e.preventDefault();
+    const precioVal = parseFloat(personaExtraForm.precioPorNoche);
+    const nochesVal = parseInt(personaExtraForm.noches);
+
+    if (isNaN(precioVal) || precioVal <= 0) {
+      alert("El precio por noche debe ser mayor a 0.");
+      return;
+    }
+    if (isNaN(nochesVal) || nochesVal <= 0) {
+      alert("Las noches deben ser mayores a 0.");
+      return;
+    }
+
+    const conceptoTrimmed = personaExtraForm.concepto.trim();
+    if (!conceptoTrimmed) {
+      alert("Por favor, ingrese el concepto.");
+      return;
+    }
+
+    const safeRegex = /^[a-zA-Z0-9áéíóúÁÉÍÓÚñÑ\s'().-]+$/;
+    if (!safeRegex.test(conceptoTrimmed)) {
+      alert("El concepto contiene caracteres no válidos.");
+      return;
+    }
+
     const montoVal = parseFloat(personaExtraForm.monto);
     if (isNaN(montoVal) || montoVal <= 0) {
       alert("El monto debe ser un número mayor a 0.");
-      return;
-    }
-    if (!personaExtraForm.concepto.trim()) {
-      alert("Por favor, ingrese el concepto.");
       return;
     }
     setPersonaExtraLoading(true);
     try {
       await api.post(`/hotel/reservas/${id}/folio`, {
         monto: montoVal,
-        concepto: personaExtraForm.concepto.trim(),
+        concepto: conceptoTrimmed,
         tipo: 'debito',
         metodo_pago: null,
         referencia: ''
@@ -390,7 +418,7 @@ export default function ReservaDetalle() {
         concepto: `Persona Extra - Cargo al Folio (${defaultNoches} noches)`
       });
       setShowPersonaExtra(false);
-      load();
+      load(true);
     } catch (err: any) {
       alert(err.message || "Error al registrar persona extra");
     } finally {
