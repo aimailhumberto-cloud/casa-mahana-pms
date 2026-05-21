@@ -27,11 +27,11 @@ const fs = require('fs');
 // Each PMS field has multiple possible Cloudbeds header names
 const COLUMN_MAP = {
   reservation_id: [
-    'reservation id', 'reservation_id', 'reservationid', 'res id', 'booking id',
+    'room reservation number', 'reservation number', 'reservation id', 'reservation_id', 'reservationid', 'res id', 'booking id',
     'booking_id', 'id', 'confirmation', 'confirmation number', 'conf #', 'conf#'
   ],
   first_name: [
-    'first name', 'first_name', 'firstname', 'guest first name', 'guest_first_name',
+    'primary guest full name', 'guest full name', 'first name', 'first_name', 'firstname', 'guest first name', 'guest_first_name',
     'nombre', 'guest name', 'name'
   ],
   last_name: [
@@ -46,26 +46,24 @@ const COLUMN_MAP = {
     'guest_phone', 'tel', 'telefono', 'teléfono', 'mobile', 'cell'
   ],
   check_in: [
-    'check-in', 'check_in', 'checkin', 'check in', 'arrival', 'arrival date',
-    'arrival_date', 'start date', 'start_date', 'fecha entrada', 'fecha_entrada',
-    'check-in date'
+    'check-in date', 'check in date', 'check-in', 'check_in', 'checkin', 'check in', 'arrival', 'arrival date',
+    'arrival_date', 'start date', 'start_date', 'fecha entrada', 'fecha_entrada'
   ],
   check_out: [
-    'check-out', 'check_out', 'checkout', 'check out', 'departure', 'departure date',
-    'departure_date', 'end date', 'end_date', 'fecha salida', 'fecha_salida',
-    'check-out date'
+    'check-out date', 'check out date', 'check-out', 'check_out', 'checkout', 'check out', 'departure', 'departure date',
+    'departure_date', 'end date', 'end_date', 'fecha salida', 'fecha_salida'
   ],
   nights: [
-    'nights', 'noches', 'length of stay', 'los', 'duration', 'stay length',
+    'room nights', 'nights', 'noches', 'length of stay', 'los', 'duration', 'stay length',
     'total nights', 'no. of nights'
   ],
   room_type: [
-    'room type', 'room_type', 'roomtype', 'type', 'accommodation type',
+    'room types', 'room type', 'room_type', 'roomtype', 'type', 'accommodation type',
     'accommodation', 'tipo habitacion', 'tipo habitación', 'tipo_habitacion',
     'room type name', 'room category'
   ],
   room_name: [
-    'room', 'room #', 'room number', 'room_number', 'room name', 'room_name',
+    'room numbers', 'room number', 'room', 'room #', 'room_number', 'room name', 'room_name',
     'assignment', 'assigned room', 'habitacion', 'habitación', 'room no',
     'room no.', 'unit', 'unit name'
   ],
@@ -82,7 +80,7 @@ const COLUMN_MAP = {
     'state'
   ],
   total: [
-    'total', 'grand total', 'total amount', 'amount', 'total price',
+    'grand total', 'total', 'total amount', 'amount', 'total price',
     'reservation total', 'monto total', 'monto_total', 'total charge',
     'total (usd)', 'total ($)'
   ],
@@ -216,10 +214,50 @@ function parseCSV(buffer) {
 }
 
 function parseExcel(buffer) {
-  const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
+  const workbook = XLSX.read(buffer, {
+    type: 'buffer',
+    cellNF: true,
+    cellStyles: true,
+    cellDates: true,
+    cellFormula: true,
+    sheetStubs: true
+  });
   const sheetName = workbook.SheetNames[0];
   const sheet = workbook.Sheets[sheetName];
-  const data = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+  // Pre-process Column A to resolve HYPERLINK formulas to actual names
+  for (const key in sheet) {
+    if (key.startsWith('A') && sheet[key]) {
+      const cell = sheet[key];
+      if (cell.f && cell.f.startsWith('HYPERLINK(')) {
+        // Extract the second argument of HYPERLINK
+        const match = cell.f.match(/HYPERLINK\(".*?",\s*"([^"]+)"\)/);
+        if (match && match[1]) {
+          cell.v = match[1];
+          cell.t = 's';
+          cell.w = match[1];
+          cell.h = match[1];
+        } else {
+          const displayMatch = cell.f.match(/display=([^&"]+)/);
+          if (displayMatch && displayMatch[1]) {
+            const decoded = decodeURIComponent(displayMatch[1]);
+            cell.v = decoded;
+            cell.t = 's';
+            cell.w = decoded;
+            cell.h = decoded;
+          }
+        }
+      }
+    }
+  }
+
+  // Check if this sheet starts with the Cloudbeds history metadata
+  // (metadata headers typically shift actual headers down to row 6 / index 5)
+  const cellA6Val = sheet['A6'] ? (sheet['A6'].v || '').toString().toLowerCase() : '';
+  const isHistoryReport = cellA6Val.includes('name') || cellA6Val.includes('guest') || cellA6Val.includes('nombre') || cellA6Val.includes('primary');
+  
+  const rangeVal = isHistoryReport ? 5 : 0;
+  const data = XLSX.utils.sheet_to_json(sheet, { range: rangeVal, defval: '' });
   const headers = data.length > 0 ? Object.keys(data[0]) : [];
 
   return {
@@ -333,13 +371,33 @@ function getValue(row, mapping, pmsField) {
 /**
  * Process a single row into a PMS reservation object
  */
-function processRow(row, mapping, rooms, plans) {
+function processRow(row, mapping, rooms, plans, guestsMap) {
   const errors = [];
   const warnings = [];
 
+  // Helper to clean promotional suffixes from guest names
+  const cleanPromoName = (name) => {
+    if (!name) return '';
+    let cleaned = String(name).trim();
+    const suffixes = [
+      /ofert[as]\s+simple/i,
+      /mahana\s+experience/i,
+      /tod[os]\s+incluid[os]/i,
+      /todo\s+incluido/i,
+      /experiencia\s+mahana/i
+    ];
+    suffixes.forEach(regex => {
+      cleaned = cleaned.replace(regex, '');
+    });
+    return cleaned.replace(/\s+/g, ' ').trim();
+  };
+
   // ── Required: Guest name ──
-  let cliente = getValue(row, mapping, 'first_name');
-  let apellido = getValue(row, mapping, 'last_name');
+  let rawCliente = getValue(row, mapping, 'first_name');
+  let rawApellido = getValue(row, mapping, 'last_name');
+
+  let cliente = cleanPromoName(rawCliente);
+  let apellido = cleanPromoName(rawApellido);
   
   // Handle case where full name is in one field
   if (cliente && !apellido && cliente.includes(' ')) {
@@ -386,7 +444,7 @@ function processRow(row, mapping, rooms, plans) {
   const roomType = getValue(row, mapping, 'room_type');
 
   // Try to match room by name
-  if (roomName) {
+  if (roomName && String(roomName).trim() !== '-' && String(roomName).trim() !== '') {
     const room = rooms.find(r => 
       r.nombre.toLowerCase() === String(roomName).toLowerCase() ||
       r.nombre.toLowerCase().includes(String(roomName).toLowerCase())
@@ -402,9 +460,17 @@ function processRow(row, mapping, rooms, plans) {
   // Try to match by room type
   if (!habitacionId && roomType) {
     tipoHabitacion = mapRoomType(roomType);
-    // Find first available room of that type
-    const room = rooms.find(r => r.tipo.toLowerCase() === tipoHabitacion.toLowerCase());
-    if (room) {
+    // Find rooms of this specific type (distribute evenly)
+    const matchingRooms = rooms.filter(r => r.tipo.toLowerCase() === tipoHabitacion.toLowerCase());
+    if (matchingRooms.length > 0) {
+      if (!global.roomRotationIndex) global.roomRotationIndex = {};
+      if (global.roomRotationIndex[tipoHabitacion] === undefined) {
+        global.roomRotationIndex[tipoHabitacion] = 0;
+      }
+      const roomIdx = global.roomRotationIndex[tipoHabitacion] % matchingRooms.length;
+      const room = matchingRooms[roomIdx];
+      global.roomRotationIndex[tipoHabitacion]++;
+      
       habitacionId = room.id;
     } else {
       warnings.push(`Tipo "${roomType}" no mapeado a habitación PMS`);
@@ -428,9 +494,13 @@ function processRow(row, mapping, rooms, plans) {
   const menores = parseInt(getValue(row, mapping, 'children')) || 0;
 
   // ── Financial ──
-  const montoTotal = parseFloat(getValue(row, mapping, 'total')) || 0;
-  const saldoPendiente = parseFloat(getValue(row, mapping, 'balance')) || 0;
-  const montoPagado = parseFloat(getValue(row, mapping, 'paid')) || (montoTotal - saldoPendiente);
+  const rawTotal = getValue(row, mapping, 'total');
+  const rawBalance = getValue(row, mapping, 'balance');
+  const rawPaid = getValue(row, mapping, 'paid');
+
+  const montoTotal = parseFloat(rawTotal === '-' ? 0 : rawTotal) || 0;
+  const saldoPendiente = parseFloat(rawBalance === '-' ? 0 : rawBalance) || 0;
+  const montoPagado = parseFloat(rawPaid === '-' ? 0 : rawPaid) || (montoTotal - saldoPendiente);
 
   // ── Source ──
   const rawSource = getValue(row, mapping, 'source');
@@ -442,13 +512,25 @@ function processRow(row, mapping, rooms, plans) {
 
   // ── Other fields ──
   const reservationId = getValue(row, mapping, 'reservation_id');
-  const email = getValue(row, mapping, 'email');
-  const phone = getValue(row, mapping, 'phone');
-  const nationality = getValue(row, mapping, 'country');
+  let email = getValue(row, mapping, 'email') || '';
+  let phone = getValue(row, mapping, 'phone') || '';
+  let nationality = getValue(row, mapping, 'country') || '';
   const notes = getValue(row, mapping, 'notes');
   const createdAt = parseDate(getValue(row, mapping, 'created'));
   const ratePlan = getValue(row, mapping, 'rate_plan');
   const arrivalTime = getValue(row, mapping, 'arrival_time');
+
+  // Enriquecer correo, teléfono y nacionalidad desde el directorio maestro de huéspedes si es posible
+  if (guestsMap) {
+    const fullNameLower = `${cliente} ${apellido}`.trim().toLowerCase();
+    const guestMatch = (email && guestsMap.get(email.trim().toLowerCase())) || guestsMap.get(fullNameLower);
+    
+    if (guestMatch) {
+      if (!email && guestMatch.email) email = guestMatch.email;
+      if (!phone && guestMatch.telefono) phone = guestMatch.telefono;
+      if (!nationality && guestMatch.pais) nationality = guestMatch.pais;
+    }
+  }
 
   // ── Build note with reference ──
   const noteParts = [];
@@ -551,6 +633,41 @@ function runImport(db, rows, mapping, options = {}) {
   const rooms = db.prepare('SELECT * FROM habitaciones WHERE activa = 1 ORDER BY id').all();
   const plans = db.prepare('SELECT * FROM planes_tarifa WHERE activo = 1').all();
 
+  // Load unified guests directory from guests.xlsx if it exists
+  const guestsMap = new Map();
+  try {
+    const guestsPath = 'C:\\Users\\Usuario\\Downloads\\guests.xlsx';
+    if (fs.existsSync(guestsPath)) {
+      const workbook = XLSX.readFile(guestsPath);
+      const sheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+      const guests = XLSX.utils.sheet_to_json(sheet);
+      
+      guests.forEach(g => {
+        const email = g['Correo electrónico'] ? String(g['Correo electrónico']).trim().toLowerCase() : '';
+        const name = g['Nombre'] ? String(g['Nombre']).trim() : '';
+        const lastName = g['Apellido'] ? String(g['Apellido']).trim() : '';
+        const fullName = `${name} ${lastName}`.trim().toLowerCase();
+        
+        const guestData = {
+          email: email || '',
+          telefono: g['Teléfono'] ? String(g['Teléfono']).trim() : '',
+          pais: g['País'] ? String(g['País']).trim() : '',
+        };
+        
+        if (email) {
+          guestsMap.set(email, guestData);
+        }
+        if (fullName) {
+          guestsMap.set(fullName, guestData);
+        }
+      });
+      console.log(`Loaded ${guestsMap.size} guests from master directory guests.xlsx for enrichment.`);
+    }
+  } catch (e) {
+    console.error('Failed to load guests.xlsx master directory for enrichment:', e.message);
+  }
+
   const results = {
     total: rows.length,
     imported: 0,
@@ -566,7 +683,7 @@ function runImport(db, rows, mapping, options = {}) {
       const rowNum = i + 1;
 
       try {
-        const { data, errors, warnings } = processRow(row, mapping, rooms, plans);
+        const { data, errors, warnings } = processRow(row, mapping, rooms, plans, guestsMap);
 
         if (errors.length > 0) {
           results.errors++;
@@ -647,8 +764,8 @@ function runImport(db, rows, mapping, options = {}) {
         }
         if (data.monto_pagado > 0) {
           db.prepare(
-            'INSERT INTO folio_hotel (reserva_id, tipo, concepto, monto, metodo_pago, registrado_por, fecha) VALUES (?, ?, ?, ?, ?, ?, ?)'
-          ).run(reservaId, 'credito', 'Pago registrado (Cloudbeds)', data.monto_pagado, '', 'CB Import', data.check_in);
+            'INSERT INTO folio_hotel (reserva_id, tipo, concepto, monto, registrado_por, fecha) VALUES (?, ?, ?, ?, ?)'
+          ).run(reservaId, 'credito', 'Pago registrado (Cloudbeds)', data.monto_pagado, 'CB Import', data.check_in);
         }
 
         // ── Update room status for active reservations ──
@@ -689,7 +806,7 @@ function runImport(db, rows, mapping, options = {}) {
       const row = rows[i];
       const rowNum = i + 1;
       try {
-        const { data, errors, warnings } = processRow(row, mapping, rooms, plans);
+        const { data, errors, warnings } = processRow(row, mapping, rooms, plans, guestsMap);
         if (errors.length > 0) {
           results.errors++;
           results.details.push({ row: rowNum, status: 'error', errors, warnings });
