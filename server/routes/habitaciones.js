@@ -145,7 +145,7 @@ router.post('/tipo/:tipo/foto', requireAuth, requireRole('admin'), upload.single
     const imageUrl = `/uploads/${req.file.filename}`;
     const db = getDb();
     const key = `foto_tipo_${tipo}`;
-    const existing = db.prepare("SELECT id FROM config_hotel WHERE clave = ?").get(key);
+    const existing = db.prepare("SELECT clave FROM config_hotel WHERE clave = ?").get(key);
     if (existing) { db.prepare("UPDATE config_hotel SET valor = ? WHERE clave = ?").run(imageUrl, key); }
     else { db.prepare("INSERT INTO config_hotel (clave, valor, descripcion) VALUES (?, ?, ?)").run(key, imageUrl, `Foto tipo ${tipo}`); }
     ok(res, { tipo, imagen: imageUrl });
