@@ -163,7 +163,7 @@ router.post('/kommo', async (req, res) => {
     if (kommoToken && kommoSubdomain) {
       const subdomain = kommoSubdomain.replace(/https?:\/\//, '').split('.')[0];
       
-      // 9a. Fetch fields metadata to resolve IDs
+      // 9a. Fetch fields metadata to resolve IDs and auto-create missing ones
       let fieldIdTotal = null;
       let fieldIdDeposito = null;
       try {
@@ -173,14 +173,67 @@ router.post('/kommo', async (req, res) => {
         if (fieldsResp.ok) {
           const fieldsData = await fieldsResp.json();
           const fieldsList = fieldsData._embedded ? fieldsData._embedded.custom_fields : [];
-          for (const f of fieldsList) {
-            const fname = f.name.toLowerCase().trim();
-            if (fname === 'pms_total_cotizacion') fieldIdTotal = f.id;
-            if (fname === 'pms_deposito_minimo') fieldIdDeposito = f.id;
+          
+          // Map of existing names to lower case
+          const existingNames = new Set(fieldsList.map(f => f.name.toLowerCase().trim()));
+          
+          // Define target fields that must exist in Kommo CRM
+          const targetFields = [
+            { name: 'pms_check_in', type: 'date' },
+            { name: 'pms_check_out', type: 'date' },
+            { name: 'pms_adultos', type: 'numeric' },
+            { name: 'pms_menores', type: 'numeric' },
+            { name: 'pms_mascotas', type: 'numeric' },
+            { name: 'pms_tipo_habitacion', type: 'text' },
+            { name: 'pms_plan_codigo', type: 'text' },
+            { name: 'pms_total_cotizacion', type: 'numeric' },
+            { name: 'pms_deposito_minimo', type: 'numeric' }
+          ];
+
+          // Determine which ones are missing
+          const missingFields = targetFields.filter(tf => !existingNames.has(tf.name));
+
+          if (missingFields.length > 0) {
+            logger.info(`Missing required fields in Kommo CRM: ${missingFields.map(m => m.name).join(', ')}. Creating them automatically...`);
+            const createResp = await fetch(`https://${subdomain}.kommo.com/api/v4/leads/custom_fields`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${kommoToken}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify(missingFields)
+            });
+
+            if (createResp.ok) {
+              logger.info('Custom fields created successfully in Kommo CRM!');
+              // Refetch fields list to get the newly generated IDs
+              const refetchResp = await fetch(`https://${subdomain}.kommo.com/api/v4/leads/custom_fields`, {
+                headers: { 'Authorization': `Bearer ${kommoToken}` }
+              });
+              if (refetchResp.ok) {
+                const refetchData = await refetchResp.json();
+                const updatedList = refetchData._embedded ? refetchData._embedded.custom_fields : [];
+                for (const f of updatedList) {
+                  const fname = f.name.toLowerCase().trim();
+                  if (fname === 'pms_total_cotizacion') fieldIdTotal = f.id;
+                  if (fname === 'pms_deposito_minimo') fieldIdDeposito = f.id;
+                }
+              }
+            } else {
+              const errText = await createResp.text();
+              logger.error(`Failed to auto-create custom fields in Kommo: ${createResp.status} - ${errText}`);
+            }
+          } else {
+            // All present, just map the IDs
+            for (const f of fieldsList) {
+              const fname = f.name.toLowerCase().trim();
+              if (fname === 'pms_total_cotizacion') fieldIdTotal = f.id;
+              if (fname === 'pms_deposito_minimo') fieldIdDeposito = f.id;
+            }
           }
         }
       } catch (e) {
-        logger.error('Error fetching custom fields metadata from Kommo:', e.message);
+        logger.error('Error fetching/creating custom fields metadata from Kommo:', e.message);
       }
 
       // 9b. Update custom fields values inside Kommo Lead
