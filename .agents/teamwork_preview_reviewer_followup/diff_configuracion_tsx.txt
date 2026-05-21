@@ -1,0 +1,405 @@
+﻿diff --git a/src/pages/Configuracion.tsx b/src/pages/Configuracion.tsx
+index ac83d9f..54cc70c 100644
+--- a/src/pages/Configuracion.tsx
++++ b/src/pages/Configuracion.tsx
+@@ -117,6 +117,9 @@ export default function Configuracion({ user }: { user: User }) {
+   const [smtpFrom, setSmtpFrom] = useState('');
+   const [adminEmail, setAdminEmail] = useState('');
+   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
++  const [emailProvider, setEmailProvider] = useState<'smtp' | 'resend'>('smtp');
++  const [resendApiKey, setResendApiKey] = useState('');
++  const [resendFromEmail, setResendFromEmail] = useState('');
+   
+   const [waApiUrl, setWaApiUrl] = useState('');
+   const [waApiToken, setWaApiToken] = useState('');
+@@ -188,6 +191,9 @@ export default function Configuracion({ user }: { user: User }) {
+           setSmtpFrom(c.smtp_from || '');
+           setAdminEmail(c.admin_email || '');
+           setNotificationsEnabled(c.notifications_enabled === 1);
++          setEmailProvider(c.email_provider || 'smtp');
++          setResendApiKey(c.resend_api_key || '');
++          setResendFromEmail(c.resend_from_email || '');
+           
+           setWaApiUrl(c.wa_api_url || '');
+           setWaApiToken(c.wa_api_token || '');
+@@ -430,6 +436,9 @@ export default function Configuracion({ user }: { user: User }) {
+         smtp_from: smtpFrom || null,
+         admin_email: adminEmail || null,
+         notifications_enabled: notificationsEnabled ? 1 : 0,
++        email_provider: emailProvider,
++        resend_api_key: resendApiKey || null,
++        resend_from_email: resendFromEmail || null,
+         wa_api_url: waApiUrl || null,
+         wa_api_token: waApiToken || null,
+         wa_from_number: waFromNumber || null,
+@@ -459,23 +468,38 @@ export default function Configuracion({ user }: { user: User }) {
+     setTestingSmtp(true);
+     setSmtpTestResult(null);
+     try {
+-      const res = await api.post('/admin/configuracion/test-smtp', {
+-        smtp_host: smtpHost,
+-        smtp_port: smtpPort,
+-        smtp_user: smtpUser,
+-        smtp_pass: smtpPass,
+-        smtp_from: smtpFrom,
+-        destinatario: testEmail,
+-        hotel_telefono: hotelTelefono,
+-        hotel_direccion: hotelDireccion
+-      });
+-      setSmtpTestResult({
+-        success: true,
+-        message: res.data?.message || 'Conexión SMTP exitosa. Correo de prueba enviado.'
+-      });
++      if (emailProvider === 'resend') {
++        const res = await api.post('/admin/configuracion/test-resend', {
++          resend_api_key: resendApiKey,
++          resend_from_email: resendFromEmail,
++          smtp_from: smtpFrom,
++          destinatario: testEmail,
++          hotel_telefono: hotelTelefono,
++          hotel_direccion: hotelDireccion
++        });
++        setSmtpTestResult({
++          success: true,
++          message: res.data?.message || 'Conexión Resend exitosa. Correo de prueba enviado.'
++        });
++      } else {
++        const res = await api.post('/admin/configuracion/test-smtp', {
++          smtp_host: smtpHost,
++          smtp_port: smtpPort,
++          smtp_user: smtpUser,
++          smtp_pass: smtpPass,
++          smtp_from: smtpFrom,
++          destinatario: testEmail,
++          hotel_telefono: hotelTelefono,
++          hotel_direccion: hotelDireccion
++        });
++        setSmtpTestResult({
++          success: true,
++          message: res.data?.message || 'Conexión SMTP exitosa. Correo de prueba enviado.'
++        });
++      }
+     } catch (err: any) {
+       const errorData = err.response?.data?.error || {
+-        message: err.message || 'Error desconocido al probar la conexión SMTP.'
++        message: err.message || 'Error desconocido al probar la conexión de correo.'
+       };
+       setSmtpTestResult({
+         success: false,
+@@ -638,11 +662,11 @@ export default function Configuracion({ user }: { user: User }) {
+                 </div>
+               )}
+ 
+-              {/* SMTP Settings */}
++              {/* Email Provider Selector */}
+               <div className="space-y-4">
+                 <div className="flex items-center justify-between border-b border-gray-100 pb-2">
+                   <h2 className="font-bold text-gray-800 text-base flex items-center gap-2">
+-                    <Mail size={18} className="text-mahana-600" /> Correo Electrónico (SMTP)
++                    <Mail size={18} className="text-mahana-600" /> Configuración de Correo Electrónico
+                   </h2>
+                   <label className="relative inline-flex items-center cursor-pointer">
+                     <input
+@@ -658,83 +682,165 @@ export default function Configuracion({ user }: { user: User }) {
+                     </span>
+                   </label>
+                 </div>
+-                
+-                <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-xl text-amber-800 flex items-start gap-3 shadow-xs">
+-                  <AlertCircle size={20} className="text-amber-600 mt-0.5 shrink-0" />
+-                  <div>
+-                    <h4 className="font-bold text-sm text-amber-900">⚠️ Recomendación de Entregabilidad SMTP</h4>
+-                    <p className="text-xs text-amber-700 mt-0.5 leading-relaxed">
+-                      <strong>IMPORTANTE:</strong> Para evitar que los correos sean catalogados como Spam o rechazados por los servidores de destino, asegúrese de que el dominio de <strong>"Correo de Remitente (De)"</strong> coincida exactamente con el dominio de su <strong>"Usuario SMTP"</strong> (ej. @casamahana.com).
+-                    </p>
+-                  </div>
+-                </div>
+ 
+                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+-                  <div>
+-                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+-                      SMTP Host
+-                    </label>
+-                    <input
+-                      type="text"
+-                      disabled={!isAdmin}
+-                      value={smtpHost}
+-                      onChange={e => setSmtpHost(e.target.value)}
+-                      className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm disabled:bg-gray-50 disabled:text-gray-400"
+-                      placeholder="smtp.example.com"
+-                    />
+-                  </div>
+-                  <div>
+-                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+-                      SMTP Port
+-                    </label>
+-                    <input
+-                      type="number"
+-                      disabled={!isAdmin}
+-                      value={smtpPort}
+-                      onChange={e => setSmtpPort(Number(e.target.value))}
+-                      className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm disabled:bg-gray-50 disabled:text-gray-400"
+-                      placeholder="587"
+-                    />
+-                  </div>
+-                  <div>
+-                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+-                      Correo de Remitente (De)
++                  <div className="md:col-span-3">
++                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
++                      Proveedor de Correo Electrónico
+                     </label>
+-                    <input
+-                      type="email"
+-                      disabled={!isAdmin}
+-                      value={smtpFrom}
+-                      onChange={e => setSmtpFrom(e.target.value)}
+-                      className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm disabled:bg-gray-50 disabled:text-gray-400"
+-                      placeholder="info@casamahana.com"
+-                    />
++                    <div className="flex gap-4">
++                      <label className="inline-flex items-center cursor-pointer">
++                        <input
++                          type="radio"
++                          disabled={!isAdmin}
++                          name="emailProvider"
++                          value="smtp"
++                          checked={emailProvider === 'smtp'}
++                          onChange={() => setEmailProvider('smtp')}
++                          className="text-mahana-600 focus:ring-mahana-500 mr-2"
++                        />
++                        <span className="text-sm text-gray-700 font-semibold">SMTP Estándar</span>
++                      </label>
++                      <label className="inline-flex items-center cursor-pointer">
++                        <input
++                          type="radio"
++                          disabled={!isAdmin}
++                          name="emailProvider"
++                          value="resend"
++                          checked={emailProvider === 'resend'}
++                          onChange={() => setEmailProvider('resend')}
++                          className="text-mahana-600 focus:ring-mahana-500 mr-2"
++                        />
++                        <span className="text-sm text-gray-700 font-semibold">Resend API</span>
++                      </label>
++                    </div>
+                   </div>
+-                  <div>
+-                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+-                      Usuario SMTP
+-                    </label>
+-                    <input
+-                      type="text"
+-                      disabled={!isAdmin}
+-                      value={smtpUser}
+-                      onChange={e => setSmtpUser(e.target.value)}
+-                      className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm disabled:bg-gray-50 disabled:text-gray-400"
+-                      placeholder="info@casamahana.com"
+-                    />
++                </div>
++
++                {emailProvider === 'resend' ? (
++                  <div className="space-y-4 animate-fadeIn">
++                    <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-xl text-amber-800 flex items-start gap-3 shadow-xs">
++                      <AlertCircle size={20} className="text-amber-600 mt-0.5 shrink-0" />
++                      <div>
++                        <h4 className="font-bold text-sm text-amber-900">⚠️ Recomendación de Entregabilidad Resend</h4>
++                        <p className="text-xs text-amber-700 mt-0.5 leading-relaxed">
++                          <strong>IMPORTANTE:</strong> Para enviar correos usando la API de Resend, asegúrese de que el <strong>"Correo de Remitente (De)"</strong> esté verificado en su panel de control de Resend, o use el dominio por defecto de pruebas de Resend.
++                        </p>
++                      </div>
++                    </div>
++
++                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
++                      <div>
++                        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
++                          Resend API Key
++                        </label>
++                        <input
++                          type="password"
++                          disabled={!isAdmin}
++                          value={resendApiKey}
++                          onChange={e => setResendApiKey(e.target.value)}
++                          className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm disabled:bg-gray-50 disabled:text-gray-400"
++                          placeholder="re_..."
++                        />
++                      </div>
++                      <div>
++                        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
++                          Correo de Remitente (De)
++                        </label>
++                        <input
++                          type="email"
++                          disabled={!isAdmin}
++                          value={resendFromEmail}
++                          onChange={e => setResendFromEmail(e.target.value)}
++                          className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm disabled:bg-gray-50 disabled:text-gray-400"
++                          placeholder="onboarding@resend.dev"
++                        />
++                      </div>
++                    </div>
+                   </div>
+-                  <div>
+-                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+-                      Contraseña SMTP
+-                    </label>
+-                    <input
+-                      type="password"
+-                      disabled={!isAdmin}
+-                      value={smtpPass}
+-                      onChange={e => setSmtpPass(e.target.value)}
+-                      className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm disabled:bg-gray-50 disabled:text-gray-400"
+-                      placeholder="••••••••"
+-                    />
++                ) : (
++                  <div className="space-y-4 animate-fadeIn">
++                    <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-xl text-amber-800 flex items-start gap-3 shadow-xs">
++                      <AlertCircle size={20} className="text-amber-600 mt-0.5 shrink-0" />
++                      <div>
++                        <h4 className="font-bold text-sm text-amber-900">⚠️ Recomendación de Entregabilidad SMTP</h4>
++                        <p className="text-xs text-amber-700 mt-0.5 leading-relaxed">
++                          <strong>IMPORTANTE:</strong> Para evitar que los correos sean catalogados como Spam o rechazados por los servidores de destino, asegúrese de que el dominio de <strong>"Correo de Remitente (De)"</strong> coincida exactamente con el dominio de su <strong>"Usuario SMTP"</strong> (ej. @casamahana.com).
++                        </p>
++                      </div>
++                    </div>
++
++                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
++                      <div>
++                        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
++                          SMTP Host
++                        </label>
++                        <input
++                          type="text"
++                          disabled={!isAdmin}
++                          value={smtpHost}
++                          onChange={e => setSmtpHost(e.target.value)}
++                          className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm disabled:bg-gray-50 disabled:text-gray-400"
++                          placeholder="smtp.example.com"
++                        />
++                      </div>
++                      <div>
++                        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
++                          SMTP Port
++                        </label>
++                        <input
++                          type="number"
++                          disabled={!isAdmin}
++                          value={smtpPort}
++                          onChange={e => setSmtpPort(Number(e.target.value))}
++                          className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm disabled:bg-gray-50 disabled:text-gray-400"
++                          placeholder="587"
++                        />
++                      </div>
++                      <div>
++                        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
++                          Correo de Remitente (De)
++                        </label>
++                        <input
++                          type="email"
++                          disabled={!isAdmin}
++                          value={smtpFrom}
++                          onChange={e => setSmtpFrom(e.target.value)}
++                          className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm disabled:bg-gray-50 disabled:text-gray-400"
++                          placeholder="info@casamahana.com"
++                        />
++                      </div>
++                      <div>
++                        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
++                          Usuario SMTP
++                        </label>
++                        <input
++                          type="text"
++                          disabled={!isAdmin}
++                          value={smtpUser}
++                          onChange={e => setSmtpUser(e.target.value)}
++                          className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm disabled:bg-gray-50 disabled:text-gray-400"
++                          placeholder="info@casamahana.com"
++                        />
++                      </div>
++                      <div>
++                        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
++                          Contraseña SMTP
++                        </label>
++                        <input
++                          type="password"
++                          disabled={!isAdmin}
++                          value={smtpPass}
++                          onChange={e => setSmtpPass(e.target.value)}
++                          className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm disabled:bg-gray-50 disabled:text-gray-400"
++                          placeholder="••••••••"
++                        />
++                      </div>
++                    </div>
+                   </div>
++                )}
++
++                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                   <div>
+                     <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                       Correo de Alertas (Admin)
+@@ -747,18 +853,23 @@ export default function Configuracion({ user }: { user: User }) {
+                       className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm disabled:bg-gray-50 disabled:text-gray-400"
+                       placeholder="admin@casamahana.com"
+                     />
++                  </div>
+                 </div>
+               </div>
+ 
+-              {/* SMTP Tester Card */}
++              {/* Email Tester Card */}
+               {isAdmin && (
+                 <div className="bg-gray-50 border border-gray-200 rounded-xl p-5 mt-4 space-y-4">
+                   <div className="flex items-center gap-2">
+                     <Sparkles size={16} className="text-mahana-600 animate-pulse" />
+-                    <h3 className="font-bold text-gray-800 text-sm">🧪 Probar Conexión de Correo (SMTP) en Vivo</h3>
++                    <h3 className="font-bold text-gray-800 text-sm">
++                      {emailProvider === 'resend' ? '🧪 Probar API de Resend en Vivo' : '🧪 Probar Conexión de Correo (SMTP) en Vivo'}
++                    </h3>
+                   </div>
+                   <p className="text-xs text-gray-500 font-sans">
+-                    Verifique que las credenciales SMTP ingresadas arriba sean correctas enviando un correo de prueba estructurado y con diseño corporativo al instante.
++                    {emailProvider === 'resend'
++                      ? 'Verifique que la API Key de Resend ingresada arriba sea correcta enviando un correo de prueba estructurado y con diseño corporativo al instante.'
++                      : 'Verifique que las credenciales SMTP ingresadas arriba sean correctas enviando un correo de prueba estructurado y con diseño corporativo al instante.'}
+                   </p>
+                   
+                   <div className="flex flex-col sm:flex-row gap-3">
+@@ -784,7 +895,7 @@ export default function Configuracion({ user }: { user: User }) {
+                         </>
+                       ) : (
+                         <>
+-                          <span>Probar Conexión SMTP</span>
++                          <span>{emailProvider === 'resend' ? 'Probar Conexión Resend' : 'Probar Conexión SMTP'}</span>
+                         </>
+                       )}
+                     </button>
+@@ -808,7 +919,7 @@ export default function Configuracion({ user }: { user: User }) {
+                           <div className="flex items-start gap-2.5">
+                             <XCircle size={16} className="text-red-600 shrink-0 mt-0.5" />
+                             <div>
+-                              <h5 className="font-bold text-red-900">Fallo en la Prueba SMTP</h5>
++                              <h5 className="font-bold text-red-900">Fallo en la Prueba de Correo</h5>
+                               <p className="mt-0.5 text-red-755">{smtpTestResult.message}</p>
+                             </div>
+                           </div>
+@@ -821,12 +932,6 @@ export default function Configuracion({ user }: { user: User }) {
+                                   ? JSON.stringify(smtpTestResult.details, null, 2) 
+                                   : String(smtpTestResult.details)}
+                               </pre>
+-                              <p className="text-[10px] text-red-600 mt-1.5 leading-normal">
+-                                💡 <strong>Consejo de Diagnóstico:</strong> 
+-                                {smtpTestResult.message?.toLowerCase().includes('connect') && ' Compruebe que el Host SMTP y el Puerto sean válidos y que no estén bloqueados por un firewall.'}
+-                                {smtpTestResult.message?.toLowerCase().includes('auth') && ' El usuario o contraseña ingresados son incorrectos. Verifique sus credenciales.'}
+-                                {smtpTestResult.message?.toLowerCase().includes('from') && ' Asegúrese de que el "Correo de Remitente (De)" esté autorizado para enviar en nombre de su cuenta SMTP.'}
+-                              </p>
+                             </div>
+                           )}
+                         </div>
+@@ -975,7 +1080,6 @@ export default function Configuracion({ user }: { user: User }) {
+                     </div>
+                   </div>
+                 </div>
+-              </div>
+ 
+               {/* Submit Button */}
+               {isAdmin && (

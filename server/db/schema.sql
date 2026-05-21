@@ -272,7 +272,10 @@ CREATE TABLE IF NOT EXISTS configuracion_sistema (
   hotel_telefono TEXT,
   hotel_politica_cancelacion TEXT,
   hotel_politica_reembolso TEXT,
-  hotel_direccion TEXT
+  hotel_direccion TEXT,
+  email_provider TEXT DEFAULT 'smtp',
+  resend_api_key TEXT,
+  resend_from_email TEXT
 );
 
 -- ═══ AUDITORÍA DE REVERSIONES CONTABLES ═══

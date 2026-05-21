@@ -1,77 +1,68 @@
-# Implementation Plan — Group Bookings and Multiple Units (Master/Child Bookings)
+# Implementation Plan: PMS Follow-up Requirements
 
-This plan outlines the design and implementation steps for a comprehensive group bookings, multiple units allocation, consolidated billing, linked calendar visualizations, physical unit drag reassignments, massive operations, and automatic tests in Casa Mahana PMS.
+This plan details the implementation steps for the five follow-up requirements in the Casa Mahana PMS.
 
-## Architecture & Data Flow
+## Scope of Work
 
-```
-[Receptionist / User UI]
-       │  (Creates group booking with multiple selected units)
-       ▼
-[POST /api/v1/hotel/reservas/grupo]
-       │
-  [db.transaction()]
-       ├── Validate dates and availability for all requested units
-       ├── Generate unique 'grupo_codigo' (e.g. GRP-YYYYMMDD-XXXX)
-       ├── Create Master reservation (with es_maestra = 1, facturacion_consolidada = 0 or 1)
-       ├── Create Child reservations (with es_maestra = 0, parent_reserva_id = master.id)
-       └── If facturacion_consolidada = 1:
-             ├── Post room/tax debits of ALL rooms (master & children) to Master's folio
-             └── Child reservations are saved with pricing/balance totals = $0
-```
+### R1. Quotes and Alternative Rates Filtering
+- **File**: `src/pages/NuevaReserva.tsx`
+- **Changes**: Filter the `filteredPlanes` memo hook with `p.visible_web === 1`.
+- **Verification**: Verify that only rates with `visible_web === 1` are shown in the dropdown and alternative rates grid.
 
-## Milestones & Work Items
+### R2. Dynamic Deposit Sync & Quick Fills
+- **File**: `src/pages/NuevaReserva.tsx`
+- **Changes**: 
+  - Add `isDepositDirty` state to track manual edits.
+  - Reset `isDepositDirty` on dates/room/plan changes.
+  - Automatically update `depositAmount` with `cotizacion.deposito_sugerido` if `isDepositDirty` is false.
+  - Add three quick-fill buttons ("0%", "50%", "100%") to dynamically fill the input field.
+- **Verification**: Change inputs in the reservation form and verify that the suggested deposit updates dynamically, and that the quick-fill buttons work.
 
-### Milestone 1: Database Schema Modifications
-- [ ] Add columns to `reservas_hotel` in `server/db/schema.sql`:
-  - `grupo_codigo` TEXT
-  - `es_maestra` INTEGER DEFAULT 0
-  - `parent_reserva_id` INTEGER
-  - `facturacion_consolidada` INTEGER DEFAULT 1
-  - Foreign Key referencing `reservas_hotel(id)` for `parent_reserva_id`
-  - Index `idx_reservas_grupo` ON `reservas_hotel(grupo_codigo)`
-- [ ] Update migration/initialization in `server/db/database.js` to dynamically add these columns if they are not already present in the existing SQLite database.
+### R3. PayPal & Mandatory Payment Attachments (Internal Flow)
+- **File**: `src/pages/NuevaReserva.tsx`, `server/routes/public.js` (for reference)
+- **Changes**:
+  - In Step 4 "Registro de Abono":
+    - If `depositMetodo === 'paypal'` or `depositMetodo === 'tarjeta'` and `depositAmount > 0`, integrate PayPal buttons in the PMS booking wizard.
+    - Prevent direct submit, force successful PayPal capture, then proceed automatically with the reservation creation using the order ID.
+    - For other payment methods (`['transferencia', 'yappy', 'cuponera_oferta_simple', 'cuponera_pahoy']`) where `depositAmount > 0`, validate that a `receiptFile` (attachment) has been uploaded. If not, block submission with an alert warning.
+- **Verification**: Try submitting without attachment for offline methods (should fail), and check the rendering/flow of PayPal buttons.
 
-### Milestone 2: Backend API & SQLite Transactions
-- [ ] Implement `POST /api/v1/hotel/reservas/grupo` in `server/routes/hotel.js` inside a single `db.transaction()` wrapper:
-  - Validate availability for all rooms and dates. If any overlaps exist, throw error and rollback completely.
-  - Insert reservations, linking them via `grupo_codigo`, `es_maestra`, `parent_reserva_id`, and `facturacion_consolidada`.
-  - Calculate totals dynamically using `calcReservation` or `calcReservationWithRates`.
-- [ ] Support retrieval of group members via `GET /api/v1/hotel/reservas?grupo_codigo=XYZ`.
+### R4. Resend Email Integration
+- **Files**: `server/db/database.js`, `server/routes/admin.js`, `server/notifications.js`, `src/pages/Configuracion.tsx`
+- **Changes**:
+  - **Database**: Add `email_provider` (default 'smtp') and `resend_api_key` columns dynamically to `configuracion_sistema` table during seeding/initialization in `database.js`.
+  - **Admin API**: Include these new fields in the allowed settings payload inside `server/routes/admin.js` for both SMTP configuration and email sending.
+  - **Notifications**: Refactor `sendEmail` in `server/notifications.js` to dispatch using the Resend REST API (via native Node `https` module) if `email_provider === 'resend'`.
+  - **UI Settings**: Update `src/pages/Configuracion.tsx` to let admins toggle between "SMTP Standard" and "Resend API", configure `resend_api_key`, and hide SMTP inputs when Resend is selected.
+- **Verification**: Verify configuration is saved to database. Add/run integration tests verifying Resend dispatch path.
 
-### Milestone 3: Consolidated Folio Accounting
-- [ ] Update folio logic:
-  - If `facturacion_consolidada = 1`, all room rate debits and taxes for children are written to the Master reservation's folio (labeled with the child's room number).
-  - The children's reservation fields (`subtotal`, `impuesto_monto`, `monto_total`, `monto_pagado`, `saldo_pendiente`) are stored as `$0`.
-  - If a payment/abono is posted, it goes to the Master folio and reduces the Master's consolidated `saldo_pendiente`.
-  - If `facturacion_consolidada = 0`, children keep separate totals and separate folios.
+### R5. Multi-room Public Booking Widget (Shopping Cart & Group API)
+- **Files**: `src/pages/BookingWidget.tsx`, `server/routes/public.js`
+- **Changes**:
+  - **Frontend UI**:
+    - Update public guest selector to support up to 30 people.
+    - Re-engineer booking wizard step 2 and step 3 to support a shopping cart.
+    - Maintain a list of `CartItem[]` representing selected rooms, plans, guests, and cotizaciones.
+    - Offer a post-selection dialog: "Add another room" (returns to Step 2) or "Proceed to Checkout" (goes to Step 4 summary).
+    - Summarize all cart items in Step 4 with a consolidated total and minimum deposit.
+    - Implement a single group booking API call on checkout.
+  - **Backend API**:
+    - Create a public unauthenticated `/api/v1/public/reservar/grupo` endpoint in `server/routes/public.js`.
+    - Extract group booking logic inside a single transaction: resolve room types to actual IDs, validate availability/dates, insert multiple reservations in `reservas_hotel` with `parent_reserva_id` and a shared `grupo_codigo`, and create consolidated folios.
+- **Verification**: Test the booking widget end-to-end to verify multi-room cart booking and SQLite data integrity.
 
-### Milestone 4: Frontend UI - Group Creation
-- [ ] Refactor `src/pages/NuevaReserva.tsx`:
-  - Add interactive switch: *¿Es una reserva de grupo?*.
-  - When active, allow multi-selection of units (checkboxes or grid) for the selected dates.
-  - Render card input forms for each room (to specify individual occupant names, roles, adult/child counts, tariff plans).
-  - Allow choosing "Facturación Consolidada" (default) or "Cuentas Separadas".
-  - Execute API call to `POST /api/v1/hotel/reservas/grupo`. On success, redirect to the Master's detail page.
+---
 
-### Milestone 5: Frontend UI - Calendar Integration
-- [ ] Refactor `src/components/RoomRow.tsx` and `src/pages/Calendario.tsx`:
-  - Render a visual link 👥 indicator next to guest names for group bookings.
-  - Render group borders using a common color hash (derived from `grupo_codigo`) with high-quality visual classes.
-  - Track `activeGroupCode` state on mouse hover. Highlight all group blocks sharing the hovered `grupo_codigo` simultaneously.
-  - Add standard HTML5 drag-and-drop handles onto reservation blocks. On dropping on a different RoomRow cell, invoke standard `PUT /hotel/reservas/:id` to swap the physical room row in the backend.
+## Execution Steps & Subagents
 
-### Milestone 6: Frontend UI - Group Detail Panel
-- [ ] Refactor `src/pages/ReservaDetalle.tsx`:
-  - If the reservation has a `grupo_codigo`, render a "Panel de Grupo 👥".
-  - List all room records, occupants, and check-in/out statuses in the group.
-  - Add a consolidated balance block showing overall group cost, paid, and remaining balance.
-  - Add massive check-in ("Check-In Grupo") and check-out ("Check-Out Grupo") action buttons.
-
-### Milestone 7: Testing & Verification
-- [ ] Create `server/routes/hotel.group.test.js` to automatically verify:
-  - Creation of group stays (3 rooms) under Consolidated Billing.
-  - Payment of consolidated balances on the Master account.
-  - Creation of group pasadías (2 bohíos) under Separate Billing.
-  - Physical room drag-and-drop reassignments in the backend.
-- [ ] Run test suite (`npm run test`) and ensure production builds (`npm run build`) finish with zero errors.
+1. **Step 1: Code modification & Implementation** (Worker subagent)
+   - Assign all implementation tasks (R1 - R5) to `teamwork_preview_worker`.
+   - The worker will modify the files, run incremental builds, and implement the necessary logic.
+   - The worker must run tests (`npm run test`) and production build (`npm run build`) to verify all works.
+2. **Step 2: Review and Verification** (Reviewer subagent)
+   - Spawn a `teamwork_preview_reviewer` to review the modifications.
+   - The reviewer will test correctness, robustness, and check for lints or build problems.
+3. **Step 3: Forensic Audit** (Auditor subagent)
+   - Spawn the `teamwork_preview_auditor` to verify code integrity and ensure no cheat/fake implementations exist.
+4. **Step 4: Final Synthesis & Handoff** (Orchestrator)
+   - Aggregate all results and present the final completion report.

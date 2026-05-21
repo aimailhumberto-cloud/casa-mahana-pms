@@ -1,34 +1,27 @@
-# Handoff Report — 2026-05-20T14:30:00-05:00
+# Orchestrator Handoff (State Dump) — Casa Mahana PMS Follow-up Requirements
 
 ## Milestone State
-All milestones are 100% completed and verified:
-- **M1: Database Schema & Setup for Double Approval**: Done. Added table `solicitudes_modificacion` and indexed it. Whitelisted the table in `database.js`.
-- **M2: Backend REST API & Transactional Processing Logic**: Done. Implemented POST to request change, GET to list changes, and POST to process (approve/reject) changes with 100% transactional guarantees and dynamic calculations.
-- **M3: Receptionist UI Interception Modal (`ReservaDetalle.tsx`)**: Done. Intercepted editing and payment updates, requiring justifications and locking reservation states.
-- **M4: Administrator Approvals Dashboard (`Aprobaciones.tsx`)**: Done. Displayed pending modification requests with rich visual Before vs After side-by-side diff comparison and action buttons.
-- **M5: Integration and End-to-End Testing**: Done. Added comprehensive tests in `double_approval.test.js`. Verified production build passes with `npm run build` and all 52 Vitest integration/unit tests pass with `npm run test`.
-- **Auditing**: Done. Audited successfully as CLEAN by two Forensic Auditor runs.
+- [x] R1. Quotes and alternative rates filtering by `visible_web = 1` in `NuevaReserva.tsx` — **DONE**
+- [x] R2. Suggested deposit quick fill buttons and dynamic initialization in `NuevaReserva.tsx` — **DONE**
+- [x] R3. Integrated PayPal & mandatory payment attachments for internal booking flow in `NuevaReserva.tsx` — **DONE**
+- [x] R4. Resend integration for email deliverability in `server/notifications.js` and settings panel — **DONE**
+- [x] R5. Multi-room public booking widget with shopping cart in `BookingWidget.tsx` and group booking API call — **DONE**
+- [x] Final build and regression tests passed successfully (61/61 tests passing) — **DONE**
 
 ## Active Subagents
-All subagents have successfully completed their tasks and delivered their handoffs. There are no active subagents:
-- `explorer_initial` (Conv ID: `5c879201-732c-4b65-a305-de2bb568e350`) — completed initial exploration.
-- `worker_backend` (Conv ID: `75cec0b5-c26e-4f88-b814-2cf184848b71`) — completed database schema & backend API.
-- `auditor_backend` (Conv ID: `b727f602-9a85-4b55-9f10-20ffcfe48300`) — completed backend audit.
-- `worker_frontend` (Conv ID: `3946e1ad-71c6-42a1-ad9c-c3dc721fd2ab`) — completed UI components & build.
-- `auditor_final` (Conv ID: `8135539a-b6ea-4095-88c7-db769f414fcb`) — completed final full-system audit.
+- **None** — All subagents (`explorer_1`, `worker_1`, `reviewer_1`, `auditor_1`) have completed their respective runs and reported back successfully.
 
 ## Pending Decisions
-- **None**: All design and architectural decisions were successfully made and executed.
+- **None** — All requirements have been implemented fully and verified without any outstanding architectural disputes.
 
 ## Remaining Work
-- **None**: The full implementation is complete, production-ready, and comprehensively verified.
+- **Handoff to User** — Send the final completion message to the user outlining the changes and how to run verification commands.
 
 ## Key Artifacts
-- **Verbatim Request**: `C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\ORIGINAL_REQUEST.md`
-- **Global Index**: `C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\PROJECT.md`
-- **Orchestrator Plan**: `C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\.agents\orchestrator\plan.md`
-- **Orchestrator Progress**: `C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\.agents\orchestrator\progress.md`
+- **Verbatim user prompt**: `C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\.agents\orchestrator\original_prompt.md`
 - **Orchestrator Briefing**: `C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\.agents\orchestrator\BRIEFING.md`
-- **Backend Handoff**: `C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\.agents\worker_backend\handoff.md`
-- **Frontend Handoff**: `C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\.agents\worker_frontend\handoff.md`
-- **Final Audit Verdict**: `C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\.agents\auditor_final\handoff.md`
+- **Orchestrator Progress Tracker**: `C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\.agents\orchestrator\progress.md`
+- **Explorer Report**: `C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\.agents\teamwork_preview_explorer_followup\analysis.md`
+- **Worker Handoff & Test Logs**: `C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\.agents\teamwork_preview_worker_followup\handoff.md`
+- **Reviewer Handoff & QA Report**: `C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\.agents\teamwork_preview_reviewer_followup\handoff.md`
+- **Forensic Auditor Handoff (Verdict: CLEAN)**: `C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\.agents\teamwork_preview_auditor_followup\handoff.md`

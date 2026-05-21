@@ -159,3 +159,62 @@ Integrity mode: development
 ### Verificación
 - [ ] Suite de pruebas de integración con Vitest para reservas de grupo en la carpeta de backend pasando con éxito.
 - [ ] La compilación de frontend (`npm run build`) y pruebas generales (`npm run test`) pasan exitosamente.
+
+## Follow-up — 2026-05-21T10:13:01Z
+
+Implementar un conjunto de mejoras clave en el PMS de Casa Mahana, abarcando la precisión de cotizaciones y alternativas web, validación y flujos de pago (PayPal integrado en reservas internas, comprobantes obligatorios), optimización de entregabilidad de correos a través de Resend, y la habilitación de reservas grupales multi-habitación con carrito de selección en la vista pública del cliente.
+
+Working directory: C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms
+Integrity mode: development
+
+## Requirements
+
+### R1. Cotizaciones y Tarifas Alternativas en Panel de Reserva
+- En `NuevaReserva.tsx`, al generar y copiar la cotización, solo se deben incluir aquellas tarifas alternativas cuyos planes tengan la propiedad `visible_web = 1` y estén correctamente cotizados (valor no indefinido).
+- El panel visual de "Tarifas en otros planes" en la interfaz de usuario también debe filtrar y mostrar únicamente planes que tengan `visible_web = 1`.
+
+### R2. Inicialización Dinámica y Ajuste del Depósito Sugerido
+- En el flujo de reserva interna, el campo "Monto del abono" debe inicializarse con el depósito sugerido (`deposito_sugerido`), pero debe actualizarse de forma dinámica cada vez que cambien las fechas, habitaciones o el plan seleccionado.
+- Añadir botones de llenado rápido al lado del input de abono: **"Llenar Depósito Sugerido"** y **"Llenar Monto Total"** para facilitar al recepcionista establecer estos valores con un solo clic.
+
+### R3. Pasarelas de Pago Integradas y Comprobantes Obligatorios en Reservas Internas
+- En el paso 4 ("Registro de Abono") de `NuevaReserva.tsx`, si el recepcionista selecciona **PayPal** o **Tarjeta (POS)** como método de pago y el monto es mayor a 0:
+  - No se debe completar la reserva de inmediato al hacer clic en el botón final de guardar.
+  - Debe cargarse de forma interactiva el SDK de PayPal y mostrar los botones oficiales de pago de PayPal (incluyendo pago con tarjeta de crédito/débito que ya está activo en el PMS público).
+  - Al completarse con éxito la transacción a través de PayPal, se debe proceder automáticamente a realizar las peticiones al backend para registrar la reserva, el folio y asociar el ID de orden de PayPal.
+- Para cualquier otro método de pago (transferencia, yappy, efectivo, cuponeras, etc.) donde el monto del abono sea mayor a 0:
+  - El sistema **no debe permitir avanzar ni completar la reserva** a menos que se haya adjuntado obligatoriamente el archivo (imagen o PDF) del comprobante de pago.
+  - Mostrar una advertencia clara si intentan continuar sin subir el archivo.
+
+### R4. Integración de Resend para Entregabilidad 100% Confiable de Correos
+- Gmail y Hotmail bloquean correos con plantillas HTML complejas si se envían por SMTP tradicional sin firmas de dominio configuradas de forma avanzada.
+- Añadir soporte nativo en el backend (`server/notifications.js`) para enviar correos directamente a través de la API oficial de **Resend**.
+- Añadir a la pestaña de configuración SMTP del PMS la opción de elegir el proveedor: **"SMTP Estándar"** o **"Resend API Key"**.
+- Si se selecciona Resend, permitir configurar la API Key en el panel y usar el cliente oficial/REST de Resend para realizar todos los envíos del sistema (pruebas, confirmaciones, abonos y reenvíos) de forma transparente y con máxima entregabilidad.
+
+### R5. Habilitación de Reservas Grandes/Grupales en la Vista Pública del Cliente
+- En la interfaz pública del cliente (`BookingWidget.tsx`), permitir la selección de más de 6 personas (por ejemplo, hasta 30 personas).
+- Rediseñar el selector de habitaciones público a un formato de **"Carrito de Reserva"**:
+  - El cliente busca fechas y cantidad total de personas.
+  - Se listan los tipos de habitaciones disponibles con un selector de cantidad (ej: "Doble: [ - ] 2 [ + ]", "Familiar: [ - ] 1 [ + ]").
+  - Mostrar un panel interactivo con la suma de la capacidad máxima seleccionada vs. el total de personas ingresadas (ej: *"Capacidad seleccionada: 12 / 12 huéspedes. ¡Perfecto!"*).
+  - Al confirmar la reserva del carrito, el frontend debe realizar una sola llamada al backend usando el endpoint transaccional de reservas grupales (`/hotel/reservas/grupo`) que asocia todas las unidades a un código de grupo consolidado, simplificando la gestión contable y el check-in para el personal interno.
+
+## Acceptance Criteria
+
+### Precisión y Lógica de Cotización
+- [ ] En la cotización generada para el portapapeles, solo aparecen planes de tarifa que tienen `visible_web = 1`.
+- [ ] El monto del abono inicial se actualiza automáticamente al cambiar la selección de habitaciones o planes, y los botones rápidos rellenan el input de abono instantáneamente.
+
+### Seguridad en Pasarelas y Comprobantes
+- [ ] Si se escoge PayPal o Tarjeta en el abono interno, el formulario muestra los botones de PayPal y requiere una transacción exitosa para crear la reserva en base de datos.
+- [ ] Si se escoge Transferencia/Yappy/Efectivo con abono > $0, el botón de confirmar está inhabilitado o muestra validación de error si no se arrastra/sube un comprobante de pago válido.
+
+### Entregabilidad con Resend
+- [ ] El PMS permite guardar la configuración de "Resend API" y todos los correos del sistema se canalizan de forma confiable a través de Resend cuando esta opción está activa.
+
+### Reservas Grupales Web
+- [ ] El selector público permite buscar para más de 6 personas.
+- [ ] El cliente puede añadir una combinación de varias habitaciones al carrito de reserva pública.
+- [ ] La reserva final se registra de forma grupal con folio consolidado en la base de datos PMS.
+

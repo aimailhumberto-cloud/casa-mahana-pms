@@ -295,4 +295,261 @@ router.post('/reservas/:id/comprobante', upload.single('comprobante'), validateU
   }
 });
 
+// Public multi-room reservation creation
+router.post('/reservas/multi', upload.single('comprobante'), validateUploadSignature, (req, res) => {
+  let body = req.body;
+  
+  // If request was sent as multipart/form-data with a JSON payload string in 'datos'
+  if (req.body && req.body.datos && typeof req.body.datos === 'string') {
+    try {
+      body = JSON.parse(req.body.datos);
+    } catch (e) {
+      return err(res, 'VALIDATION_ERROR', 'Error parseando campo datos como JSON');
+    }
+  }
+
+  const {
+    cliente,
+    apellido,
+    email,
+    whatsapp,
+    nacionalidad,
+    metodo_pago,
+    referencia,
+    paypal_order_id,
+    pago_tipo = 'deposito',
+    monto_pagado = 0,
+    check_in: top_check_in,
+    check_out: top_check_out
+  } = body;
+
+  const rooms = body.rooms;
+
+  // Validations
+  const missing = [];
+  if (!cliente) missing.push('cliente');
+  if (!email) missing.push('email');
+  if (!rooms || !Array.isArray(rooms) || rooms.length === 0) missing.push('rooms');
+  if (missing.length) return err(res, 'VALIDATION_ERROR', `Campos requeridos: ${missing.join(', ')}`);
+
+  const db = getDb();
+
+  // Generate a unique group code: e.g. G-XXXX
+  const grupo_codigo = `G-${Math.floor(100000 + Math.random() * 900000)}`;
+
+  // We will run this inside a transaction!
+  const transaction = db.transaction(() => {
+    const createdReservations = [];
+    let aggregatedSubtotal = 0;
+    let aggregatedImpuesto = 0;
+    let aggregatedTotal = 0;
+    
+    // Track blocked/selected room IDs inside the transaction to prevent booking the same room ID in multiple parts of the same request
+    const bookedRoomIdsThisRequest = [];
+
+    for (let index = 0; index < rooms.length; index++) {
+      const roomReq = rooms[index];
+      const check_in = roomReq.check_in || top_check_in;
+      const check_out = roomReq.check_out || top_check_out;
+      const tipo_habitacion = roomReq.tipo_habitacion;
+      const plan_codigo = roomReq.plan_codigo;
+      const adultos = roomReq.adultos !== undefined ? +roomReq.adultos : 1;
+      const menores = roomReq.menores !== undefined ? +roomReq.menores : 0;
+      const mascotas = roomReq.mascotas !== undefined ? +roomReq.mascotas : 0;
+
+      if (!check_in || !check_out) {
+        throw new Error(`check_in y check_out son requeridos para la habitación en el índice ${index}`);
+      }
+      if (check_out <= check_in) {
+        throw new Error(`check_out debe ser posterior a check_in para la habitación en el índice ${index}`);
+      }
+      const todayStr = new Date().toISOString().split('T')[0];
+      if (check_in < todayStr) {
+        throw new Error(`No se puede reservar en fechas pasadas para la habitación en el índice ${index}`);
+      }
+      if (!tipo_habitacion) {
+        throw new Error(`tipo_habitacion es requerido para la habitación en el índice ${index}`);
+      }
+      if (!plan_codigo) {
+        throw new Error(`plan_codigo es requerido para la habitación en el índice ${index}`);
+      }
+
+      const plan = db.prepare('SELECT * FROM planes_tarifa WHERE codigo = ? AND activo = 1 AND visible_web = 1').get(plan_codigo);
+      if (!plan) {
+        throw new Error(`Plan ${plan_codigo} no disponible`);
+      }
+
+      // Validate plan room type applicability
+      if (plan.tipos_aplicables) {
+        try {
+          const applicableTypes = JSON.parse(plan.tipos_aplicables);
+          if (Array.isArray(applicableTypes) && applicableTypes.length > 0) {
+            if (!applicableTypes.includes(tipo_habitacion)) {
+              throw new Error(`El plan ${plan.nombre} no se puede aplicar a habitaciones de tipo ${tipo_habitacion}`);
+            }
+          }
+        } catch (e) {
+          console.error('Error parsing plan.tipos_aplicables in multi-room:', e);
+        }
+      }
+
+      // Find an available room of the requested type
+      const activeRooms = db.prepare("SELECT id FROM habitaciones WHERE tipo = ? AND activa = 1 AND categoria = 'Estadía'").all(tipo_habitacion);
+      
+      // Find conflicting reservations in DB
+      const conflicts = db.prepare(`
+        SELECT habitacion_id FROM reservas_hotel
+        WHERE estado NOT IN ('Cancelada', 'No-Show', 'Check-Out')
+          AND check_in < ? AND check_out > ?
+      `).all(check_out, check_in).map(r => r.habitacion_id);
+
+      // Also filter out any rooms already booked inside THIS multi-room transaction
+      const availableRoom = activeRooms.find(r => !conflicts.includes(r.id) && !bookedRoomIdsThisRequest.includes(r.id));
+      
+      if (!availableRoom) {
+        throw new Error(`No hay habitaciones disponibles de tipo ${tipo_habitacion} para las fechas ${check_in} a ${check_out}`);
+      }
+
+      bookedRoomIdsThisRequest.push(availableRoom.id);
+
+      // Calculate totals
+      const totals = calcReservationWithRates(plan.id, check_in, check_out, adultos, menores, mascotas);
+      const noches = calcNoches(check_in, check_out);
+
+      // Associate full paid amount to the first booking in group
+      const paidAmount = index === 0 ? (parseFloat(monto_pagado) || 0) : 0;
+
+      const data = {
+        cliente: sanitize(cliente),
+        apellido: sanitize(apellido || ''),
+        email: sanitize(email),
+        whatsapp: sanitize(whatsapp || ''),
+        telefono: '',
+        nacionalidad: sanitize(nacionalidad || ''),
+        habitacion_id: availableRoom.id,
+        tipo_habitacion,
+        check_in,
+        check_out,
+        noches,
+        adultos,
+        menores,
+        mascotas,
+        plan_codigo,
+        plan_nombre: plan.nombre,
+        precio_adulto_noche: plan.precio_adulto_noche,
+        precio_menor_noche: plan.precio_menor_noche,
+        precio_mascota_noche: plan.precio_mascota_noche,
+        subtotal: totals.subtotal,
+        impuesto_pct: totals.impuesto_pct,
+        impuesto_monto: totals.impuesto_monto,
+        monto_total: totals.monto_total,
+        deposito_sugerido: totals.deposito_sugerido,
+        monto_pagado: paidAmount,
+        saldo_pendiente: Math.round((totals.monto_total - paidAmount) * 100) / 100,
+        estado: 'Pendiente',
+        fuente: 'Website',
+        notas: metodo_pago ? `${metodo_pago.toUpperCase()} Ref: ${referencia || 'N/A'}` : (paypal_order_id ? `PayPal Order: ${paypal_order_id}` : ''),
+        created_by: 'Web Booking',
+        grupo_codigo
+      };
+
+      const reserva = create('reservas_hotel', data);
+
+      // Add folio entries
+      if (totals.subtotal > 0) {
+        db.prepare('INSERT INTO folio_hotel (reserva_id, tipo, concepto, monto, registrado_por) VALUES (?, ?, ?, ?, ?)').run(
+          reserva.id, 'debito', `${plan.nombre} (${noches} noches)`, totals.subtotal, 'Web Booking');
+      }
+      if (totals.impuesto_monto > 0) {
+        db.prepare('INSERT INTO folio_hotel (reserva_id, tipo, concepto, monto, registrado_por) VALUES (?, ?, ?, ?, ?)').run(
+          reserva.id, 'debito', `Impuesto ${totals.impuesto_pct}%`, totals.impuesto_monto, 'Web Booking');
+      }
+      if (paidAmount > 0) {
+        const finalMetodo = metodo_pago || 'paypal';
+        const finalReferencia = referencia || paypal_order_id || '';
+        db.prepare('INSERT INTO folio_hotel (reserva_id, tipo, concepto, monto, metodo_pago, referencia, registrado_por) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+          reserva.id, 'credito', pago_tipo === 'total' ? 'Pago total (Website)' : 'Depósito (Website)',
+          paidAmount, finalMetodo, finalReferencia, 'Web Booking');
+      }
+
+      aggregatedSubtotal += totals.subtotal;
+      aggregatedImpuesto += totals.impuesto_monto;
+      aggregatedTotal += totals.monto_total;
+
+      createdReservations.push({
+        id: reserva.id,
+        check_in,
+        check_out,
+        tipo_habitacion,
+        plan_nombre: plan.nombre,
+        monto_total: totals.monto_total
+      });
+    }
+
+    return {
+      createdReservations,
+      aggregatedSubtotal,
+      aggregatedImpuesto,
+      aggregatedTotal
+    };
+  });
+
+  try {
+    const result = transaction();
+
+    // If there is an uploaded receipt file (comprobante), attach it to the FIRST reservation in the group!
+    if (req.file) {
+      try {
+        const firstRes = result.createdReservations[0];
+        const tipo = 'recibo';
+        db.prepare(`INSERT INTO documentos_reserva (reserva_id, tipo, nombre_original, nombre_archivo, mime_type, tamaño, notas, subido_por)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
+          firstRes.id, tipo, req.file.originalname, req.file.filename, req.file.mimetype, req.file.size,
+          body.notas || 'Comprobante de reserva multi-habitación subido por Huésped desde el Widget.', 'Huésped Online'
+        );
+      } catch (uploadErr) {
+        console.error('Error attaching comprobante to first reservation:', uploadErr.message);
+      }
+    }
+
+    // Fire webhooks and notifications for each booking created
+    for (const item of result.createdReservations) {
+      fireWebhooks('reserva.creada', {
+        reserva_id: item.id,
+        cliente,
+        check_in: item.check_in,
+        check_out: item.check_out,
+        plan: item.plan_nombre,
+        monto_total: item.monto_total,
+        monto_pagado: item.monto_total === result.createdReservations[0].monto_total ? (parseFloat(monto_pagado) || 0) : 0,
+        fuente: 'Website',
+        grupo_codigo
+      });
+
+      // Async notifications
+      const fullReserva = findById('reservas_hotel', item.id);
+      const hab = fullReserva.habitacion_id ? findById('habitaciones', fullReserva.habitacion_id) : null;
+      notifications.notifyReservationConfirmed(fullReserva, hab).catch(e => console.log('Booking notif error:', e.message));
+      notifications.notifyAdminNewBooking(fullReserva, hab).catch(e => console.log('Admin notif error:', e.message));
+    }
+
+    ok(res, {
+      success: true,
+      grupo_codigo,
+      reservas: result.createdReservations,
+      reserva_id: result.createdReservations[0].id,
+      totales: {
+        subtotal: result.aggregatedSubtotal,
+        impuesto: result.aggregatedImpuesto,
+        total: result.aggregatedTotal
+      },
+      mensaje: `¡Reserva grupal ${grupo_codigo} recibida con éxito! Nuestro equipo la revisará y confirmaremos por email/WhatsApp.`
+    }, null, 201);
+
+  } catch (error) {
+    console.error('Multi-room booking transaction aborted:', error.message);
+    return err(res, 'NO_AVAILABILITY', error.message);
+  }
+});
+
 module.exports = router;

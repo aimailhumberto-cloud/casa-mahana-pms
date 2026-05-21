@@ -1,0 +1,125 @@
+﻿diff --git a/server/routes/admin.js b/server/routes/admin.js
+index 2e19714..a0c62c7 100644
+--- a/server/routes/admin.js
++++ b/server/routes/admin.js
+@@ -545,7 +545,7 @@ router.put('/configuracion/sistema', requireAuth, requireRole('admin'), (req, re
+       'admin_email', 'notifications_enabled', 'wa_api_url', 'wa_api_token',
+       'wa_from_number', 'wa_enabled',
+       'hotel_telefono', 'hotel_politica_cancelacion', 'hotel_politica_reembolso',
+-      'hotel_direccion'
++      'hotel_direccion', 'email_provider', 'resend_api_key', 'resend_from_email'
+     ];
+     const updates = [];
+     const params = [];
+@@ -705,6 +705,111 @@ router.post('/configuracion/test-smtp', requireAuth, requireRole('admin'), async
+   }
+ });
+ 
++// Route for Resend Test Diagnostics
++router.post('/configuracion/test-resend', requireAuth, requireRole('admin'), async (req, res) => {
++  try {
++    const { resend_api_key, resend_from_email, smtp_from, destinatario } = req.body;
++    const fromEmail = resend_from_email || smtp_from;
++    
++    if (!resend_api_key || !fromEmail || !destinatario) {
++      return err(res, 'VALIDATION_ERROR', 'La API Key de Resend, el remitente y el destinatario son requeridos.');
++    }
++    
++    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
++    if (!emailRegex.test(destinatario)) {
++      return err(res, 'VALIDATION_ERROR', 'Formato de correo destinatario inválido');
++    }
++    
++    console.log(`🧪 Iniciando diagnóstico Resend para ${destinatario}`);
++    
++    const mailBody = `
++      <h2 style="color:#22863a;">🧪 ¡Conexión Resend Exitosa!</h2>
++      <p style="color:#4a5568;">El PMS de Casa Mahana ha verificado exitosamente la configuración de tu proveedor de correo Resend.</p>
++      
++      <div class="highlight" style="border-left-color: #22863a; background-color: #f6fdf9; border-left-width: 4px; padding: 15px; border-radius: 8px; margin: 20px 0;">
++        <p style="margin: 0; font-size: 14px; color: #2e7d32;"><strong>Detalles de la conexión:</strong></p>
++        <ul style="margin: 8px 0 0 0; padding-left: 20px; font-size: 13px; color: #2d3748; line-height: 1.6;">
++          <li><strong>Proveedor:</strong> <code>Resend API</code></li>
++          <li><strong>Remitente (From):</strong> <code>${fromEmail}</code></li>
++          <li><strong>Fecha/Hora de Prueba:</strong> <code>${new Date().toLocaleString('es-PA')}</code></li>
++        </ul>
++      </div>
++      
++      <p style="color:#718096;font-size:13px;">Si has recibido este mensaje, significa que los correos automáticos de confirmación, recordatorios y recibos de pago comenzarán a enviarse con normalidad desde Resend.</p>
++    `;
++    
++    const dummyConfig = {
++      hotel_telefono: req.body.hotel_telefono || '+507 6000-0000',
++      smtp_from: fromEmail,
++      hotel_direccion: req.body.hotel_direccion || 'Playa El Palmar, Chame, Panamá'
++    };
++    
++    const finalHtml = baseTemplate(mailBody, '🧪 Prueba de Resend Exitosa — Casa Mahana PMS', dummyConfig);
++    
++    const https = require('https');
++    const payload = JSON.stringify({
++      from: fromEmail,
++      to: [destinatario],
++      subject: `🧪 Prueba de Resend Exitosa — Casa Mahana PMS`,
++      html: finalHtml
++    });
++    const options = {
++      hostname: 'api.resend.com',
++      path: '/emails',
++      method: 'POST',
++      headers: {
++        'Content-Type': 'application/json',
++        'Authorization': `Bearer ${resend_api_key}`,
++        'Content-Length': Buffer.byteLength(payload)
++      }
++    };
++
++    const resResult = await new Promise((resolve) => {
++      const reqRes = https.request(options, (resReq) => {
++        let data = '';
++        resReq.on('data', chunk => data += chunk);
++        resReq.on('end', () => {
++          if (resReq.statusCode >= 200 && resReq.statusCode < 300) {
++            try {
++              const parsed = JSON.parse(data);
++              resolve({ success: true, messageId: parsed.id });
++            } catch {
++              resolve({ success: true, messageId: 'resend-success' });
++            }
++          } else {
++            resolve({ success: false, error: `Resend API error (${resReq.statusCode}): ${data}` });
++          }
++        });
++      });
++
++      reqRes.on('error', (e) => {
++        resolve({ success: false, error: e.message });
++      });
++
++      reqRes.write(payload);
++      reqRes.end();
++    });
++
++    if (resResult.success) {
++      return ok(res, {
++        message: 'Correo de diagnóstico Resend enviado con éxito.',
++        messageId: resResult.messageId
++      });
++    } else {
++      return res.status(400).json({
++        success: false,
++        error: {
++          code: 'RESEND_TEST_FAILED',
++          message: `La API de Resend devolvió un error: ${resResult.error}`
++        }
++      });
++    }
++  } catch (e) {
++    console.error('Resend test route server error:', e);
++    err(res, 'SERVER_ERROR', `Error del servidor durante la prueba Resend: ${e.message}`, 500);
++  }
++});
++
+ // ══════════════════════════════════════
+ // LOGS QUERY ENDPOINTS
+ // ══════════════════════════════════════

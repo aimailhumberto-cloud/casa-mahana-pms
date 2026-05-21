@@ -61,6 +61,15 @@ function getDb() {
       if (!sysCols.includes('hotel_direccion')) {
         db.exec('ALTER TABLE configuracion_sistema ADD COLUMN hotel_direccion TEXT');
       }
+      if (!sysCols.includes('email_provider')) {
+        db.exec("ALTER TABLE configuracion_sistema ADD COLUMN email_provider TEXT DEFAULT 'smtp'");
+      }
+      if (!sysCols.includes('resend_api_key')) {
+        db.exec('ALTER TABLE configuracion_sistema ADD COLUMN resend_api_key TEXT');
+      }
+      if (!sysCols.includes('resend_from_email')) {
+        db.exec('ALTER TABLE configuracion_sistema ADD COLUMN resend_from_email TEXT');
+      }
     }
 
     db.exec(schema);
@@ -315,7 +324,9 @@ function getDb() {
         hotel_telefono = COALESCE(hotel_telefono, '+507 6000-0000'),
         hotel_politica_cancelacion = COALESCE(hotel_politica_cancelacion, 'Las cancelaciones realizadas hasta 48 horas antes de la llegada no tienen cargo. Las cancelaciones tardías o no-show tienen una penalidad de 1 noche.'),
         hotel_politica_reembolso = COALESCE(hotel_politica_reembolso, 'Los reembolsos se procesarán dentro de los 5-7 días hábiles posteriores a la aprobación, utilizando el mismo método de pago original.'),
-        hotel_direccion = COALESCE(hotel_direccion, 'Playa El Palmar, Chame, Panamá')
+        hotel_direccion = COALESCE(hotel_direccion, 'Playa El Palmar, Chame, Panamá'),
+        email_provider = COALESCE(email_provider, 'smtp'),
+        resend_from_email = COALESCE(resend_from_email, 'onboarding@resend.dev')
       WHERE id = 1
     `).run();
 

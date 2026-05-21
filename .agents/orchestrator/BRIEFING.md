@@ -1,73 +1,73 @@
-# BRIEFING — 2026-05-20T20:19:00Z
+# BRIEFING — 2026-05-21T05:13:18-05:00
 
 ## Mission
-Implement the complete Group Bookings and Multiple Units (Master/Child Bookings) module in Casa Mahana PMS, conforming to the designs and blueprints in ORIGINAL_REQUEST.md.
+Implement 5 key follow-up PMS requirements (Quotes filtering, Suggested deposit buttons, PayPal & mandatory attachments, Resend integration, Multi-room public booking widget).
 
 ## 🔒 My Identity
-- Archetype: project_orchestrator
+- Archetype: orchestrator
 - Roles: orchestrator, user_liaison, human_reporter, successor
 - Working directory: C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\.agents\orchestrator
 - Original parent: main agent
-- Original parent conversation ID: 95d1f977-98d9-41cb-9f5f-4eb8ad98281d
+- Original parent conversation ID: 51d91313-e918-4f3b-a7c7-e34d0785b941
 
 ## 🔒 My Workflow
-- **Pattern**: Project / Canonical
+- **Pattern**: Project
 - **Scope document**: C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\PROJECT.md
-1. **Decompose**: Decompose the user request into appropriate milestones.
+1. **Decompose**: Decompose the task into milestones corresponding to each requirement.
 2. **Dispatch & Execute**:
    - **Direct (iteration loop)**: Explorer → Worker → Reviewer → test → gate
+   - **Delegate (sub-orchestrator)**: When an item is too large, spawn a sub-orchestrator for it.
 3. **On failure** (in this order):
-   - Retry, Replace, Skip, Redistribute, Redesign, Escalate
-4. **Succession**: Self-succeed at 16 spawns.
+   - Retry: nudge stuck agent or re-send task
+   - Replace: spawn fresh agent with partial progress
+   - Skip: proceed without (only if non-critical)
+   - Redistribute: split stuck agent's remaining work
+   - Redesign: re-partition decomposition
+   - Escalate: report to parent (sub-orchestrators only, last resort)
+4. **Succession**: Spawn successor when spawn count reaches 16.
 - **Work items**:
-  1. Initial Codebase Exploration [done]
-  2. Database Schema Modifications for Group Bookings [done]
-  3. Backend API Implementation & Accounting Transaction Logic [done]
-  4. Frontend UI for Group Booking Creation [done]
-  5. UI for Calendario Integration & Drag-and-drop Reassignment [done]
-  6. UI for Reservation Detail Group Management & Mass Check-in/out [done]
-  7. E2E Test Suite Creation & Testing Verification [done]
-- **Current phase**: 7
-- **Current focus**: Victory handoff and claim completion
+  1. R1: Quotes & Alternative Rates filtering by visible_web = 1 [pending]
+  2. R2: Suggested deposit quick fill & dynamic initialization [pending]
+  3. R3: PayPal integration & mandatory attachments in internal booking [pending]
+  4. R4: Resend integration for emails [pending]
+  5. R5: Multi-room public booking widget & API call [pending]
+  6. Final validation & testing [pending]
+- **Current phase**: 1
+- **Current focus**: Decompose and plan
 
 ## 🔒 Key Constraints
-- All backend work must be verified and audited as CLEAN by the Forensic Auditor.
-- Do not reuse subagents after handoff.
-- Never write, modify, or create source code files directly.
-- Never run build/test commands yourself — require workers to do so.
+- NEVER write, modify, or create source code files directly.
+- NEVER run build/test commands yourself — require workers to do so.
+- You MAY use file-editing tools ONLY for metadata/state files (.md) in your .agents/ folder.
+- Never reuse a subagent after it has delivered its handoff — always spawn fresh.
 
 ## Current Parent
-- Conversation ID: 95d1f977-98d9-41cb-9f5f-4eb8ad98281d
-- Updated: yes
+- Conversation ID: 51d91313-e918-4f3b-a7c7-e34d0785b941
+- Updated: not yet
 
 ## Key Decisions Made
-- Initiated initial codebase explorer to find schema details, current routes, and react components.
-- Decoupled the backend/db and frontend work to run two separate workers for maximum speed and quality.
-- Embedded strict SQLite transaction isolation for `/hotel/reservas/grupo` bulk creation to ensure atomic rollback.
-- Employed high-performance HSL hashing to map group pastel colors dynamically and handled mouse sync in the parent calendar.
+- Decompose the follow-up work into 6 Milestones.
 
 ## Team Roster
 | Agent | Type | Work Item | Status | Conv ID |
 |-------|------|-----------|--------|---------|
-| explorer_initial | teamwork_preview_explorer | Codebase analysis and strategy for group bookings | completed | 3a9954f4-ad8a-4e78-93f2-77fc23d9e934 |
-| worker_db_backend | teamwork_preview_worker | Milestone 1-3 Database & Backend implementation | completed | 4c0e3668-d79c-44bd-9a74-684647fb6964 |
-| worker_frontend | teamwork_preview_worker | Milestone 4-6 React frontend UI implementation | completed | fd7f12c5-f02b-4302-bb4b-a0055594bce6 |
-| auditor_final | teamwork_preview_auditor | Independent Forensic Integrity Audit & Verdict | completed | d97f716e-1357-4aa1-b7dc-da28a3a9f3d1 |
+| explorer_1 | teamwork_preview_explorer | Explore codebase for R1-R5 | completed | 1b71ca2e-e867-4db3-9d89-18db09d5a5b9 |
+| worker_1 | teamwork_preview_worker | Implement requirements R1-R5 | completed | e585a1b6-5535-4ee0-a427-bdadbe7df468 |
+| reviewer_1 | teamwork_preview_reviewer | Review code, tests, and build | completed | 24d70090-dc3f-49e7-acc9-74ae3cc69e24 |
+| auditor_1 | teamwork_preview_auditor | Perform forensic integrity audit | completed | 199a5468-2d4b-46bc-a616-c4428414417b |
 
 ## Succession Status
 - Succession required: no
 - Spawn count: 4 / 16
-- Pending subagents: []
+- Pending subagents: none
 - Predecessor: none
-- Successor: none
+- Successor: not yet spawned
 
 ## Active Timers
-- Heartbeat cron: task-27
+- Heartbeat cron: task-23
 - Safety timer: none
 - On succession: kill all timers before spawning successor
-- On context truncation: run `manage_task(Action="list")` — re-create if missing
+- On context truncation: run manage_task(Action="list") — re-create if missing
 
 ## Artifact Index
-- C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\ORIGINAL_REQUEST.md — Verbatim user requirements
-- C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\PROJECT.md — Global project index and plan
-- C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\.agents\orchestrator\plan.md — Specific execution plan
+- C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\.agents\orchestrator\original_prompt.md — Verbatim user prompt.

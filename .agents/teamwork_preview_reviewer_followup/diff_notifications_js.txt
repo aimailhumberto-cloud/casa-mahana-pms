@@ -1,0 +1,101 @@
+﻿diff --git a/server/notifications.js b/server/notifications.js
+index bdf8110..aa0cc78 100644
+--- a/server/notifications.js
++++ b/server/notifications.js
+@@ -636,22 +636,82 @@ async function sendEmail(to, subject, html) {
+     if (config.notifications_enabled !== 1) {
+       return { sent: false, reason: 'disabled' };
+     }
+-    const t = getTransporter();
+-    if (!t) return { sent: false, reason: 'not_configured' };
+-    
+-    const from = config.smtp_from || process.env.SMTP_FROM || `${HOTEL_NAME} <${config.smtp_user || process.env.SMTP_USER}>`;
++
++    const emailProvider = config.email_provider || 'smtp';
+     const adminEmail = config.admin_email || process.env.ADMIN_EMAIL;
+-    
+-    // Configura copia oculta (BCC) a la organización si la variable está definida
+-    // y el correo actual no es el correo del administrador (para evitar duplicados)
+-    const mailOptions = { from, to, subject, html };
+-    if (adminEmail && to !== adminEmail) {
+-      mailOptions.bcc = adminEmail;
++    const from = (emailProvider === 'resend' ? config.resend_from_email : null) || config.smtp_from || process.env.SMTP_FROM || `${HOTEL_NAME} <${config.smtp_user || process.env.SMTP_USER || 'reservas@casamahana.com'}>`;
++    const bcc = (adminEmail && to !== adminEmail) ? adminEmail : null;
++
++    if (emailProvider === 'resend') {
++      const apiKey = config.resend_api_key;
++      if (!apiKey) {
++        return { sent: false, reason: 'Resend API key not configured' };
++      }
++      
++      const res = await new Promise((resolve) => {
++        const payload = JSON.stringify({
++          from: from,
++          to: [to],
++          subject: subject,
++          html: html,
++          ...(bcc ? { bcc: [bcc] } : {})
++        });
++
++        const options = {
++          hostname: 'api.resend.com',
++          path: '/emails',
++          method: 'POST',
++          headers: {
++            'Content-Type': 'application/json',
++            'Authorization': `Bearer ${apiKey}`,
++            'Content-Length': Buffer.byteLength(payload)
++          }
++        };
++
++        const req = https.request(options, (resReq) => {
++          let data = '';
++          resReq.on('data', chunk => data += chunk);
++          resReq.on('end', () => {
++            if (resReq.statusCode >= 200 && resReq.statusCode < 300) {
++              try {
++                const parsed = JSON.parse(data);
++                resolve({ sent: true, messageId: parsed.id });
++              } catch {
++                resolve({ sent: true, messageId: 'resend-success' });
++              }
++            } else {
++              resolve({ sent: false, reason: `Resend API error (${resReq.statusCode}): ${data}` });
++            }
++          });
++        });
++
++        req.on('error', (e) => {
++          resolve({ sent: false, reason: e.message });
++        });
++
++        req.write(payload);
++        req.end();
++      });
++
++      if (res.sent) {
++        console.log(`📧 Email sent to ${to} via Resend: ${res.messageId}`);
++      } else {
++        console.error(`📧 Resend error to ${to}:`, res.reason);
++      }
++      return res;
++    } else {
++      const t = getTransporter();
++      if (!t) return { sent: false, reason: 'not_configured' };
++      
++      const mailOptions = { from, to, subject, html };
++      if (bcc) {
++        mailOptions.bcc = bcc;
++      }
++      
++      const info = await t.sendMail(mailOptions);
++      console.log(`📧 Email sent to ${to} via SMTP: ${info.messageId}`);
++      return { sent: true, messageId: info.messageId };
+     }
+-    
+-    const info = await t.sendMail(mailOptions);
+-    console.log(`📧 Email sent to ${to}: ${info.messageId}`);
+-    return { sent: true, messageId: info.messageId };
+   } catch (err) {
+     console.error(`📧 Email error to ${to}:`, err.message);
+     return { sent: false, reason: err.message };

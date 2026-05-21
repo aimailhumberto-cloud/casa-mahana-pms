@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
 
 process.env.NODE_ENV = 'test';
 process.env.TEST_DB_NAME = 'casa-mahana-admin-test.db';
@@ -28,6 +28,7 @@ describe('Admin CRUD and Deactivated User Security Endpoints', () => {
   let putConfigHandler;
   let getNotifLogsHandler;
   let getReversionesLogsHandler;
+  let postTestResendHandler;
 
   beforeAll(() => {
     resetDb();
@@ -54,6 +55,7 @@ describe('Admin CRUD and Deactivated User Security Endpoints', () => {
     putConfigHandler = findRouteHandler(adminRouter, '/configuracion/sistema', 'put');
     getNotifLogsHandler = findRouteHandler(adminRouter, '/configuracion/logs', 'get');
     getReversionesLogsHandler = findRouteHandler(adminRouter, '/configuracion/reversiones', 'get');
+    postTestResendHandler = findRouteHandler(adminRouter, '/configuracion/test-resend', 'post');
   });
 
   describe('Deactivated User Security Blocking', () => {
@@ -228,7 +230,10 @@ describe('Admin CRUD and Deactivated User Security Endpoints', () => {
           wa_api_url: 'https://graph.facebook.com/v19.0/12345/messages',
           wa_api_token: 'token789',
           wa_from_number: '1234567890',
-          wa_enabled: true
+          wa_enabled: true,
+          email_provider: 'resend',
+          resend_api_key: 're_secret123',
+          resend_from_email: 'noreply@casamahana.com'
         }
       };
       let resStatus = 200;
@@ -246,6 +251,9 @@ describe('Admin CRUD and Deactivated User Security Endpoints', () => {
       expect(resData.data.notifications_enabled).toBe(1);
       expect(resData.data.wa_api_url).toBe('https://graph.facebook.com/v19.0/12345/messages');
       expect(resData.data.wa_enabled).toBe(1);
+      expect(resData.data.email_provider).toBe('resend');
+      expect(resData.data.resend_api_key).toBe('re_secret123');
+      expect(resData.data.resend_from_email).toBe('noreply@casamahana.com');
     });
 
     it('should validate SMTP port during updates', () => {
@@ -330,6 +338,121 @@ describe('Admin CRUD and Deactivated User Security Endpoints', () => {
       expect(resData.success).toBe(true);
       expect(resData.data.length).toBeGreaterThan(0);
       expect(resData.data[0].reserva_id).toBe(42);
+    });
+  });
+
+  describe('Resend Test Diagnostics Endpoint', () => {
+    it('should validate request fields and return VALIDATION_ERROR (400)', async () => {
+      const req = {
+        user: { rol: 'admin' },
+        body: {
+          resend_api_key: '',
+          resend_from_email: 'noreply@casamahana.com',
+          destinatario: 'test@example.com'
+        }
+      };
+      let resStatus = 200;
+      let resData = null;
+      const res = {
+        status: (code) => { resStatus = code; return res; },
+        json: (data) => { resData = data; return res; }
+      };
+
+      await postTestResendHandler(req, res);
+      expect(resStatus).toBe(400);
+      expect(resData.success).toBe(false);
+      expect(resData.error.code).toBe('VALIDATION_ERROR');
+    });
+
+    it('should return success when Resend API responds with success', async () => {
+      const https = require('https');
+      const mockRequest = vi.spyOn(https, 'request').mockImplementation((options, callback) => {
+        const mockResponse = {
+          statusCode: 200,
+          on: (event, cb) => {
+            if (event === 'data') {
+              cb(JSON.stringify({ id: 're_order_12345' }));
+            }
+            if (event === 'end') {
+              cb();
+            }
+          }
+        };
+        callback(mockResponse);
+        return {
+          on: vi.fn(),
+          write: vi.fn(),
+          end: vi.fn()
+        };
+      });
+
+      const req = {
+        user: { rol: 'admin' },
+        body: {
+          resend_api_key: 're_testkey123',
+          resend_from_email: 'noreply@casamahana.com',
+          destinatario: 'client@example.com'
+        }
+      };
+      let resStatus = 200;
+      let resData = null;
+      const res = {
+        status: (code) => { resStatus = code; return res; },
+        json: (data) => { resData = data; return res; }
+      };
+
+      await postTestResendHandler(req, res);
+      expect(resStatus).toBe(200);
+      expect(resData.success).toBe(true);
+      expect(resData.data.messageId).toBe('re_order_12345');
+
+      mockRequest.mockRestore();
+    });
+
+    it('should return error details when Resend API fails', async () => {
+      const https = require('https');
+      const mockRequest = vi.spyOn(https, 'request').mockImplementation((options, callback) => {
+        const mockResponse = {
+          statusCode: 400,
+          on: (event, cb) => {
+            if (event === 'data') {
+              cb('Invalid API Key');
+            }
+            if (event === 'end') {
+              cb();
+            }
+          }
+        };
+        callback(mockResponse);
+        return {
+          on: vi.fn(),
+          write: vi.fn(),
+          end: vi.fn()
+        };
+      });
+
+      const req = {
+        user: { rol: 'admin' },
+        body: {
+          resend_api_key: 're_badkey',
+          resend_from_email: 'noreply@casamahana.com',
+          destinatario: 'client@example.com'
+        }
+      };
+      let resStatus = 200;
+      let resData = null;
+      const res = {
+        status: (code) => { resStatus = code; return res; },
+        json: (data) => { resData = data; return res; }
+      };
+
+      await postTestResendHandler(req, res);
+      expect(resStatus).toBe(400);
+      expect(resData.success).toBe(false);
+      expect(resData.error.code).toBe('RESEND_TEST_FAILED');
+      expect(resData.error.message).toContain('Invalid API Key');
+
+      mockRequest.mockRestore();
     });
   });
 });

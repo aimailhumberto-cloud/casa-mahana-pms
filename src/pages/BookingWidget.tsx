@@ -58,6 +58,18 @@ const defaultRoomImages: Record<string, string> = {
   'Estándar': 'https://images.unsplash.com/photo-1584132967334-10e028bd69f7?w=400&h=250&fit=crop',
   'Camping': 'https://images.unsplash.com/photo-1504280390367-361c6d9f38f4?w=400&h=250&fit=crop',
 }
+type CartItem = {
+  id: string;
+  tipo: string;
+  plan: Plan;
+  adultos: number;
+  menores: number;
+  mascotas: number;
+  subtotal: number;
+  impuesto_monto: number;
+  monto_total: number;
+  deposito_minimo: number;
+}
 
 export default function BookingWidget() {
   const [step, setStep] = useState(1)
@@ -75,8 +87,14 @@ export default function BookingWidget() {
   const [pagoTipo, setPagoTipo] = useState<'deposito' | 'total'>('deposito')
   const [guest, setGuest] = useState({ nombre: '', apellido: '', email: '', whatsapp: '', nacionalidad: '' })
   const [paypalConfig, setPaypalConfig] = useState<{ paypal_enabled: boolean; paypal_client_id: string | null; paypal_mode: string }>({ paypal_enabled: false, paypal_client_id: null, paypal_mode: 'sandbox' })
-  const [result, setResult] = useState<{ reserva_id?: number; mensaje?: string } | null>(null)
+  const [result, setResult] = useState<{ reserva_id?: number; mensaje?: string; grupo_codigo?: string } | null>(null)
   const [tipoFotos, setTipoFotos] = useState<Record<string, string>>({})
+
+  // Multi-room Shopping Cart states
+  const [cart, setCart] = useState<CartItem[]>([])
+  const [cartItemAdults, setCartItemAdults] = useState(1)
+  const [cartItemMinors, setCartItemMinors] = useState(0)
+  const [cartItemPets, setCartItemPets] = useState(0)
 
   // Offline Payment states
   const [receiptFile, setReceiptFile] = useState<File | null>(null)
@@ -123,6 +141,10 @@ export default function BookingWidget() {
 
   const selectRoomType = async (tipo: string) => {
     setSelectedType(tipo); setLoading(true); setError('')
+    // Reset guest counts for this specific room to defaults/top-level preferences
+    setCartItemAdults(adultos)
+    setCartItemMinors(menores)
+    setCartItemPets(0)
     try {
       const resp = await fetch(`${API}/planes?tipo=${tipo}`)
       const data = await resp.json()
@@ -132,25 +154,60 @@ export default function BookingWidget() {
   }
 
   const selectPlan = async (plan: Plan) => {
-    setSelectedPlan(plan); setLoading(true); setError('')
-    try {
-      const resp = await fetch(`${API}/cotizar?plan=${plan.codigo}&adultos=${adultos}&menores=${menores}&check_in=${checkIn}&check_out=${checkOut}`)
-      const data = await resp.json()
-      if (!data.success) { setError(data.error?.message || 'Error'); return }
-      setCotizacion(data.data); setStep(4)
-    } catch { setError('Error de conexión') } finally { setLoading(false) }
+    setSelectedPlan(plan);
   }
+
+  const addToCart = async (roomType: string, plan: Plan, adults: number, minors: number, pets: number) => {
+    setLoading(true); setError('')
+    try {
+      const resp = await fetch(`${API}/cotizar?plan=${plan.codigo}&adultos=${adults}&menores=${minors}&mascotas=${pets}&check_in=${checkIn}&check_out=${checkOut}`)
+      const data = await resp.json()
+      if (!data.success) { setError(data.error?.message || 'Error cotizando'); return }
+      
+      const newItem: CartItem = {
+        id: `${Date.now()}-${Math.random()}`,
+        tipo: roomType,
+        plan,
+        adultos: adults,
+        menores: minors,
+        mascotas: pets,
+        subtotal: data.data.subtotal,
+        impuesto_monto: data.data.impuesto_monto,
+        monto_total: data.data.monto_total,
+        deposito_minimo: data.data.deposito_minimo
+      }
+      
+      setCart(prev => [...prev, newItem])
+      setSelectedType('')
+      setSelectedPlan(null)
+      setStep(2) // return to available room types list to choose more!
+    } catch {
+      setError('Error cotizando habitación')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const totalSubtotal = cart.reduce((acc, item) => acc + item.subtotal, 0)
+  const totalImpuesto = cart.reduce((acc, item) => acc + item.impuesto_monto, 0)
+  const totalMontoTotal = cart.reduce((acc, item) => acc + item.monto_total, 0)
+  const totalDepositoMinimo = cart.reduce((acc, item) => acc + item.deposito_minimo, 0)
 
   const createReservation = async (paypalOrderId: string) => {
     setLoading(true); setError('')
-    const montoPagar = pagoTipo === 'total' ? cotizacion!.monto_total : cotizacion!.deposito_minimo
+    const totalPagar = pagoTipo === 'total' ? totalMontoTotal : totalDepositoMinimo
     try {
-      const resp = await fetch(`${API}/reservar`, {
+      const resp = await fetch(`${API}/reservas/multi`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           cliente: guest.nombre, apellido: guest.apellido, email: guest.email, whatsapp: guest.whatsapp, nacionalidad: guest.nacionalidad,
-          check_in: checkIn, check_out: checkOut, tipo_habitacion: selectedType, plan_codigo: selectedPlan!.codigo,
-          adultos, menores, monto_pagado: montoPagar, paypal_order_id: paypalOrderId, pago_tipo: pagoTipo
+          check_in: checkIn, check_out: checkOut, metodo_pago: 'paypal', paypal_order_id: paypalOrderId, pago_tipo: pagoTipo,
+          monto_pagado: totalPagar,
+          rooms: cart.map(item => ({
+            tipo_habitacion: item.tipo, plan_codigo: item.plan.codigo,
+            adultos: item.adultos, menores: item.menores, mascotas: item.mascotas,
+            check_in: checkIn, check_out: checkOut
+          }))
         })
       })
       const data = await resp.json()
@@ -161,50 +218,46 @@ export default function BookingWidget() {
 
   const handleOfflineBooking = async () => {
     setLoading(true); setError('')
-    const montoPagar = pagoTipo === 'total' ? cotizacion!.monto_total : cotizacion!.deposito_minimo
+    const totalPagar = pagoTipo === 'total' ? totalMontoTotal : totalDepositoMinimo
     try {
-      // 1. Create the reservation
-      const resp = await fetch(`${API}/reservar`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          cliente: guest.nombre,
-          apellido: guest.apellido,
-          email: guest.email,
-          whatsapp: guest.whatsapp,
-          nacionalidad: guest.nacionalidad,
+      const payload = {
+        cliente: guest.nombre,
+        apellido: guest.apellido,
+        email: guest.email,
+        whatsapp: guest.whatsapp,
+        nacionalidad: guest.nacionalidad,
+        check_in: checkIn,
+        check_out: checkOut,
+        pago_tipo: pagoTipo,
+        monto_pagado: totalPagar,
+        metodo_pago: paymentMethod,
+        referencia: reference,
+        rooms: cart.map(item => ({
+          tipo_habitacion: item.tipo,
+          plan_codigo: item.plan.codigo,
+          adultos: item.adultos,
+          menores: item.menores,
+          mascotas: item.mascotas,
           check_in: checkIn,
-          check_out: checkOut,
-          tipo_habitacion: selectedType,
-          plan_codigo: selectedPlan!.codigo,
-          adultos,
-          menores,
-          monto_pagado: montoPagar,
-          pago_tipo: pagoTipo,
-          metodo_pago: paymentMethod,
-          referencia: reference
-        })
+          check_out: checkOut
+        }))
+      }
+
+      const formData = new FormData()
+      if (receiptFile) {
+        formData.append('comprobante', receiptFile)
+      }
+      formData.append('datos', JSON.stringify(payload))
+      formData.append('notas', `Comprobante de ${paymentMethod.toUpperCase()} (Ref: ${reference}) subido por el huésped durante la reserva online.`)
+
+      const resp = await fetch(`${API}/reservas/multi`, {
+        method: 'POST',
+        body: formData
       })
       const data = await resp.json()
       if (!data.success) {
         setError(data.error?.message || 'Error creando reserva')
         return
-      }
-
-      // 2. Sequential upload of transaction receipt/comprobante if file is selected
-      if (receiptFile && data.data.reserva_id) {
-        const formData = new FormData()
-        formData.append('comprobante', receiptFile)
-        formData.append('notas', `Comprobante de ${paymentMethod.toUpperCase()} (Ref: ${reference}) subido por el huésped durante la reserva online.`)
-        
-        const uploadResp = await fetch(`${API}/reservas/${data.data.reserva_id}/comprobante`, {
-          method: 'POST',
-          body: formData
-        })
-        const uploadData = await uploadResp.json()
-        if (!uploadData.success) {
-          console.error('Error subiendo comprobante:', uploadData.error?.message)
-        }
       }
 
       setResult(data.data)
@@ -217,10 +270,10 @@ export default function BookingWidget() {
   }
 
   const isGuestValid = guest.nombre && guest.email && guest.apellido
-  const montoPagar = cotizacion ? (pagoTipo === 'total' ? cotizacion.monto_total : cotizacion.deposito_minimo) : 0
-  const planImage = selectedPlan?.imagen || tipoFotos[selectedType] || defaultRoomImages[selectedType] || defaultRoomImages['Familiar']
+  const montoPagar = pagoTipo === 'total' ? totalMontoTotal : totalDepositoMinimo
+  const planImage = selectedPlan?.imagen || (selectedType ? (tipoFotos[selectedType] || defaultRoomImages[selectedType]) : '') || defaultRoomImages['Familiar']
 
-  const stepLabels = ['Fechas', 'Habitación', 'Tarifa', 'Resumen', 'Pago', 'Confirmado']
+  const stepLabels = ['Fechas', 'Habitaciones', 'Tarifas', 'Resumen', 'Pago', 'Confirmado']
 
   return (
     <div className="min-h-screen" style={{ background: 'linear-gradient(135deg, #fefbf3 0%, #fdf4e3 30%, #fef9ef 60%, #fffcf5 100%)' }}>
@@ -313,37 +366,92 @@ export default function BookingWidget() {
 
         {/* STEP 2: Room Type */}
         {step === 2 && (
-          <div className="bg-white rounded-3xl shadow-xl p-6 sm:p-8 border border-amber-100/50">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 rounded-2xl bg-amber-100 flex items-center justify-center"><Bed className="w-5 h-5 text-amber-700" /></div>
-              <div><h2 className="text-xl font-bold text-gray-800">Elige tu habitación</h2></div>
-            </div>
-            <p className="text-sm text-gray-400 mb-6 ml-[52px]">{noches} noche{noches > 1 ? 's' : ''} · {adultos} adulto{adultos > 1 ? 's' : ''}{menores > 0 ? ` · ${menores} menor${menores > 1 ? 'es' : ''}` : ''}</p>
-            <div className="space-y-4">
-              {roomTypes.map(rt => {
-                const Icon = roomIcons[rt.tipo] || Bed
-                const img = tipoFotos[rt.tipo] || defaultRoomImages[rt.tipo] || defaultRoomImages['Familiar']
-                return (
-                  <button key={rt.tipo} onClick={() => selectRoomType(rt.tipo)}
-                    className="w-full rounded-2xl border border-gray-100 hover:border-amber-300 hover:shadow-lg transition-all duration-200 text-left overflow-hidden group">
-                    <div className="flex flex-col sm:flex-row">
-                      <div className="sm:w-44 h-32 sm:h-auto overflow-hidden">
-                        <img src={img} alt={rt.tipo} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+          <div className="space-y-6 animate-fadeIn">
+            {cart.length > 0 && (
+              <div className="bg-gradient-to-br from-amber-50 to-amber-100/40 border border-amber-200 rounded-3xl p-6 shadow-sm">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="font-bold text-amber-900 text-base flex items-center gap-2">
+                    <span>🛒 Tu Carrito de Habitaciones</span>
+                    <span className="bg-amber-200 text-amber-900 text-xs px-2 py-0.5 rounded-full font-bold">{cart.length}</span>
+                  </h3>
+                  <button
+                    onClick={() => setCart([])}
+                    className="text-xs text-red-600 hover:text-red-800 font-semibold transition"
+                  >
+                    Vaciar carrito
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  {cart.map((item) => (
+                    <div key={item.id} className="flex justify-between items-center bg-white p-4 rounded-2xl border border-gray-100 text-sm shadow-xs">
+                      <div>
+                        <p className="font-bold text-gray-800 flex items-center gap-1.5">
+                          <Bed className="w-4 h-4 text-amber-600" />
+                          <span>{item.tipo}</span>
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">{item.plan.nombre} · {item.adultos} Ad{item.menores > 0 ? ` · ${item.menores} Mn` : ''}{item.mascotas > 0 ? ` · ${item.mascotas} Mc` : ''}</p>
                       </div>
-                      <div className="flex-1 p-4 sm:p-5 flex items-center justify-between">
-                        <div>
-                          <h3 className="font-bold text-gray-800 text-lg flex items-center gap-2"><Icon className="w-5 h-5 text-amber-600" /> {rt.tipo}</h3>
-                          <p className="text-sm text-gray-500 mt-1">{rt.capacidad_min}–{rt.capacidad_max} huéspedes</p>
-                          <p className="text-xs text-emerald-600 mt-1 font-medium">{rt.disponibles} disponible{rt.disponibles > 1 ? 's' : ''}</p>
-                        </div>
-                        <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-amber-600 transition" />
+                      <div className="flex items-center gap-3">
+                        <span className="font-bold text-amber-800">${item.monto_total.toFixed(2)}</span>
+                        <button
+                          onClick={() => setCart(prev => prev.filter(x => x.id !== item.id))}
+                          className="w-7 h-7 rounded-full bg-red-50 text-red-500 flex items-center justify-center hover:bg-red-100 transition"
+                          title="Eliminar de mi carrito"
+                        >
+                          ✕
+                        </button>
                       </div>
                     </div>
+                  ))}
+                </div>
+                <div className="flex flex-col sm:flex-row items-center justify-between mt-5 pt-4 border-t border-amber-200/50 gap-4">
+                  <div>
+                    <span className="text-xs text-gray-500 block">Total de tu estadía ({noches} noche{noches > 1 ? 's' : ''})</span>
+                    <p className="text-2xl font-bold text-amber-900">${totalMontoTotal.toFixed(2)}</p>
+                  </div>
+                  <button
+                    onClick={() => setStep(4)}
+                    className="w-full sm:w-auto px-6 py-3 bg-gradient-to-r from-amber-700 to-amber-800 text-white font-bold rounded-xl text-sm hover:shadow-lg transition flex items-center justify-center gap-2"
+                  >
+                    <span>Siguiente: Registrarse</span>
+                    <ChevronRight className="w-4 h-4" />
                   </button>
-                )
-              })}
+                </div>
+              </div>
+            )}
+
+            <div className="bg-white rounded-3xl shadow-xl p-6 sm:p-8 border border-amber-100/50">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-10 h-10 rounded-2xl bg-amber-100 flex items-center justify-center"><Bed className="w-5 h-5 text-amber-700" /></div>
+                <div><h2 className="text-xl font-bold text-gray-800">Elige una habitación para agregar</h2></div>
+              </div>
+              <p className="text-sm text-gray-400 mb-6 ml-[52px]">{noches} noche{noches > 1 ? 's' : ''} · {adultos} adulto{adultos > 1 ? 's' : ''}{menores > 0 ? ` · ${menores} menor${menores > 1 ? 'es' : ''}` : ''}</p>
+              <div className="space-y-4">
+                {roomTypes.map(rt => {
+                  const Icon = roomIcons[rt.tipo] || Bed
+                  const img = tipoFotos[rt.tipo] || defaultRoomImages[rt.tipo] || defaultRoomImages['Familiar']
+                  return (
+                    <button key={rt.tipo} onClick={() => selectRoomType(rt.tipo)}
+                      className="w-full rounded-2xl border border-gray-100 hover:border-amber-300 hover:shadow-lg transition-all duration-200 text-left overflow-hidden group">
+                      <div className="flex flex-col sm:flex-row">
+                        <div className="sm:w-44 h-32 sm:h-auto overflow-hidden">
+                          <img src={img} alt={rt.tipo} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                        </div>
+                        <div className="flex-1 p-4 sm:p-5 flex items-center justify-between">
+                          <div>
+                            <h3 className="font-bold text-gray-800 text-lg flex items-center gap-2"><Icon className="w-5 h-5 text-amber-600" /> {rt.tipo}</h3>
+                            <p className="text-sm text-gray-500 mt-1">{rt.capacidad_min}–{rt.capacidad_max} huéspedes</p>
+                            <p className="text-xs text-emerald-600 mt-1 font-medium">{rt.disponibles} disponible{rt.disponibles > 1 ? 's' : ''}</p>
+                          </div>
+                          <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-amber-600 transition" />
+                        </div>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+              <button onClick={() => setStep(1)} className="mt-5 text-sm text-amber-700 hover:text-amber-900 font-medium flex items-center gap-1"><ArrowLeft className="w-4 h-4" /> Cambiar fechas</button>
             </div>
-            <button onClick={() => setStep(1)} className="mt-5 text-sm text-amber-700 hover:text-amber-900 font-medium flex items-center gap-1"><ArrowLeft className="w-4 h-4" /> Cambiar fechas</button>
           </div>
         )}
 
@@ -355,17 +463,17 @@ export default function BookingWidget() {
               <div><h2 className="text-xl font-bold text-gray-800">Elige tu experiencia</h2></div>
             </div>
             <p className="text-sm text-gray-400 mb-6 ml-[52px]">Habitación {selectedType} · {noches} noche{noches > 1 ? 's' : ''}</p>
-            <div className="space-y-4">
+            <div className="space-y-6">
               {plans.map(plan => (
-                <button key={plan.codigo} onClick={() => selectPlan(plan)}
-                  className="w-full rounded-2xl border border-gray-100 hover:border-amber-300 hover:shadow-lg transition-all duration-200 text-left overflow-hidden group">
-                  <div className="flex flex-col sm:flex-row">
-                    {(plan.imagen || defaultRoomImages[selectedType]) && (
-                      <div className="sm:w-44 h-36 sm:h-auto overflow-hidden">
-                        <img src={plan.imagen || defaultRoomImages[selectedType]} alt={plan.nombre} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                      </div>
-                    )}
-                    <div className="flex-1 p-5">
+                <div key={plan.codigo}
+                  className="w-full rounded-2xl border border-gray-100 hover:border-amber-300 hover:shadow-lg transition-all duration-200 text-left overflow-hidden flex flex-col sm:flex-row bg-white">
+                  {(plan.imagen || defaultRoomImages[selectedType]) && (
+                    <div className="sm:w-44 h-36 sm:h-auto overflow-hidden shrink-0">
+                      <img src={plan.imagen || defaultRoomImages[selectedType]} alt={plan.nombre} className="w-full h-full object-cover" />
+                    </div>
+                  )}
+                  <div className="flex-1 p-5 flex flex-col justify-between">
+                    <div>
                       <div className="flex justify-between items-start mb-2">
                         <h3 className="font-bold text-lg text-gray-800">{plan.nombre}</h3>
                         <div className="text-right shrink-0 ml-3">
@@ -375,7 +483,7 @@ export default function BookingWidget() {
                       </div>
                       <p className="text-sm text-gray-500 mb-3">{plan.descripcion}</p>
                       {plan.incluye?.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5">
+                        <div className="flex flex-wrap gap-1.5 mb-4">
                           {plan.incluye.map((item, i) => (
                             <span key={i} className="text-[11px] px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-full font-medium flex items-center gap-1">
                               <Check className="w-3 h-3" /> {item}
@@ -384,8 +492,50 @@ export default function BookingWidget() {
                         </div>
                       )}
                     </div>
+
+                    <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap items-center justify-between gap-4 bg-amber-50/20 p-3 rounded-xl">
+                      <div className="flex gap-3">
+                        <div>
+                          <label className="block text-[9px] font-bold text-gray-400 uppercase mb-1">Adultos</label>
+                          <select
+                            value={cartItemAdults}
+                            onChange={e => setCartItemAdults(+e.target.value)}
+                            className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs bg-white text-gray-700 font-semibold"
+                          >
+                            {[1,2,3,4,5,6].map(n => <option key={n} value={n}>{n}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[9px] font-bold text-gray-400 uppercase mb-1">Menores</label>
+                          <select
+                            value={cartItemMinors}
+                            onChange={e => setCartItemMinors(+e.target.value)}
+                            className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs bg-white text-gray-700 font-semibold"
+                          >
+                            {[0,1,2,3,4].map(n => <option key={n} value={n}>{n}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[9px] font-bold text-gray-400 uppercase mb-1">Mascotas</label>
+                          <select
+                            value={cartItemPets}
+                            onChange={e => setCartItemPets(+e.target.value)}
+                            className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs bg-white text-gray-700 font-semibold"
+                          >
+                            {[0,1,2,3].map(n => <option key={n} value={n}>{n}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => addToCart(selectedType, plan, cartItemAdults, cartItemMinors, cartItemPets)}
+                        disabled={loading}
+                        className="px-4 py-2.5 bg-amber-800 text-white font-bold rounded-xl text-xs hover:bg-amber-900 transition flex items-center gap-1.5 shadow-sm hover:shadow-md active:scale-95 disabled:opacity-50"
+                      >
+                        {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <><Check className="w-3.5 h-3.5" /> Agregar al Carrito</>}
+                      </button>
+                    </div>
                   </div>
-                </button>
+                </div>
               ))}
             </div>
             <button onClick={() => setStep(2)} className="mt-5 text-sm text-amber-700 hover:text-amber-900 font-medium flex items-center gap-1"><ArrowLeft className="w-4 h-4" /> Cambiar habitación</button>
@@ -393,29 +543,49 @@ export default function BookingWidget() {
         )}
 
         {/* STEP 4: Summary + Guest Info */}
-        {step === 4 && cotizacion && (
-          <div className="space-y-5">
+        {step === 4 && cart.length > 0 && (
+          <div className="space-y-5 animate-fadeIn">
             {/* Photo + Summary Card */}
             <div className="bg-white rounded-3xl shadow-xl overflow-hidden border border-amber-100/50">
               {planImage && (
                 <div className="h-48 sm:h-56 overflow-hidden relative">
-                  <img src={planImage} alt={selectedPlan?.nombre} className="w-full h-full object-cover" />
+                  <img src={planImage} alt="Casa Mahana" className="w-full h-full object-cover" />
                   <div className="absolute inset-0" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.6), transparent 60%)' }} />
                   <div className="absolute bottom-4 left-5 text-white">
-                    <h3 className="text-xl font-bold">{selectedPlan?.nombre}</h3>
-                    <p className="text-white/70 text-sm">{selectedType} · {noches} noche{noches > 1 ? 's' : ''}</p>
+                    <h3 className="text-xl font-bold">Resumen de tu reserva</h3>
+                    <p className="text-white/70 text-sm">{cart.length} habitación/es · {noches} noche{noches > 1 ? 's' : ''}</p>
                   </div>
                 </div>
               )}
               <div className="p-6">
-                <h2 className="text-lg font-bold text-gray-800 mb-4">Resumen de tu reserva</h2>
+                <h2 className="text-lg font-bold text-gray-800 mb-4">Habitaciones Seleccionadas</h2>
+                <div className="space-y-3 mb-6">
+                  {cart.map((item) => (
+                    <div key={item.id} className="flex justify-between items-start bg-gray-50/70 p-4 rounded-2xl border border-gray-100 text-xs">
+                      <div>
+                        <p className="font-bold text-gray-800 flex items-center gap-1.5">
+                          <Bed className="w-3.5 h-3.5 text-amber-600" />
+                          <span>{item.tipo}</span>
+                        </p>
+                        <p className="text-gray-500 mt-1">{item.plan.nombre}</p>
+                        <p className="text-gray-400 mt-1">{item.adultos} Ad{item.menores > 0 ? ` · ${item.menores} Mn` : ''}{item.mascotas > 0 ? ` · ${item.mascotas} Mc` : ''}</p>
+                      </div>
+                      <div className="text-right">
+                        <span className="font-bold text-amber-800 text-sm block">${item.monto_total.toFixed(2)}</span>
+                        <span className="text-[10px] text-gray-400">Total habitación</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <h2 className="text-lg font-bold text-gray-800 mb-4">Resumen financiero</h2>
                 <div className="rounded-2xl p-4 space-y-2.5 text-sm" style={{ background: 'linear-gradient(135deg, #fffbeb, #fef3c7)' }}>
                   <div className="flex justify-between"><span className="text-gray-500 flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5" /> Fechas</span><span className="font-semibold text-gray-700">{checkIn} — {checkOut}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500 flex items-center gap-1.5"><Users className="w-3.5 h-3.5" /> Huéspedes</span><span className="font-semibold text-gray-700">{adultos} adulto{adultos > 1 ? 's' : ''}{menores > 0 ? `, ${menores} menor${menores > 1 ? 'es' : ''}` : ''}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500 flex items-center gap-1.5"><Users className="w-3.5 h-3.5" /> Habitaciones</span><span className="font-semibold text-gray-700">{cart.length}</span></div>
                   <hr className="border-amber-200/50" />
-                  <div className="flex justify-between"><span className="text-gray-500">Subtotal</span><span className="font-semibold text-gray-700">${cotizacion.subtotal.toFixed(2)}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">Impuesto ({cotizacion.impuesto_pct}%)</span><span className="font-semibold text-gray-700">${cotizacion.impuesto_monto.toFixed(2)}</span></div>
-                  <div className="flex justify-between text-lg font-bold text-amber-900 pt-1 border-t border-amber-200/50"><span>Total</span><span>${cotizacion.monto_total.toFixed(2)}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">Subtotal</span><span className="font-semibold text-gray-700">${totalSubtotal.toFixed(2)}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">Impuesto (7%)</span><span className="font-semibold text-gray-700">${totalImpuesto.toFixed(2)}</span></div>
+                  <div className="flex justify-between text-lg font-bold text-amber-900 pt-1 border-t border-amber-200/50"><span>Total</span><span>${totalMontoTotal.toFixed(2)}</span></div>
                 </div>
 
                 <div className="mt-5">
@@ -423,12 +593,12 @@ export default function BookingWidget() {
                   <div className="grid grid-cols-2 gap-3">
                     <button onClick={() => setPagoTipo('deposito')}
                       className={`p-4 rounded-2xl border-2 text-center transition-all ${pagoTipo === 'deposito' ? 'border-amber-500 bg-amber-50 shadow-md' : 'border-gray-200 hover:border-amber-300'}`}>
-                      <p className="text-xl font-bold text-amber-800">${cotizacion.deposito_minimo.toFixed(2)}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">Depósito {cotizacion.deposito_pct}%</p>
+                      <p className="text-xl font-bold text-amber-800">${totalDepositoMinimo.toFixed(2)}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">Depósito Mínimo</p>
                     </button>
                     <button onClick={() => setPagoTipo('total')}
                       className={`p-4 rounded-2xl border-2 text-center transition-all ${pagoTipo === 'total' ? 'border-amber-500 bg-amber-50 shadow-md' : 'border-gray-200 hover:border-amber-300'}`}>
-                      <p className="text-xl font-bold text-amber-800">${cotizacion.monto_total.toFixed(2)}</p>
+                      <p className="text-xl font-bold text-amber-800">${totalMontoTotal.toFixed(2)}</p>
                       <p className="text-xs text-gray-500 mt-0.5">Pago completo</p>
                     </button>
                   </div>
@@ -475,19 +645,19 @@ export default function BookingWidget() {
                 <CreditCard className="w-5 h-5" /> Continuar al pago
               </button>
             </div>
-            <button onClick={() => setStep(3)} className="text-sm text-amber-700 hover:text-amber-900 font-medium flex items-center gap-1"><ArrowLeft className="w-4 h-4" /> Cambiar tarifa</button>
+            <button onClick={() => setStep(2)} className="text-sm text-amber-700 hover:text-amber-900 font-medium flex items-center gap-1"><ArrowLeft className="w-4 h-4" /> Volver a habitaciones</button>
           </div>
         )}
 
         {/* STEP 5: Pago */}
-        {step === 5 && cotizacion && (
-          <div className="bg-white rounded-3xl shadow-xl overflow-hidden border border-amber-100/50">
+        {step === 5 && cart.length > 0 && (
+          <div className="bg-white rounded-3xl shadow-xl overflow-hidden border border-amber-100/50 animate-fadeIn">
             {planImage && (
               <div className="h-32 overflow-hidden relative">
-                <img src={planImage} alt={selectedPlan?.nombre} className="w-full h-full object-cover" style={{ filter: 'brightness(0.7)' }} />
+                <img src={planImage} alt="Casa Mahana" className="w-full h-full object-cover" style={{ filter: 'brightness(0.7)' }} />
                 <div className="absolute inset-0 flex items-center justify-center">
                   <div className="text-center text-white">
-                    <p className="text-sm opacity-80">{pagoTipo === 'total' ? 'Pago completo' : `Depósito (${cotizacion.deposito_pct}%)`}</p>
+                    <p className="text-sm opacity-80">{pagoTipo === 'total' ? 'Pago completo' : 'Depósito Mínimo'}</p>
                     <p className="text-4xl font-bold">${montoPagar.toFixed(2)} <span className="text-base font-normal opacity-70">USD</span></p>
                   </div>
                 </div>
@@ -495,7 +665,7 @@ export default function BookingWidget() {
             )}
             <div className="p-6 sm:p-8">
               {pagoTipo === 'deposito' && (
-                <p className="text-center text-xs text-gray-400 mb-5">Saldo restante de <b>${(cotizacion.monto_total - montoPagar).toFixed(2)}</b> se cancela en check-in</p>
+                <p className="text-center text-xs text-gray-400 mb-5">Saldo restante de <b>${(totalMontoTotal - montoPagar).toFixed(2)}</b> se cancela en check-in</p>
               )}
 
               {/* Segmented Tab Control */}
@@ -535,7 +705,7 @@ export default function BookingWidget() {
                   </div>
                   {paypalConfig.paypal_enabled && paypalConfig.paypal_client_id ? (
                     <PayPalButtons clientId={paypalConfig.paypal_client_id} mode={paypalConfig.paypal_mode}
-                      monto={montoPagar} descripcion={`Casa Mahana - ${selectedPlan?.nombre} (${cotizacion.noches} noches)`}
+                      monto={montoPagar} descripcion={`Casa Mahana - Reserva de ${cart.length} habitaciones (${noches} noches)`}
                       onSuccess={(orderId) => createReservation(orderId)}
                       onError={(msg) => setError(msg)} />
                   ) : (
