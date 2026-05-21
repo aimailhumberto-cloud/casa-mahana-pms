@@ -30,8 +30,16 @@ function App() {
 
   useEffect(() => {
     if (isLoggedIn()) {
-      api.get('/auth/me').then(r => { setUser(r.data); setLoading(false); })
-        .catch(() => { clearToken(); setLoading(false); });
+      api.get('/auth/me').then(r => {
+        localStorage.setItem('pms_user', JSON.stringify(r.data));
+        setUser(r.data);
+        setLoading(false);
+      })
+        .catch(() => {
+          clearToken();
+          localStorage.removeItem('pms_user');
+          setLoading(false);
+        });
     } else { setLoading(false); }
   }, []);
 
@@ -56,10 +64,16 @@ function App() {
   const handleLogin = async (email: string, password: string) => {
     const r = await api.post('/auth/login', { email, password });
     setToken(r.data.token);
+    localStorage.setItem('pms_user', JSON.stringify(r.data.user));
     setUser(r.data.user);
   };
 
-  const handleLogout = () => { clearToken(); setUser(null); navigate('/login'); };
+  const handleLogout = () => {
+    clearToken();
+    localStorage.removeItem('pms_user');
+    setUser(null);
+    navigate('/login');
+  };
 
   // Public route: /reservar (no auth needed)
   if (location.pathname === '/reservar') return <BookingWidget />;

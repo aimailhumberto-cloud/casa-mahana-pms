@@ -106,7 +106,10 @@ const RoomRow = memo(({
   return (
     <div className="flex border-b border-gray-100 hover:bg-gray-50/50 group/row" style={{ minHeight: '40px' }}>
       {/* Room Name */}
-      <div className={`${ROOM_COL_W} flex-shrink-0 border-r border-gray-200 px-3 py-1.5 flex items-center gap-2`}>
+      <div
+        className={`${ROOM_COL_W} flex-shrink-0 border-r border-gray-200 px-3 py-1.5 flex items-center gap-2 cursor-context-menu`}
+        onContextMenu={(e) => onCellContextMenu(e, room, formatDate(dates[0]))}
+      >
         <span className="text-sm font-medium text-gray-700">{room.nombre}</span>
         <span
           className={`w-2 h-2 rounded-full flex-shrink-0 ${

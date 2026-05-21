@@ -20,6 +20,8 @@ export default function AdminHabitaciones() {
   const [tipoFotos, setTipoFotos] = useState<Record<string, string>>({});
   const [uploadingTipo, setUploadingTipo] = useState('');
 
+  const isAdmin = JSON.parse(localStorage.getItem('pms_user') || '{}')?.rol === 'admin';
+
   const load = () => {
     setLoading(true);
     Promise.all([
@@ -79,7 +81,9 @@ export default function AdminHabitaciones() {
       load();
       setTimeout(() => setSuccess(''), 3000);
     } catch (e: any) {
-      setError(e?.response?.data?.error?.message || 'Error guardando habitación');
+      const detailedMessage = e?.response?.data?.error?.message || e?.response?.data?.message || e.message || 'Error guardando habitación';
+      setError(detailedMessage);
+      alert(detailedMessage);
     }
   };
 
@@ -91,16 +95,25 @@ export default function AdminHabitaciones() {
       load();
       setTimeout(() => setSuccess(''), 3000);
     } catch (e: any) {
-      setError(e?.response?.data?.error?.message || 'Error eliminando habitación');
+      const detailedMessage = e?.response?.data?.error?.message || e?.response?.data?.message || e.message || 'Error eliminando habitación';
+      setError(detailedMessage);
+      alert(detailedMessage);
       setTimeout(() => setError(''), 5000);
     }
   };
 
   const handleReactivate = async (room: any) => {
-    await api.put(`/habitaciones/${room.id}`, { activa: 1 });
-    setSuccess(`${room.nombre} reactivada ✓`);
-    load();
-    setTimeout(() => setSuccess(''), 3000);
+    try {
+      await api.put(`/habitaciones/${room.id}`, { activa: 1 });
+      setSuccess(`${room.nombre} reactivada ✓`);
+      load();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (e: any) {
+      const detailedMessage = e?.response?.data?.error?.message || e?.response?.data?.message || e.message || 'Error reactivando habitación';
+      setError(detailedMessage);
+      alert(detailedMessage);
+      setTimeout(() => setError(''), 5000);
+    }
   };
 
   const grouped = Object.entries(
@@ -119,10 +132,12 @@ export default function AdminHabitaciones() {
           <h1 className="text-2xl font-bold text-gray-800">Administrar Habitaciones</h1>
           <p className="text-sm text-gray-400 mt-0.5">{rooms.filter(r => r.activa).length} activas • {rooms.filter(r => !r.activa).length} inactivas</p>
         </div>
-        <button onClick={openCreate}
-          className="flex items-center gap-2 bg-mahana-500 text-white px-5 py-2.5 rounded-xl hover:bg-mahana-600 transition font-medium">
-          <Plus size={18} /> Nueva Habitación
-        </button>
+        {isAdmin && (
+          <button onClick={openCreate}
+            className="flex items-center gap-2 bg-mahana-500 text-white px-5 py-2.5 rounded-xl hover:bg-mahana-600 transition font-medium">
+            <Plus size={18} /> Nueva Habitación
+          </button>
+        )}
       </div>
 
       {success && <div className="bg-green-50 text-green-700 px-4 py-3 rounded-xl text-sm mb-4">{success}</div>}
@@ -143,23 +158,30 @@ export default function AdminHabitaciones() {
                   <Camera size={20} className="text-gray-300" />
                 </div>
               )}
-              <label className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-xl opacity-0 group-hover:opacity-100 cursor-pointer transition">
-                <Upload size={16} className="text-white" />
-                <input type="file" accept="image/*" className="hidden" disabled={uploadingTipo === tipo}
-                  onChange={async (e) => {
-                    if (!e.target.files?.[0]) return;
-                    setUploadingTipo(tipo);
-                    try {
-                      const fd = new FormData();
-                      fd.append('foto', e.target.files[0]);
-                      const resp = await api.post(`/habitaciones/tipo/${tipo}/foto`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-                      setTipoFotos(prev => ({ ...prev, [tipo]: resp.data.imagen }));
-                      setSuccess(`Foto de ${tipo} actualizada ✓`);
-                      setTimeout(() => setSuccess(''), 3000);
-                    } catch { setError('Error subiendo foto'); setTimeout(() => setError(''), 5000); }
-                    setUploadingTipo('');
-                  }} />
-              </label>
+              {isAdmin && (
+                <label className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-xl opacity-0 group-hover:opacity-100 cursor-pointer transition">
+                  <Upload size={16} className="text-white" />
+                  <input type="file" accept="image/*" className="hidden" disabled={uploadingTipo === tipo}
+                    onChange={async (e) => {
+                      if (!e.target.files?.[0]) return;
+                      setUploadingTipo(tipo);
+                      try {
+                        const fd = new FormData();
+                        fd.append('foto', e.target.files[0]);
+                        const resp = await api.post(`/habitaciones/tipo/${tipo}/foto`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+                        setTipoFotos(prev => ({ ...prev, [tipo]: resp.data.imagen }));
+                        setSuccess(`Foto de ${tipo} actualizada ✓`);
+                        setTimeout(() => setSuccess(''), 3000);
+                      } catch (e: any) {
+                        const detailedMessage = e?.response?.data?.error?.message || e?.response?.data?.message || e.message || 'Error subiendo foto';
+                        setError(detailedMessage);
+                        alert(detailedMessage);
+                        setTimeout(() => setError(''), 5000);
+                      }
+                      setUploadingTipo('');
+                    }} />
+                </label>
+              )}
             </div>
             <div>
               <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">{tipo}</h2>
@@ -171,20 +193,22 @@ export default function AdminHabitaciones() {
               <div key={room.id} className={`bg-white rounded-xl p-4 shadow-sm border transition ${!room.activa ? 'opacity-50 border-red-200' : 'border-transparent hover:border-gray-200'}`}>
                 <div className="flex items-center justify-between mb-2">
                   <span className="font-bold text-gray-800">{room.nombre}</span>
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => openEdit(room)} className="p-1.5 text-gray-300 hover:text-ocean-500 rounded transition" title="Editar">
-                      <Edit2 size={14} />
-                    </button>
-                    {room.activa ? (
-                      <button onClick={() => handleDelete(room)} className="p-1.5 text-gray-300 hover:text-red-500 rounded transition" title="Eliminar">
-                        <Trash2 size={14} />
+                  {isAdmin && (
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => openEdit(room)} className="p-1.5 text-gray-300 hover:text-ocean-500 rounded transition" title="Editar">
+                        <Edit2 size={14} />
                       </button>
-                    ) : (
-                      <button onClick={() => handleReactivate(room)} className="text-xs text-green-500 hover:text-green-700 px-2" title="Reactivar">
-                        Reactivar
-                      </button>
-                    )}
-                  </div>
+                      {room.activa ? (
+                        <button onClick={() => handleDelete(room)} className="p-1.5 text-gray-300 hover:text-red-500 rounded transition" title="Eliminar">
+                          <Trash2 size={14} />
+                        </button>
+                      ) : (
+                        <button onClick={() => handleReactivate(room)} className="text-xs text-green-500 hover:text-green-700 px-2" title="Reactivar">
+                          Reactivar
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div className="space-y-1 text-xs text-gray-500">
                   <div className="flex items-center gap-1.5">

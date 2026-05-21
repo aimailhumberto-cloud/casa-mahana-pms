@@ -218,3 +218,83 @@ Integrity mode: development
 - [ ] El cliente puede añadir una combinación de varias habitaciones al carrito de reserva pública.
 - [ ] La reserva final se registra de forma grupal con folio consolidado en la base de datos PMS.
 
+## Follow-up — 2026-05-21T06:04:06-05:00
+
+Implementar un conjunto de mejoras clave y correcciones en el PMS de Casa Mahana, abarcando la pasarela de pagos con tarjeta y PayPal en folios/registro rápido, flexibilidad en montos de abonos internos, carrito grupal con distribución libre de huéspedes en la vista pública, menú de limpieza contextual en el calendario, comisiones en % y conciliaciones de CxC, y control de permisos y bugs de fotos de habitaciones.
+
+Working directory: C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms
+Integrity mode: development
+
+## Requirements
+
+### R1. Cobro por Tarjeta y Pasarela de PayPal en Registrar Pago Rápido y Folios
+- En `ReservaDetalle.tsx` (registro de abonos del folio) y en `Calendario.tsx` (modal de pago rápido):
+  - Al seleccionar el método de pago **"Tarjeta de Crédito"** o **"PayPal"** con un monto superior a $0, no registrar la transacción de inmediato en el backend.
+  - Cargar interactively el SDK oficial de PayPal y mostrar los botones oficiales de pago de PayPal (incluyendo pago con tarjeta que ya está activo en el PMS de la vista pública).
+  - Al capturarse con éxito el pago en PayPal, proceder a persistir la transacción en el folio asociando el ID de orden devuelto.
+
+### R2. Flexibilidad en Montos de Abono en Nueva Reserva
+- En el formulario de creación de reserva interna (`NuevaReserva.tsx`), el campo "Monto del abono" en el paso 4 no debe ser bloqueante ni forzar únicamente el 50% recomendado.
+- Permitir al recepcionista ingresar libremente cualquier monto numérico para el abono.
+- Añadir dos botones de autocompletado rápido al lado del input:
+  - **"50% Sugerido"**: Calcula y llena el input con el depósito recomendado.
+  - **"100% Total"**: Llena el input con el total neto de la reserva cotizada.
+
+### R3. Buscador Público Expandido, Carrito de Reserva y Distribución Multi-Formato Libre
+- En la interfaz del cliente (`BookingWidget.tsx`):
+  - Expandir los selectores y buscadores para permitir reservas de grupos grandes de **hasta 30 personas** en lugar de limitarse a 6.
+  - Agregar un selector dinámico de "Mascotas" (Pets) en el buscador y el carrito.
+  - Rediseñar el flujo a un formato de **"Carrito de Reservas"** que permita reservar habitaciones de diferentes formatos con total libertad:
+    - El cliente busca fechas y huéspedes.
+    - Se muestran los tipos de habitaciones disponibles con selectores de cantidad (`[ - ] Qty [ + ]`) permitiendo combinar formatos libres (ej: 1 Familiar, 1 Doble, 1 Camping).
+    - En el paso de datos de huéspedes, habilitar una **consola de distribución interactiva**: se listará cada habitación seleccionada y el cliente podrá asignar dinámicamente cuántos adultos, menores y mascotas dormirán en ese cuarto específico, respetando su capacidad máxima (`capacidad_max`).
+    - Un panel flotante glassmorphic compara la capacidad y huéspedes totales asignados vs. el total de personas buscadas en tiempo real.
+    - Al confirmar el carrito, realizar una única petición transaccional grupal (`POST /api/v1/public/reservas/multi` o similar) para reservar y asociar todos los registros de habitación bajo un solo código de grupo consolidado en base de datos SQLite.
+
+### R4. Menú Contextual de Estatus de Limpieza en el Calendario
+- En el panel del calendario (`Calendario.tsx` / `RoomRow.tsx`):
+  - Permitir hacer clic derecho o tocar sobre el nombre/número de la habitación en la cabecera lateral izquierda.
+  - Desplegar un menú contextual flotante premium con opciones de cambio de estatus de limpieza: "Limpia" 🟢, "Sucia" 🔴 y "Inspeccionada" 🔵.
+  - Al seleccionar una opción, invocar al backend para cambiar el estado de limpieza y actualizar la visualización reactivamente sin necesidad de recargar la página.
+
+### R5. CxC: Comisión en % de Cupones y Solución de Conciliación
+- En el módulo de cuentas por cobrar (`Saldos.tsx`):
+  - En la pestaña de cobros y cupones, añadir un input numérico de **"Comisión (%)"**.
+  - Al rellenar este campo, descontar dinámicamente este porcentaje del valor total del cobro del cupón antes de procesar el pago para registrar contablemente el neto de forma exacta.
+  - Corregir el bug del botón "Reconciliar Cobros" que se muestra deshabilitado o no responde. Asegurar que lea correctamente el rol de administrador (`user.rol === 'admin'`) para permitir la acción de conciliación masiva.
+- En el backend (`server/routes/hotel.js`):
+  - Registrar la comisión en porcentaje cobrada por el tercero en la base de datos de folios/cuentas al conciliar un pago de tercero.
+
+### R6. Config Rooms: Bug de Subida de Fotos y Control de Permisos
+- En `/admin/habitaciones` (`AdminHabitaciones.tsx`):
+  - **Diferenciación de Roles:** Esta página es accesible a recepcionistas (`staff`) y administradores (`admin`). Sin embargo, las acciones de creación, modificación, borrado y subida de fotos están restringidas en el backend a administradores (`requireRole('admin')`), por lo que un staff que intente usarlas recibe un error HTTP 403.
+  - **Alineación Visual:** Pasar el objeto `user` de la sesión activa como prop desde `App.tsx`. Ocultar o deshabilitar el botón *"Nueva Habitación"*, los botones de edición/eliminación de cada tarjeta de habitación y el overlay de cámara/subida de foto si `user.rol !== 'admin'`.
+  - **Exposición de Errores Reales:** En los bloques `catch` de todas las peticiones (especialmente en la subida de fotos), en vez de tragar el error con un mensaje genérico *"Error subiendo foto"*, capturar `e?.response?.data?.error?.message` o `e.message` y mostrarlo explícitamente en el banner de alerta de la UI, además de imprimir el stack del error con `console.error(e)`.
+
+---
+
+## Acceptance Criteria
+
+### Pasarela y Pagos
+- [ ] La selección de tarjeta o PayPal en Registrar Pago rápido o folio carga interactivamente el SDK de PayPal y valida la transacción antes de persistir.
+- [ ] El recepcionista puede ingresar cualquier monto de abono, y los botones rápidos "50% Sugerido" y "100% Total" llenan el input instantáneamente.
+
+### Reserva Grupal Web
+- [ ] La vista del cliente permite seleccionar hasta 30 personas y agregar una combinación libre de habitaciones al carrito de compra.
+- [ ] Permite al cliente distribuir huéspedes (adultos, menores, mascotas) de forma interactiva en cada habitación agregada al carrito, respetando las capacidades físicas.
+- [ ] La reserva final se crea de forma grupal y consolidada en base de datos.
+
+### Calendario y Limpieza
+- [ ] El clic derecho en el número de habitación del calendario despliega un menú flotante y actualiza el estatus de limpieza del cuarto en vivo en el backend and frontend.
+
+### CxC Comisiones
+- [ ] Saldos incluye un campo de comisión en % y descuenta ese fee contable del cobro final. El botón de reconciliación contable se habilita y responde para los administradores.
+
+### Config Rooms y Fotos (R6)
+- [ ] Si un Recepcionista (`staff`) entra a Config Rooms, todos los botones de Nueva Habitación, editar, eliminar y la cámara de subida de fotos se ocultan por completo de la pantalla.
+- [ ] Si un Administrador entra, puede subir fotos sin problemas y cualquier error del servidor de subida o base de datos se reporta de forma detallada en el banner rojo e impreso en consola.
+
+### Pruebas y Compilación
+- [ ] Al finalizar, el suite de pruebas (`npm run test`) pasa exitosamente (61/61 tests en verde) y el build de producción (`npm run build`) compila perfectamente.
+
+

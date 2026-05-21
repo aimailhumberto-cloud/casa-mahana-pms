@@ -131,6 +131,7 @@ CREATE TABLE IF NOT EXISTS folio_hotel (
   fecha TEXT DEFAULT (date('now')),
   reconciliado INTEGER DEFAULT 0,         -- 0 = no, 1 = reconciliado (CxC cuponeras/terceros)
   fecha_reconciliacion TEXT,              -- Fecha de la conciliación contable
+  comision_porcentaje REAL DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (reserva_id) REFERENCES reservas_hotel(id)
 );

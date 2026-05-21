@@ -162,6 +162,77 @@ describe('CxC, Reversals and Dynamic Taxes - Integration tests', () => {
       expect(updated.reconciliado).toBe(1);
       expect(updated.fecha_reconciliacion).toBe(new Date().toISOString().split('T')[0]);
     });
+
+    it('should reconcile folios in bulk via admin route and apply comision_porcentaje', () => {
+      // Seed a reservation
+      db.prepare(`
+        INSERT INTO reservas_hotel (id, cliente, apellido, check_in, check_out, adultos, menores, mascotas, plan_codigo, habitacion_id, monto_total, monto_pagado, saldo_pendiente, estado)
+        VALUES (11, 'Jane', 'Doe', '2026-06-01', '2026-06-03', 1, 0, 0, 'EXENTO', 1, 200, 0, 200, 'Confirmada')
+      `).run();
+
+      // Register payment with cuponera_pahoy
+      db.prepare(`
+        INSERT INTO folio_hotel (reserva_id, tipo, concepto, monto, metodo_pago, referencia, registrado_por, reconciliado)
+        VALUES (11, 'credito', 'Pago PaHoy', 200, 'cuponera_pahoy', 'REF-PH-1', 'Test Admin', 0)
+      `).run();
+
+      const entry = db.prepare("SELECT id FROM folio_hotel WHERE reserva_id = 11 AND metodo_pago = 'cuponera_pahoy'").get();
+      expect(entry).toBeDefined();
+
+      const req = {
+        user: { rol: 'admin' },
+        body: { ids: [entry.id], comision_porcentaje: 12.5 }
+      };
+      let resData;
+      const res = {
+        status: () => res,
+        json: (data) => { resData = data; }
+      };
+
+      reconcileHandler(req, res);
+      expect(resData.success).toBe(true);
+
+      // Verify DB state
+      const updated = db.prepare("SELECT reconciliado, fecha_reconciliacion, comision_porcentaje FROM folio_hotel WHERE id = ?").get(entry.id);
+      expect(updated.reconciliado).toBe(1);
+      expect(updated.fecha_reconciliacion).toBe(new Date().toISOString().split('T')[0]);
+      expect(updated.comision_porcentaje).toBe(12.5);
+    });
+
+    it('should default comision_porcentaje to 0 when not provided', () => {
+      // Seed a reservation
+      db.prepare(`
+        INSERT INTO reservas_hotel (id, cliente, apellido, check_in, check_out, adultos, menores, mascotas, plan_codigo, habitacion_id, monto_total, monto_pagado, saldo_pendiente, estado)
+        VALUES (12, 'Bob', 'Smith', '2026-06-01', '2026-06-03', 1, 0, 0, 'EXENTO', 1, 200, 0, 200, 'Confirmada')
+      `).run();
+
+      // Register payment with al_cobro
+      db.prepare(`
+        INSERT INTO folio_hotel (reserva_id, tipo, concepto, monto, metodo_pago, referencia, registrado_por, reconciliado)
+        VALUES (12, 'credito', 'Pago Al Cobro', 200, 'al_cobro', 'REF-AC-1', 'Test Admin', 0)
+      `).run();
+
+      const entry = db.prepare("SELECT id FROM folio_hotel WHERE reserva_id = 12 AND metodo_pago = 'al_cobro'").get();
+      expect(entry).toBeDefined();
+
+      const req = {
+        user: { rol: 'admin' },
+        body: { ids: [entry.id] }
+      };
+      let resData;
+      const res = {
+        status: () => res,
+        json: (data) => { resData = data; }
+      };
+
+      reconcileHandler(req, res);
+      expect(resData.success).toBe(true);
+
+      // Verify DB state
+      const updated = db.prepare("SELECT reconciliado, fecha_reconciliacion, comision_porcentaje FROM folio_hotel WHERE id = ?").get(entry.id);
+      expect(updated.reconciliado).toBe(1);
+      expect(updated.comision_porcentaje).toBe(0);
+    });
   });
 
   describe('Audit-Safe Reversals', () => {

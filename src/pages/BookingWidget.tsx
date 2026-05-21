@@ -79,6 +79,10 @@ export default function BookingWidget() {
   const [checkOut, setCheckOut] = useState('')
   const [adultos, setAdultos] = useState(1)
   const [menores, setMenores] = useState(0)
+  const [mascotas, setMascotas] = useState(0)
+  const [adultosBuscados, setAdultosBuscados] = useState(1)
+  const [menoresBuscados, setMenoresBuscados] = useState(0)
+  const [mascotasBuscadas, setMascotasBuscadas] = useState(0)
   const [roomTypes, setRoomTypes] = useState<RoomType[]>([])
   const [selectedType, setSelectedType] = useState('')
   const [plans, setPlans] = useState<Plan[]>([])
@@ -95,6 +99,10 @@ export default function BookingWidget() {
   const [cartItemAdults, setCartItemAdults] = useState(1)
   const [cartItemMinors, setCartItemMinors] = useState(0)
   const [cartItemPets, setCartItemPets] = useState(0)
+
+  // Plan fetching per room type
+  const [allRoomPlans, setAllRoomPlans] = useState<Record<string, Plan[]>>({})
+  const [selectedPlans, setSelectedPlans] = useState<Record<string, Plan>>({})
 
   // Offline Payment states
   const [receiptFile, setReceiptFile] = useState<File | null>(null)
@@ -135,8 +143,105 @@ export default function BookingWidget() {
       const data = await resp.json()
       if (!data.success) { setError(data.error?.message || 'Error'); return }
       if (data.data.tipos_disponibles.length === 0) { setError('No hay disponibilidad para esas fechas. Prueba con otras fechas.'); return }
-      setRoomTypes(data.data.tipos_disponibles); setStep(2)
+      
+      setRoomTypes(data.data.tipos_disponibles)
+      
+      // Save searched values
+      setAdultosBuscados(adultos)
+      setMenoresBuscados(menores)
+      setMascotasBuscadas(mascotas)
+
+      // Fetch plans for all available room types in parallel
+      const plansMap: Record<string, Plan[]> = {}
+      const defaultPlansMap: Record<string, Plan> = {}
+      await Promise.all(data.data.tipos_disponibles.map(async (rt: RoomType) => {
+        const pResp = await fetch(`${API}/planes?tipo=${rt.tipo}`)
+        const pData = await pResp.json()
+        if (pData.success && pData.data.length > 0) {
+          plansMap[rt.tipo] = pData.data
+          defaultPlansMap[rt.tipo] = pData.data[0]
+        }
+      }))
+      setAllRoomPlans(plansMap)
+      setSelectedPlans(defaultPlansMap)
+      setStep(2)
     } catch { setError('Error de conexión') } finally { setLoading(false) }
+  }
+
+  const handleIncrement = async (rt: RoomType) => {
+    const currentQty = cart.filter(x => x.tipo === rt.tipo).length
+    if (currentQty >= rt.disponibles) return
+    
+    const plan = selectedPlans[rt.tipo]
+    if (!plan) return
+
+    setLoading(true); setError('')
+    try {
+      // Fetch or compute the cotizacion for the room using selected plan, default guest counts (adultos = 1, menores = 0, mascotas = 0)
+      const resp = await fetch(`${API}/cotizar?plan=${plan.codigo}&adultos=1&menores=0&mascotas=0&check_in=${checkIn}&check_out=${checkOut}`)
+      const data = await resp.json()
+      if (!data.success) { setError(data.error?.message || 'Error cotizando'); return }
+      
+      const newItem: CartItem = {
+        id: `${Date.now()}-${Math.random()}`,
+        tipo: rt.tipo,
+        plan,
+        adultos: 1,
+        menores: 0,
+        mascotas: 0,
+        subtotal: data.data.subtotal,
+        impuesto_monto: data.data.impuesto_monto,
+        monto_total: data.data.monto_total,
+        deposito_minimo: data.data.deposito_minimo
+      }
+      setCart(prev => [...prev, newItem])
+    } catch {
+      setError('Error cotizando habitación')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleDecrement = (rt: RoomType) => {
+    const idx = [...cart].reverse().findIndex(x => x.tipo === rt.tipo)
+    if (idx === -1) return
+    const actualIdx = cart.length - 1 - idx
+    setCart(prev => prev.filter((_, i) => i !== actualIdx))
+  }
+
+  const updateCartItemGuests = async (itemId: string, adults: number, minors: number, pets: number) => {
+    // Update local state immediately so UI remains highly responsive
+    setCart(prev => prev.map(item => {
+      if (item.id === itemId) {
+        return { ...item, adultos: adults, menores: minors, mascotas: pets }
+      }
+      return item
+    }))
+
+    // Fetch exact updated price
+    const item = cart.find(x => x.id === itemId)
+    if (!item) return
+    
+    try {
+      const resp = await fetch(`${API}/cotizar?plan=${item.plan.codigo}&adultos=${adults}&menores=${minors}&mascotas=${pets}&check_in=${checkIn}&check_out=${checkOut}`)
+      const data = await resp.json()
+      if (data.success) {
+        setCart(prev => prev.map(x => {
+          if (x.id === itemId) {
+            return {
+              ...x,
+              subtotal: data.data.subtotal,
+              impuesto_monto: data.data.impuesto_monto,
+              monto_total: data.data.monto_total,
+              deposito_minimo: data.data.deposito_minimo
+            }
+          }
+          return x
+        }))
+      }
+    } catch (err) {
+      console.error("Error updating cotizacion dynamically", err)
+    }
   }
 
   const selectRoomType = async (tipo: string) => {
@@ -192,6 +297,39 @@ export default function BookingWidget() {
   const totalImpuesto = cart.reduce((acc, item) => acc + item.impuesto_monto, 0)
   const totalMontoTotal = cart.reduce((acc, item) => acc + item.monto_total, 0)
   const totalDepositoMinimo = cart.reduce((acc, item) => acc + item.deposito_minimo, 0)
+
+  // Calculations for Step 3 (Guest Allocation Console)
+  const assignedAdults = cart.reduce((acc, x) => acc + x.adultos, 0)
+  const assignedMinors = cart.reduce((acc, x) => acc + x.menores, 0)
+  const assignedPets = cart.reduce((acc, x) => acc + x.mascotas, 0)
+
+  const adultsMatch = assignedAdults === adultosBuscados
+  const minorsMatch = assignedMinors === menoresBuscados
+  const petsMatch = assignedPets === mascotasBuscadas
+
+  // Check physical capacities for all rooms in cart
+  const capacityViolations = cart.map(item => {
+    const rt = roomTypes.find(r => r.tipo === item.tipo)
+    const capMin = rt ? rt.capacidad_min : 1
+    const capMax = rt ? rt.capacidad_max : 4
+    const totalGuests = item.adultos + item.menores
+    const isTooLow = totalGuests < capMin
+    const isTooHigh = totalGuests > capMax
+    const isAdultInvalid = item.adultos < 1
+    return {
+      itemId: item.id,
+      tipo: item.tipo,
+      isTooLow,
+      isTooHigh,
+      isAdultInvalid,
+      capMin,
+      capMax,
+      totalGuests
+    }
+  })
+
+  const hasCapacityViolation = capacityViolations.some(v => v.isTooLow || v.isTooHigh || v.isAdultInvalid)
+  const allMatch = adultsMatch && minorsMatch && petsMatch && !hasCapacityViolation
 
   const createReservation = async (paypalOrderId: string) => {
     setLoading(true); setError('')
@@ -271,9 +409,9 @@ export default function BookingWidget() {
 
   const isGuestValid = guest.nombre && guest.email && guest.apellido
   const montoPagar = pagoTipo === 'total' ? totalMontoTotal : totalDepositoMinimo
-  const planImage = selectedPlan?.imagen || (selectedType ? (tipoFotos[selectedType] || defaultRoomImages[selectedType]) : '') || defaultRoomImages['Familiar']
+  const planImage = cart[0]?.plan.imagen || (cart[0]?.tipo ? (tipoFotos[cart[0].tipo] || defaultRoomImages[cart[0].tipo]) : '') || defaultRoomImages['Familiar']
 
-  const stepLabels = ['Fechas', 'Habitaciones', 'Tarifas', 'Resumen', 'Pago', 'Confirmado']
+  const stepLabels = ['Fechas', 'Habitaciones', 'Distribución', 'Resumen', 'Pago', 'Confirmado']
 
   return (
     <div className="min-h-screen" style={{ background: 'linear-gradient(135deg, #fefbf3 0%, #fdf4e3 30%, #fef9ef 60%, #fffcf5 100%)' }}>
@@ -336,7 +474,7 @@ export default function BookingWidget() {
               </div>
             </div>
             {noches > 0 && <p className="text-sm text-amber-700 font-medium mb-4 flex items-center gap-1.5"><Clock className="w-4 h-4" /> {noches} noche{noches > 1 ? 's' : ''}</p>}
-            <div className="grid grid-cols-2 gap-4 mb-6">
+            <div className="grid grid-cols-3 gap-4 mb-6">
               <div>
                 <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5"><Users className="w-3.5 h-3.5 inline mr-1" />Adultos</label>
                 <select value={adultos} onChange={e => setAdultos(+e.target.value)} className="w-full px-4 py-3.5 rounded-xl border border-gray-200 bg-gray-50/50 focus:ring-2 focus:ring-amber-400 text-gray-700">
@@ -346,7 +484,13 @@ export default function BookingWidget() {
               <div>
                 <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Menores</label>
                 <select value={menores} onChange={e => setMenores(+e.target.value)} className="w-full px-4 py-3.5 rounded-xl border border-gray-200 bg-gray-50/50 focus:ring-2 focus:ring-amber-400 text-gray-700">
-                  {[0,1,2,3,4].map(n => <option key={n} value={n}>{n} menor{n !== 1 ? 'es' : ''}</option>)}
+                  {Array.from({ length: 16 }, (_, i) => i).map(n => <option key={n} value={n}>{n} menor{n !== 1 ? 'es' : ''}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Mascotas</label>
+                <select value={mascotas} onChange={e => setMascotas(+e.target.value)} className="w-full px-4 py-3.5 rounded-xl border border-gray-200 bg-gray-50/50 focus:ring-2 focus:ring-amber-400 text-gray-700">
+                  {Array.from({ length: 11 }, (_, i) => i).map(n => <option key={n} value={n}>{n} mascota{n !== 1 ? 's' : ''}</option>)}
                 </select>
               </div>
             </div>
@@ -410,10 +554,10 @@ export default function BookingWidget() {
                     <p className="text-2xl font-bold text-amber-900">${totalMontoTotal.toFixed(2)}</p>
                   </div>
                   <button
-                    onClick={() => setStep(4)}
+                    onClick={() => setStep(3)}
                     className="w-full sm:w-auto px-6 py-3 bg-gradient-to-r from-amber-700 to-amber-800 text-white font-bold rounded-xl text-sm hover:shadow-lg transition flex items-center justify-center gap-2"
                   >
-                    <span>Siguiente: Registrarse</span>
+                    <span>Siguiente: Distribuir Huéspedes</span>
                     <ChevronRight className="w-4 h-4" />
                   </button>
                 </div>
@@ -425,28 +569,72 @@ export default function BookingWidget() {
                 <div className="w-10 h-10 rounded-2xl bg-amber-100 flex items-center justify-center"><Bed className="w-5 h-5 text-amber-700" /></div>
                 <div><h2 className="text-xl font-bold text-gray-800">Elige una habitación para agregar</h2></div>
               </div>
-              <p className="text-sm text-gray-400 mb-6 ml-[52px]">{noches} noche{noches > 1 ? 's' : ''} · {adultos} adulto{adultos > 1 ? 's' : ''}{menores > 0 ? ` · ${menores} menor${menores > 1 ? 'es' : ''}` : ''}</p>
+              <p className="text-sm text-gray-400 mb-6 ml-[52px]">{noches} noche{noches > 1 ? 's' : ''} · {adultosBuscados} adulto{adultosBuscados > 1 ? 's' : ''}{menoresBuscados > 0 ? ` · ${menoresBuscados} menor${menoresBuscados > 1 ? 'es' : ''}` : ''}{mascotasBuscadas > 0 ? ` · ${mascotasBuscadas} mascota${mascotasBuscadas > 1 ? 's' : ''}` : ''}</p>
               <div className="space-y-4">
                 {roomTypes.map(rt => {
                   const Icon = roomIcons[rt.tipo] || Bed
                   const img = tipoFotos[rt.tipo] || defaultRoomImages[rt.tipo] || defaultRoomImages['Familiar']
+                  const currentQty = cart.filter(x => x.tipo === rt.tipo).length
+
                   return (
-                    <button key={rt.tipo} onClick={() => selectRoomType(rt.tipo)}
-                      className="w-full rounded-2xl border border-gray-100 hover:border-amber-300 hover:shadow-lg transition-all duration-200 text-left overflow-hidden group">
+                    <div key={rt.tipo}
+                      className="w-full rounded-2xl border border-gray-100 hover:border-amber-300 hover:shadow-md transition-all duration-200 text-left overflow-hidden bg-white">
                       <div className="flex flex-col sm:flex-row">
-                        <div className="sm:w-44 h-32 sm:h-auto overflow-hidden">
-                          <img src={img} alt={rt.tipo} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                        <div className="sm:w-44 h-32 sm:h-auto overflow-hidden shrink-0">
+                          <img src={img} alt={rt.tipo} className="w-full h-full object-cover" />
                         </div>
-                        <div className="flex-1 p-4 sm:p-5 flex items-center justify-between">
+                        <div className="flex-1 p-4 sm:p-5 flex flex-col justify-between">
                           <div>
                             <h3 className="font-bold text-gray-800 text-lg flex items-center gap-2"><Icon className="w-5 h-5 text-amber-600" /> {rt.tipo}</h3>
                             <p className="text-sm text-gray-500 mt-1">{rt.capacidad_min}–{rt.capacidad_max} huéspedes</p>
                             <p className="text-xs text-emerald-600 mt-1 font-medium">{rt.disponibles} disponible{rt.disponibles > 1 ? 's' : ''}</p>
                           </div>
-                          <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-amber-600 transition" />
+
+                          {/* Plan select for this room type */}
+                          <div className="mt-3">
+                            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Plan de Tarifa</label>
+                            <select
+                              value={selectedPlans[rt.tipo]?.codigo || ''}
+                              onChange={(e) => {
+                                const plan = allRoomPlans[rt.tipo]?.find(p => p.codigo === e.target.value)
+                                if (plan) {
+                                  setSelectedPlans(prev => ({ ...prev, [rt.tipo]: plan }))
+                                }
+                              }}
+                              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl bg-white text-gray-700 focus:ring-2 focus:ring-amber-400"
+                            >
+                              {allRoomPlans[rt.tipo]?.map(p => (
+                                <option key={p.codigo} value={p.codigo}>{p.nombre} (${p.precio_adulto_noche}/noche)</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* Sleek quantity selector */}
+                          <div className="flex items-center gap-3 mt-4 pt-3 border-t border-gray-100">
+                            <button
+                              onClick={() => handleDecrement(rt)}
+                              disabled={currentQty === 0 || loading}
+                              className="w-8 h-8 rounded-full border border-gray-200 hover:border-amber-500 flex items-center justify-center font-bold text-gray-500 hover:text-amber-700 disabled:opacity-30 transition"
+                            >
+                              -
+                            </button>
+                            <span className="font-bold text-gray-800 text-sm w-6 text-center">
+                              {currentQty}
+                            </span>
+                            <button
+                              onClick={() => handleIncrement(rt)}
+                              disabled={currentQty >= rt.disponibles || loading}
+                              className="w-8 h-8 rounded-full border border-gray-200 hover:border-amber-500 flex items-center justify-center font-bold text-gray-500 hover:text-amber-700 disabled:opacity-30 transition"
+                            >
+                              +
+                            </button>
+                            <span className="text-xs text-gray-400 ml-auto">
+                              ({rt.disponibles} disponibles)
+                            </span>
+                          </div>
                         </div>
                       </div>
-                    </button>
+                    </div>
                   )
                 })}
               </div>
@@ -455,90 +643,201 @@ export default function BookingWidget() {
           </div>
         )}
 
-        {/* STEP 3: Plan Selection */}
+        {/* STEP 3: Guest Room Allocation Console */}
         {step === 3 && (
-          <div className="bg-white rounded-3xl shadow-xl p-6 sm:p-8 border border-amber-100/50">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 rounded-2xl bg-amber-100 flex items-center justify-center"><Coffee className="w-5 h-5 text-amber-700" /></div>
-              <div><h2 className="text-xl font-bold text-gray-800">Elige tu experiencia</h2></div>
-            </div>
-            <p className="text-sm text-gray-400 mb-6 ml-[52px]">Habitación {selectedType} · {noches} noche{noches > 1 ? 's' : ''}</p>
-            <div className="space-y-6">
-              {plans.map(plan => (
-                <div key={plan.codigo}
-                  className="w-full rounded-2xl border border-gray-100 hover:border-amber-300 hover:shadow-lg transition-all duration-200 text-left overflow-hidden flex flex-col sm:flex-row bg-white">
-                  {(plan.imagen || defaultRoomImages[selectedType]) && (
-                    <div className="sm:w-44 h-36 sm:h-auto overflow-hidden shrink-0">
-                      <img src={plan.imagen || defaultRoomImages[selectedType]} alt={plan.nombre} className="w-full h-full object-cover" />
-                    </div>
-                  )}
-                  <div className="flex-1 p-5 flex flex-col justify-between">
-                    <div>
-                      <div className="flex justify-between items-start mb-2">
-                        <h3 className="font-bold text-lg text-gray-800">{plan.nombre}</h3>
-                        <div className="text-right shrink-0 ml-3">
-                          <p className="text-2xl font-bold text-amber-800">${plan.precio_adulto_noche}</p>
-                          <p className="text-[10px] text-gray-400 uppercase tracking-wide">por adulto / noche</p>
-                        </div>
-                      </div>
-                      <p className="text-sm text-gray-500 mb-3">{plan.descripcion}</p>
-                      {plan.incluye?.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5 mb-4">
-                          {plan.incluye.map((item, i) => (
-                            <span key={i} className="text-[11px] px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-full font-medium flex items-center gap-1">
-                              <Check className="w-3 h-3" /> {item}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+          <div className="space-y-6 animate-fadeIn pb-32">
+            <div className="bg-white rounded-3xl shadow-xl p-6 sm:p-8 border border-amber-100/50">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-10 h-10 rounded-2xl bg-amber-100 flex items-center justify-center"><Users className="w-5 h-5 text-amber-700" /></div>
+                <div>
+                  <h2 className="text-xl font-bold text-gray-800">Distribución de Huéspedes</h2>
+                  <p className="text-sm text-gray-400">Distribuye tus huéspedes y mascotas en las habitaciones seleccionadas</p>
+                </div>
+              </div>
+              
+              <div className="space-y-4 mt-6">
+                {cart.map((item, idx) => {
+                  const rt = roomTypes.find(r => r.tipo === item.tipo)
+                  const capMin = rt ? rt.capacidad_min : 1
+                  const capMax = rt ? rt.capacidad_max : 4
+                  const totalGuests = item.adultos + item.menores
+                  const isTooLow = totalGuests < capMin
+                  const isTooHigh = totalGuests > capMax
+                  const isAdultInvalid = item.adultos < 1
+                  const hasWarn = isTooLow || isTooHigh || isAdultInvalid
 
-                    <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap items-center justify-between gap-4 bg-amber-50/20 p-3 rounded-xl">
-                      <div className="flex gap-3">
-                        <div>
-                          <label className="block text-[9px] font-bold text-gray-400 uppercase mb-1">Adultos</label>
-                          <select
-                            value={cartItemAdults}
-                            onChange={e => setCartItemAdults(+e.target.value)}
-                            className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs bg-white text-gray-700 font-semibold"
-                          >
-                            {Array.from({ length: 30 }, (_, i) => i + 1).map(n => <option key={n} value={n}>{n}</option>)}
-                          </select>
+                  return (
+                    <div key={item.id} className="p-5 rounded-2xl border border-gray-100 bg-gray-50/30 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                      <div className="space-y-1.5 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-gray-800 text-sm">Habitación {idx + 1}: {item.tipo}</span>
+                          <span className="text-[10px] bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded-full">
+                            {item.plan.nombre}
+                          </span>
+                          {hasWarn && (
+                            <span className="text-[10px] bg-red-100 text-red-700 font-semibold px-2.5 py-0.5 rounded-full flex items-center gap-1 animate-pulse">
+                              ⚠️ Advertencia de capacidad
+                            </span>
+                          )}
                         </div>
-                        <div>
-                          <label className="block text-[9px] font-bold text-gray-400 uppercase mb-1">Menores</label>
-                          <select
-                            value={cartItemMinors}
-                            onChange={e => setCartItemMinors(+e.target.value)}
-                            className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs bg-white text-gray-700 font-semibold"
-                          >
-                            {[0,1,2,3,4].map(n => <option key={n} value={n}>{n}</option>)}
-                          </select>
+                        <p className="text-xs text-gray-400">
+                          Capacidad física: {capMin} - {capMax} huéspedes.
+                        </p>
+                        {isAdultInvalid && <p className="text-[11px] text-red-500 font-medium">Debe haber al menos 1 adulto en cada habitación.</p>}
+                        {isTooLow && <p className="text-[11px] text-red-500 font-medium">Faltan huéspedes para cumplir el mínimo de {capMin}.</p>}
+                        {isTooHigh && <p className="text-[11px] text-red-500 font-medium">Se supera la capacidad máxima de {capMax} huéspedes.</p>}
+                      </div>
+
+                      {/* Guest Adjusters */}
+                      <div className="flex items-center gap-4 flex-wrap bg-white p-3 rounded-xl border border-gray-100">
+                        {/* Adults */}
+                        <div className="flex flex-col items-center">
+                          <span className="text-[9px] font-bold text-gray-400 uppercase mb-1">Adultos</span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => updateCartItemGuests(item.id, Math.max(0, item.adultos - 1), item.menores, item.mascotas)}
+                              className="w-6 h-6 rounded-full border border-gray-200 hover:border-amber-500 flex items-center justify-center text-xs font-bold text-gray-500"
+                            >
+                              -
+                            </button>
+                            <span className="text-xs font-bold text-gray-700 w-4 text-center">{item.adultos}</span>
+                            <button
+                              onClick={() => updateCartItemGuests(item.id, Math.min(30, item.adultos + 1), item.menores, item.mascotas)}
+                              className="w-6 h-6 rounded-full border border-gray-200 hover:border-amber-500 flex items-center justify-center text-xs font-bold text-gray-500"
+                            >
+                              +
+                            </button>
+                          </div>
                         </div>
-                        <div>
-                          <label className="block text-[9px] font-bold text-gray-400 uppercase mb-1">Mascotas</label>
-                          <select
-                            value={cartItemPets}
-                            onChange={e => setCartItemPets(+e.target.value)}
-                            className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs bg-white text-gray-700 font-semibold"
-                          >
-                            {[0,1,2,3].map(n => <option key={n} value={n}>{n}</option>)}
-                          </select>
+
+                        {/* Minors */}
+                        <div className="flex flex-col items-center">
+                          <span className="text-[9px] font-bold text-gray-400 uppercase mb-1">Menores</span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => updateCartItemGuests(item.id, item.adultos, Math.max(0, item.menores - 1), item.mascotas)}
+                              className="w-6 h-6 rounded-full border border-gray-200 hover:border-amber-500 flex items-center justify-center text-xs font-bold text-gray-500"
+                            >
+                              -
+                            </button>
+                            <span className="text-xs font-bold text-gray-700 w-4 text-center">{item.menores}</span>
+                            <button
+                              onClick={() => updateCartItemGuests(item.id, item.adultos, Math.min(15, item.menores + 1), item.mascotas)}
+                              className="w-6 h-6 rounded-full border border-gray-200 hover:border-amber-500 flex items-center justify-center text-xs font-bold text-gray-500"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Pets */}
+                        <div className="flex flex-col items-center">
+                          <span className="text-[9px] font-bold text-gray-400 uppercase mb-1">Mascotas</span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => updateCartItemGuests(item.id, item.adultos, item.menores, Math.max(0, item.mascotas - 1))}
+                              className="w-6 h-6 rounded-full border border-gray-200 hover:border-amber-500 flex items-center justify-center text-xs font-bold text-gray-500"
+                            >
+                              -
+                            </button>
+                            <span className="text-xs font-bold text-gray-700 w-4 text-center">{item.mascotas}</span>
+                            <button
+                              onClick={() => updateCartItemGuests(item.id, item.adultos, item.menores, Math.min(10, item.mascotas + 1))}
+                              className="w-6 h-6 rounded-full border border-gray-200 hover:border-amber-500 flex items-center justify-center text-xs font-bold text-gray-500"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Room Price */}
+                        <div className="text-right pl-2 border-l border-gray-100 flex flex-col justify-center">
+                          <span className="text-[10px] text-gray-400 block font-semibold">Hab. Total</span>
+                          <span className="font-bold text-amber-800 text-sm">${item.monto_total.toFixed(2)}</span>
                         </div>
                       </div>
-                      <button
-                        onClick={() => addToCart(selectedType, plan, cartItemAdults, cartItemMinors, cartItemPets)}
-                        disabled={loading}
-                        className="px-4 py-2.5 bg-amber-800 text-white font-bold rounded-xl text-xs hover:bg-amber-900 transition flex items-center gap-1.5 shadow-sm hover:shadow-md active:scale-95 disabled:opacity-50"
-                      >
-                        {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <><Check className="w-3.5 h-3.5" /> Agregar al Carrito</>}
-                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+
+              <div className="mt-8 flex justify-between items-center">
+                <button onClick={() => setStep(2)} className="text-sm text-amber-700 hover:text-amber-900 font-medium flex items-center gap-1">
+                  <ArrowLeft className="w-4 h-4" /> Volver a habitaciones
+                </button>
+              </div>
+            </div>
+
+            {/* Floating Glassmorphic Validation Panel at the bottom */}
+            <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/80 backdrop-blur-xl border-t border-amber-200/50 shadow-2xl py-5 px-6">
+              <div className="max-w-3xl mx-auto flex flex-col md:flex-row items-center justify-between gap-5">
+                <div className="flex-1 w-full space-y-3">
+                  {/* Status Stats */}
+                  <div className="grid grid-cols-4 gap-4 text-center md:text-left">
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-gray-400 block">Adultos</span>
+                      <p className={`text-base font-bold ${adultsMatch ? 'text-emerald-600' : 'text-amber-600'}`}>
+                        {assignedAdults} / {adultosBuscados}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-gray-400 block">Menores</span>
+                      <p className={`text-base font-bold ${minorsMatch ? 'text-emerald-600' : 'text-amber-600'}`}>
+                        {assignedMinors} / {menoresBuscados}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-gray-400 block">Mascotas</span>
+                      <p className={`text-base font-bold ${petsMatch ? 'text-emerald-600' : 'text-amber-600'}`}>
+                        {assignedPets} / {mascotasBuscadas}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-gray-400 block">Cap. Máxima</span>
+                      <p className="text-base font-bold text-amber-900">
+                        {cart.reduce((acc, item) => {
+                          const rt = roomTypes.find(r => r.tipo === item.tipo)
+                          return acc + (rt ? rt.capacidad_max : 0)
+                        }, 0)}
+                      </p>
                     </div>
                   </div>
+
+                  {/* Clean status banner */}
+                  <div className={`p-3 rounded-2xl text-xs font-semibold ${allMatch ? 'bg-emerald-50 border border-emerald-200 text-emerald-800' : 'bg-red-50 border border-red-200 text-red-800'}`}>
+                    {allMatch ? (
+                      <p>¡Perfecto! Todos los huéspedes y mascotas han sido asignados correctamente.</p>
+                    ) : (
+                      <div className="space-y-1">
+                        <p className="font-bold">⚠️ Falta completar la distribución correcta:</p>
+                        <ul className="list-disc pl-4 space-y-0.5">
+                          {assignedAdults < adultosBuscados && <li>Faltan asignar {adultosBuscados - assignedAdults} adulto(s) de tu búsqueda.</li>}
+                          {assignedAdults > adultosBuscados && <li>Sobran {assignedAdults - adultosBuscados} adulto(s) asignado(s).</li>}
+                          {assignedMinors < menoresBuscados && <li>Faltan asignar {menoresBuscados - assignedMinors} menor(es) de tu búsqueda.</li>}
+                          {assignedMinors > menoresBuscados && <li>Sobran {assignedMinors - menoresBuscados} menor(es) asignado(s).</li>}
+                          {assignedPets < mascotasBuscadas && <li>Faltan asignar {mascotasBuscadas - assignedPets} mascota(s) de tu búsqueda.</li>}
+                          {assignedPets > mascotasBuscadas && <li>Sobran {assignedPets - mascotasBuscadas} mascota(s) asignada(s).</li>}
+                          {hasCapacityViolation && <li>Revisa las advertencias de capacidad física en cada habitación.</li>}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              ))}
+
+                <div className="w-full md:w-auto flex flex-col items-center sm:items-end gap-1">
+                  <span className="text-[10px] text-gray-400 block">Total a Pagar</span>
+                  <p className="text-2xl font-black text-amber-900 mb-2">${totalMontoTotal.toFixed(2)}</p>
+                  <button
+                    disabled={!allMatch}
+                    onClick={() => setStep(4)}
+                    className="w-full md:w-auto px-6 py-4 bg-gradient-to-r from-amber-700 to-amber-800 text-white font-bold rounded-2xl text-base hover:shadow-xl disabled:opacity-40 disabled:pointer-events-none transition flex items-center justify-center gap-2"
+                  >
+                    <span>Siguiente: Datos de Huésped</span>
+                    <ChevronRight className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
             </div>
-            <button onClick={() => setStep(2)} className="mt-5 text-sm text-amber-700 hover:text-amber-900 font-medium flex items-center gap-1"><ArrowLeft className="w-4 h-4" /> Cambiar habitación</button>
           </div>
         )}
 
@@ -645,7 +944,7 @@ export default function BookingWidget() {
                 <CreditCard className="w-5 h-5" /> Continuar al pago
               </button>
             </div>
-            <button onClick={() => setStep(2)} className="text-sm text-amber-700 hover:text-amber-900 font-medium flex items-center gap-1"><ArrowLeft className="w-4 h-4" /> Volver a habitaciones</button>
+            <button onClick={() => setStep(3)} className="text-sm text-amber-700 hover:text-amber-900 font-medium flex items-center gap-1"><ArrowLeft className="w-4 h-4" /> Volver a distribución</button>
           </div>
         )}
 

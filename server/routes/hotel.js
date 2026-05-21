@@ -1134,20 +1134,21 @@ router.get('/hotel/saldos/terceros', requireAuth, (req, res) => {
 // Reconciliación en lote de CxC Terceros y Cuponeras
 router.post('/hotel/saldos/reconciliar', requireAuth, requireRole('admin'), (req, res) => {
   try {
-    const { ids } = req.body;
+    const { ids, comision_porcentaje } = req.body;
     if (!Array.isArray(ids) || ids.length === 0) {
       return err(res, 'VALIDATION_ERROR', 'Se requiere una lista de ids de folio para reconciliar');
     }
+    const comisionVal = comision_porcentaje !== undefined ? (parseFloat(comision_porcentaje) || 0) : 0;
     const db = getDb();
     const stmt = db.prepare(`
       UPDATE folio_hotel
-      SET reconciliado = 1, fecha_reconciliacion = ?
+      SET reconciliado = 1, fecha_reconciliacion = ?, comision_porcentaje = ?
       WHERE id = ? AND tipo = 'credito' AND metodo_pago IN ('al_cobro', 'cuponera_oferta_simple', 'cuponera_pahoy')
     `);
     const today = new Date().toISOString().split('T')[0];
     const txn = db.transaction(() => {
       for (const id of ids) {
-        stmt.run(today, id);
+        stmt.run(today, comisionVal, id);
       }
     });
     txn();

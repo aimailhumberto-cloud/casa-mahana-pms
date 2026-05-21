@@ -181,21 +181,21 @@ export default function ContextMenu({
               onClick={() => handleItemClick('set_clean')}
               className="w-full flex items-center gap-2 px-2.5 py-1 text-[11px] font-medium text-gray-600 hover:bg-green-50 hover:text-green-700 rounded-lg transition text-left"
             >
-              <span className="text-[10px]">🟢</span> Marcar Limpia
+              <span className="text-[10px]">🟢</span> Marcar como Limpia
             </button>
 
             <button
               onClick={() => handleItemClick('set_inspected')}
               className="w-full flex items-center gap-2 px-2.5 py-1 text-[11px] font-medium text-gray-600 hover:bg-blue-50 hover:text-blue-700 rounded-lg transition text-left"
             >
-              <span className="text-[10px]">🔵</span> Inspeccionada
+              <span className="text-[10px]">🔵</span> Marcar como Inspeccionada
             </button>
 
             <button
               onClick={() => handleItemClick('set_dirty')}
               className="w-full flex items-center gap-2 px-2.5 py-1 text-[11px] font-medium text-gray-600 hover:bg-red-50 hover:text-red-700 rounded-lg transition text-left"
             >
-              <span className="text-[10px]">🔴</span> Marcar Sucia
+              <span className="text-[10px]">🔴</span> Marcar como Sucia
             </button>
           </div>
         </div>

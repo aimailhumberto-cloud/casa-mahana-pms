@@ -124,6 +124,14 @@ export default function NuevaReserva() {
       .catch(e => console.error('Error fetching paypal config:', e));
   }, []);
 
+  useEffect(() => {
+    const amt = parseFloat(depositAmount);
+    if ((depositMetodo === 'paypal' || depositMetodo === 'tarjeta_credito' || depositMetodo === 'tarjeta') && amt > 0) {
+      setIsOnlineFlow(true);
+    }
+  }, [depositMetodo, depositAmount]);
+
+
   const [form, setForm] = useState({
     cliente: '', apellido: '', email: '', whatsapp: '', nacionalidad: '',
     check_in: searchParams.get('check_in') || '',
@@ -736,10 +744,11 @@ ${altRatesStr}
       return;
     }
 
-    if (!isOnlineFlow && parseFloat(depositAmount) > 0 && (depositMetodo === 'transferencia' || depositMetodo === 'yappy') && !receiptFile) {
-      setError('El comprobante de pago es obligatorio para abonos por transferencia o Yappy.');
+    if (!isOnlineFlow && parseFloat(depositAmount) > 0 && !receiptFile) {
+      setError('El comprobante de pago es obligatorio para registrar abonos manuales. Por favor suba un recibo válido.');
       return;
     }
+
 
     setLoading(true);
     try {
@@ -1490,6 +1499,7 @@ ${altRatesStr}
                       <option value="transferencia">Transferencia</option>
                       <option value="yappy">Yappy</option>
                       <option value="tarjeta">Tarjeta (POS)</option>
+                      <option value="tarjeta_credito">Tarjeta de Crédito</option>
                       <option value="paypal">PayPal</option>
                       <option value="al_cobro">Al Cobro (CXC)</option>
                       <option value="cuponera_oferta_simple">Oferta Simple (Cupón)</option>
@@ -1502,7 +1512,7 @@ ${altRatesStr}
                 </div>
 
                 {/* Upload receipt container */}
-                {(depositMetodo === 'transferencia' || depositMetodo === 'yappy' || depositMetodo === 'efectivo' || depositMetodo.startsWith('cuponera_') || depositMetodo === 'al_cobro') && parseFloat(depositAmount) > 0 && (
+                {!isOnlineFlow && parseFloat(depositAmount) > 0 && (
                   <div className="md:col-span-4 mt-2">
                     <label className="block text-sm font-medium text-gray-500 mb-2">📸 Comprobante de Pago (Yappy, Recibo o Transferencia)</label>
                     <div

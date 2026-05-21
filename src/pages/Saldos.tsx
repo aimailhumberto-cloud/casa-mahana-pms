@@ -18,6 +18,7 @@ export default function Saldos() {
   const [tercerosLoading, setTercerosLoading] = useState(false);
   const [selectedTerceros, setSelectedTerceros] = useState<number[]>([]);
   const [reconciling, setReconciling] = useState(false);
+  const [comision, setComision] = useState('0');
 
   const isAdmin = JSON.parse(localStorage.getItem('pms_user') || '{}')?.rol === 'admin';
 
@@ -74,7 +75,16 @@ export default function Saldos() {
     if (!confirm(`¿Está seguro de reconciliar contablemente ${selectedTerceros.length} cobro(s)?`)) return;
     setReconciling(true);
     try {
-      await api.post('/hotel/saldos/reconciliar', { ids: selectedTerceros });
+      const comisionPct = parseFloat(comision) || 0;
+      const selectedItems = tercerosData.filter((x: any) => selectedTerceros.includes(x.id));
+      const totalOriginalSelected = selectedItems.reduce((s, x) => s + (x.monto || 0), 0);
+      const totalDescuentoSelected = totalOriginalSelected * (1 - comisionPct / 100);
+
+      await api.post('/hotel/saldos/reconciliar', {
+        ids: selectedTerceros,
+        comision: comisionPct,
+        monto_descuento: totalDescuentoSelected
+      });
       alert('Movimientos reconciliados con éxito');
       loadTerceros();
     } catch (err: any) {
@@ -128,6 +138,9 @@ export default function Saldos() {
   const totalAlCobro = filteredTerceros.filter(f => f.metodo_pago === 'al_cobro').reduce((s, f) => s + (f.monto || 0), 0);
   const totalTercerosSum = filteredTerceros.reduce((s, f) => s + (f.monto || 0), 0);
 
+  const comisionPct = parseFloat(comision) || 0;
+  const totalTercerosDescuento = filteredTerceros.reduce((s, f) => s + (f.monto || 0) * (1 - comisionPct / 100), 0);
+
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
@@ -141,7 +154,7 @@ export default function Saldos() {
           </p>
         </div>
         <div className="bg-red-50 text-red-700 px-5 py-3 rounded-xl font-semibold text-lg">
-          Total CxC: ${activeTab === 'clientes' ? totalSaldo.toFixed(2) : totalTercerosSum.toFixed(2)}
+          Total CxC: ${activeTab === 'clientes' ? totalSaldo.toFixed(2) : (comisionPct > 0 ? totalTercerosDescuento.toFixed(2) : totalTercerosSum.toFixed(2))}
         </div>
       </div>
 
@@ -339,7 +352,20 @@ export default function Saldos() {
               <input value={search} onChange={e => setSearch(e.target.value)}
                 className="input pl-9 w-full" placeholder="Buscar por cliente, cupón o referencia..." />
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-4 flex-wrap">
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Comisión (%)</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  value={comision}
+                  onChange={e => setComision(e.target.value)}
+                  className="input py-1.5 px-3 w-20 text-sm focus:outline-none focus:border-ocean-400"
+                  placeholder="0"
+                />
+              </div>
               {!isAdmin && (
                 <span className="text-xs text-amber-600 bg-amber-50 px-3 py-1.5 rounded-lg border border-amber-100 font-medium">
                   ⚠️ Solo administradores pueden reconciliar
@@ -427,7 +453,16 @@ export default function Saldos() {
                             <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${metodoClass}`}>{metodoLabel}</span>
                           </td>
                           <td className="px-4 py-3 text-gray-500 font-mono text-xs">{f.referencia || '-'}</td>
-                          <td className="px-4 py-3 text-right font-bold text-gray-800">${f.monto?.toFixed(2)}</td>
+                          <td className="px-4 py-3 text-right font-bold text-gray-800">
+                            {comisionPct > 0 ? (
+                              <div className="flex flex-col items-end">
+                                <span className="text-xs text-gray-400 line-through">${f.monto?.toFixed(2)}</span>
+                                <span className="text-green-600">${(f.monto * (1 - comisionPct / 100)).toFixed(2)}</span>
+                              </div>
+                            ) : (
+                              `$${f.monto?.toFixed(2)}`
+                            )}
+                          </td>
                           <td className="px-4 py-3 text-gray-500 text-xs">{f.registrado_por || '-'}</td>
                           <td className="px-4 py-3 text-gray-400 text-xs">{f.fecha}</td>
                         </tr>
@@ -438,7 +473,16 @@ export default function Saldos() {
                     <tr>
                       <td className="px-4 py-3"></td>
                       <td className="px-4 py-3" colSpan={6}>TOTAL ({filteredTerceros.length} cobros)</td>
-                      <td className="px-4 py-3 text-right font-bold text-red-600">${totalTercerosSum.toFixed(2)}</td>
+                      <td className="px-4 py-3 text-right font-bold text-red-600">
+                        {comisionPct > 0 ? (
+                          <div className="flex flex-col items-end">
+                            <span className="text-xs text-gray-400 line-through">${totalTercerosSum.toFixed(2)}</span>
+                            <span>${totalTercerosDescuento.toFixed(2)}</span>
+                          </div>
+                        ) : (
+                          `$${totalTercerosSum.toFixed(2)}`
+                        )}
+                      </td>
                       <td className="px-4 py-3" colSpan={2}></td>
                     </tr>
                   </tfoot>

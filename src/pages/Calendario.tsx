@@ -1,6 +1,58 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { api } from '../api/client';
-import { ChevronLeft, ChevronRight, CalendarDays } from 'lucide-react';
+import { ChevronLeft, ChevronRight, CalendarDays, Loader2 } from 'lucide-react';
+
+function PayPalButtons({ clientId, mode, monto, descripcion, onSuccess, onError }: {
+  clientId: string; mode: string; monto: number; descripcion: string; onSuccess: (orderId: string) => void; onError: (msg: string) => void
+}) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [sdkReady, setSdkReady] = useState(false)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const existing = document.getElementById('paypal-sdk')
+    if (existing) { setSdkReady(true); setLoading(false); return }
+    const script = document.createElement('script')
+    script.id = 'paypal-sdk'
+    script.src = `https://www.paypal.com/sdk/js?client-id=${clientId}&currency=USD&intent=capture&enable-funding=card`
+    script.onload = () => { setSdkReady(true); setLoading(false) }
+    script.onerror = () => { onError('Error cargando PayPal'); setLoading(false) }
+    document.head.appendChild(script)
+  }, [clientId])
+
+  useEffect(() => {
+    if (!sdkReady || !containerRef.current || !(window as any).paypal) return
+    containerRef.current.innerHTML = ''
+    ;(window as any).paypal.Buttons({
+      style: { layout: 'vertical', color: 'gold', shape: 'rect', label: 'paypal', height: 40 },
+      createOrder: async () => {
+        const resp = await fetch(`/api/v1/public/paypal/create-order`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ monto, descripcion })
+        })
+        const data = await resp.json()
+        if (data.success) return data.data.orderId
+        throw new Error(data.error?.message || 'Error creando orden')
+      },
+      onApprove: async (data: any) => {
+        const resp = await fetch(`/api/v1/public/paypal/capture-order`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orderId: data.orderID })
+        })
+        const result = await resp.json()
+        if (result.success && result.data.status === 'COMPLETED') { onSuccess(data.orderID) }
+        else { onError('Pago no completado') }
+      },
+      onError: () => onError('Error en PayPal')
+    }).render(containerRef.current)
+  }, [sdkReady, monto])
+
+  if (loading) return <div className="flex justify-center py-4"><Loader2 className="w-6 h-6 animate-spin text-amber-600" /></div>
+  return <div ref={containerRef} />
+}
+
 import { useNavigate } from 'react-router-dom';
 import InteractivePopover from '../components/InteractivePopover';
 import { useContextMenu } from '../hooks/useContextMenu';
@@ -57,6 +109,15 @@ export default function Calendario() {
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [posConfirmed, setPosConfirmed] = useState(false);
+  const [paypalConfig, setPaypalConfig] = useState<any>({ paypal_enabled: false, paypal_client_id: '', paypal_mode: 'sandbox' });
+
+  useEffect(() => {
+    api.get('/public/paypal-config')
+      .then(r => {
+        if (r.data) setPaypalConfig(r.data);
+      })
+      .catch(e => console.error('Error fetching paypal config:', e));
+  }, []);
 
   // Hover references to prevent high-frequency re-renders & flickering
   const leaveTimeoutRef = useRef<any>(null);
@@ -505,6 +566,8 @@ export default function Calendario() {
                     { id: 'transferencia', label: '🏦 Transfer' },
                     { id: 'yappy', label: '📱 Yappy' },
                     { id: 'tarjeta', label: '💳 Tarjeta POS' },
+                    { id: 'tarjeta_credito', label: '💳 Tarjeta Crédito' },
+                    { id: 'paypal', label: '🔵 PayPal' },
                     { id: 'al_cobro', label: '📝 Al Cobro (CXC)' },
                     { id: 'cuponera_oferta_simple', label: '🏷️ Oferta Simple' },
                     { id: 'cuponera_pahoy', label: '⚡ PaHoy' },
@@ -605,22 +668,76 @@ export default function Calendario() {
               </div>
             </div>
 
-            <div className="flex gap-2.5 mt-6">
-              <button
-                type="submit"
-                disabled={quickPayLoading}
-                className="flex-1 py-2.5 bg-green-500 text-white rounded-xl font-bold text-sm hover:bg-green-600 transition shadow-lg shadow-green-100 flex items-center justify-center gap-1.5 disabled:opacity-50"
-              >
-                {quickPayLoading ? 'Procesando...' : 'Aplicar Abono'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setQuickPayReservaId(null)}
-                className="px-4 py-2.5 text-gray-500 hover:bg-gray-100 rounded-xl text-sm font-semibold transition"
-              >
-                Cancelar
-              </button>
-            </div>
+            {(() => {
+              const isOnlineQuickPay = (quickPayForm.metodo_pago === 'paypal' || quickPayForm.metodo_pago === 'tarjeta_credito') && parseFloat(quickPayForm.monto) > 0;
+              return (
+                <div className="flex gap-2.5 mt-6 flex-col">
+                  {isOnlineQuickPay ? (
+                    <div className="flex flex-col gap-2 w-full">
+                      {paypalConfig.paypal_enabled && paypalConfig.paypal_client_id ? (
+                        <div className="w-full">
+                          <PayPalButtons
+                            clientId={paypalConfig.paypal_client_id}
+                            mode={paypalConfig.paypal_mode}
+                            monto={parseFloat(quickPayForm.monto)}
+                            descripcion={`Casa Mahana - Pago rapido reserva #${quickPayReservaId}`}
+                            onSuccess={async (orderId) => {
+                              setQuickPayLoading(true);
+                              try {
+                                await api.post(`/hotel/reservas/${quickPayReservaId}/folio`, {
+                                  monto: parseFloat(quickPayForm.monto),
+                                  concepto: quickPayForm.concepto || 'Abono online (PayPal)',
+                                  tipo: 'credito',
+                                  metodo_pago: quickPayForm.metodo_pago,
+                                  referencia: orderId
+                                });
+                                setQuickPayReservaId(null);
+                                setReceiptFile(null);
+                                setPosConfirmed(false);
+                                load();
+                              } catch (err: any) {
+                                alert(err.message || 'Error registrando el pago');
+                              } finally {
+                                setQuickPayLoading(false);
+                              }
+                            }}
+                            onError={(msg) => alert(msg)}
+                          />
+                        </div>
+                      ) : (
+                        <div className="text-xs text-gray-500 bg-gray-50 p-3 rounded-lg text-center">
+                          El pago online por PayPal no está disponible en este momento.
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setQuickPayReservaId(null)}
+                        className="w-full py-2.5 text-gray-500 hover:bg-gray-100 rounded-xl text-sm font-semibold transition border border-gray-200"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2.5 w-full">
+                      <button
+                        type="submit"
+                        disabled={quickPayLoading}
+                        className="flex-1 py-2.5 bg-green-500 text-white rounded-xl font-bold text-sm hover:bg-green-600 transition shadow-lg shadow-green-100 flex items-center justify-center gap-1.5 disabled:opacity-50"
+                      >
+                        {quickPayLoading ? 'Procesando...' : 'Aplicar Abono'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setQuickPayReservaId(null)}
+                        className="px-4 py-2.5 text-gray-500 hover:bg-gray-100 rounded-xl text-sm font-semibold transition border border-gray-200"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </form>
         </div>
       )}

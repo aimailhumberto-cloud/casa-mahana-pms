@@ -1,8 +1,59 @@
 // v2 — cancel/edit/folio-totals
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
-import { ArrowLeft, Plus, Edit2, X, Check, Upload, FileText, Trash2, Image, Mail, Phone, Eye, RefreshCw, Calendar, XCircle, CheckCircle2, ShieldAlert, ExternalLink } from 'lucide-react';
+import { ArrowLeft, Plus, Edit2, X, Check, Upload, FileText, Trash2, Image, Mail, Phone, Eye, RefreshCw, Calendar, XCircle, CheckCircle2, ShieldAlert, ExternalLink, Loader2 } from 'lucide-react';
+
+function PayPalButtons({ clientId, mode, monto, descripcion, onSuccess, onError }: {
+  clientId: string; mode: string; monto: number; descripcion: string; onSuccess: (orderId: string) => void; onError: (msg: string) => void
+}) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [sdkReady, setSdkReady] = useState(false)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const existing = document.getElementById('paypal-sdk')
+    if (existing) { setSdkReady(true); setLoading(false); return }
+    const script = document.createElement('script')
+    script.id = 'paypal-sdk'
+    script.src = `https://www.paypal.com/sdk/js?client-id=${clientId}&currency=USD&intent=capture&enable-funding=card`
+    script.onload = () => { setSdkReady(true); setLoading(false) }
+    script.onerror = () => { onError('Error cargando PayPal'); setLoading(false) }
+    document.head.appendChild(script)
+  }, [clientId])
+
+  useEffect(() => {
+    if (!sdkReady || !containerRef.current || !(window as any).paypal) return
+    containerRef.current.innerHTML = ''
+    ;(window as any).paypal.Buttons({
+      style: { layout: 'vertical', color: 'gold', shape: 'rect', label: 'paypal', height: 40 },
+      createOrder: async () => {
+        const resp = await fetch(`/api/v1/public/paypal/create-order`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ monto, descripcion })
+        })
+        const data = await resp.json()
+        if (data.success) return data.data.orderId
+        throw new Error(data.error?.message || 'Error creando orden')
+      },
+      onApprove: async (data: any) => {
+        const resp = await fetch(`/api/v1/public/paypal/capture-order`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orderId: data.orderID })
+        })
+        const result = await resp.json()
+        if (result.success && result.data.status === 'COMPLETED') { onSuccess(data.orderID) }
+        else { onError('Pago no completado') }
+      },
+      onError: () => onError('Error en PayPal')
+    }).render(containerRef.current)
+  }, [sdkReady, monto])
+
+  if (loading) return <div className="flex justify-center py-4"><Loader2 className="w-6 h-6 animate-spin text-amber-600" /></div>
+  return <div ref={containerRef} />
+}
 
 const estadoColor: Record<string, string> = {
   'Confirmada': 'bg-blue-100 text-blue-700',
@@ -58,6 +109,15 @@ export default function ReservaDetalle() {
   const [pagoFile, setPagoFile] = useState<File | null>(null);
   const [pagoPreviewUrl, setPagoPreviewUrl] = useState<string | null>(null);
   const [pagoDragActive, setPagoDragActive] = useState(false);
+  const [paypalConfig, setPaypalConfig] = useState<any>({ paypal_enabled: false, paypal_client_id: '', paypal_mode: 'sandbox' });
+
+  useEffect(() => {
+    api.get('/public/paypal-config')
+      .then(r => {
+        if (r.data) setPaypalConfig(r.data);
+      })
+      .catch(e => console.error('Error fetching paypal config:', e));
+  }, []);
 
   useEffect(() => {
     if (!pagoFile) {
@@ -671,6 +731,8 @@ export default function ReservaDetalle() {
                       <option value="transferencia">Transferencia</option>
                       <option value="yappy">Yappy</option>
                       <option value="tarjeta">Tarjeta (POS)</option>
+                      <option value="tarjeta_credito">Tarjeta de Crédito</option>
+                      <option value="paypal">PayPal</option>
                       <option value="al_cobro">Al Cobro (CXC)</option>
                       <option value="cuponera_oferta_simple">Oferta Simple (Cupón)</option>
                       <option value="cuponera_pahoy">PaHoy (Cupón)</option>
@@ -755,10 +817,48 @@ export default function ReservaDetalle() {
                     </div>
                   )}
                 </div>
-                <div className="flex gap-2">
-                  <button type="submit" disabled={pagoLoading} className="px-4 py-2 bg-ocean-500 text-white rounded-lg text-sm hover:bg-ocean-600 disabled:opacity-50">
-                    {pagoLoading ? 'Guardando...' : 'Guardar Pago'}
-                  </button>
+                <div className="flex gap-2 flex-col md:flex-row md:items-center">
+                  {(pago.metodo_pago === 'paypal' || pago.metodo_pago === 'tarjeta_credito') && parseFloat(pago.monto) > 0 ? (
+                    paypalConfig.paypal_enabled && paypalConfig.paypal_client_id ? (
+                      <div className="max-w-xs w-full mt-2">
+                        <PayPalButtons
+                          clientId={paypalConfig.paypal_client_id}
+                          mode={paypalConfig.paypal_mode}
+                          monto={parseFloat(pago.monto)}
+                          descripcion={`Casa Mahana - Pago folio reserva #${id}`}
+                          onSuccess={async (orderId) => {
+                            setPagoLoading(true);
+                            try {
+                              await api.post(`/hotel/reservas/${id}/folio`, {
+                                monto: parseFloat(pago.monto),
+                                concepto: pago.concepto || 'Abono online (PayPal)',
+                                tipo: 'credito',
+                                metodo_pago: pago.metodo_pago,
+                                referencia: orderId
+                              });
+                              setPago({ monto: '', concepto: 'Abono', metodo_pago: 'efectivo', referencia: '' });
+                              setPagoFile(null);
+                              setShowPago(false);
+                              load();
+                            } catch (err: any) {
+                              alert(err.message || 'Error registrando el pago');
+                            } finally {
+                              setPagoLoading(false);
+                            }
+                          }}
+                          onError={(msg) => alert(msg)}
+                        />
+                      </div>
+                    ) : (
+                      <div className="text-xs text-gray-500 bg-gray-100 p-2 rounded-lg">
+                        El pago online por PayPal no está disponible en este momento.
+                      </div>
+                    )
+                  ) : (
+                    <button type="submit" disabled={pagoLoading} className="px-4 py-2 bg-ocean-500 text-white rounded-lg text-sm hover:bg-ocean-600 disabled:opacity-50">
+                      {pagoLoading ? 'Guardando...' : 'Guardar Pago'}
+                    </button>
+                  )}
                   <button type="button" onClick={() => { setShowPago(false); setPagoFile(null); }} className="px-4 py-2 text-gray-500 text-sm">Cancelar</button>
                 </div>
               </form>

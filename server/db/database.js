@@ -46,6 +46,14 @@ function getDb() {
       }
     }
 
+    const folioExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='folio_hotel'").get();
+    if (folioExists) {
+      const folioCols = db.prepare('PRAGMA table_info(folio_hotel)').all().map(c => c.name);
+      if (!folioCols.includes('comision_porcentaje')) {
+        db.exec('ALTER TABLE folio_hotel ADD COLUMN comision_porcentaje REAL DEFAULT 0');
+      }
+    }
+
     const configSysExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='configuracion_sistema'").get();
     if (configSysExists) {
       const sysCols = db.prepare('PRAGMA table_info(configuracion_sistema)').all().map(c => c.name);
