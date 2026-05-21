@@ -244,13 +244,10 @@ export default function BookingWidget() {
     pets: number,
     availableTypes: RoomType[]
   ) => {
-    const ROOM_CAPACITIES: Record<string, { min: number; max: number }> = {
-      'Familiar': { min: 2, max: 6 },
-      'Doble': { min: 2, max: 4 },
-      'Estándar': { min: 2, max: 3 },
-      'Camping': { min: 1, max: 2 },
-      'Bohío': { min: 1, max: 10 }
-    }
+    const ROOM_CAPACITIES: Record<string, { min: number; max: number }> = {}
+    availableTypes.forEach(rt => {
+      ROOM_CAPACITIES[rt.tipo] = { min: rt.capacidad_min, max: rt.capacidad_max }
+    })
 
     function solveDistribution(
       rooms: string[],
@@ -300,13 +297,18 @@ export default function BookingWidget() {
       return null
     }
 
-    const typeOrder = ['Familiar', 'Doble', 'Estándar', 'Camping', 'Bohío']
+    // Sort available room types by max capacity to establish priority weights
+    const sortedTypes = [...availableTypes].sort((a, b) => a.capacidad_max - b.capacidad_max)
+    const weights: Record<string, number> = {}
+    sortedTypes.forEach((rt, index) => {
+      weights[rt.tipo] = Math.pow(10, index)
+    })
+
+    const typeOrder = sortedTypes.map(rt => rt.tipo)
     const availableMap: Record<string, number> = {}
     
     availableTypes.forEach(rt => {
-      if (typeOrder.includes(rt.tipo)) {
-        availableMap[rt.tipo] = rt.disponibles
-      }
+      availableMap[rt.tipo] = rt.disponibles
     })
 
     const results: string[][] = []
@@ -328,19 +330,11 @@ export default function BookingWidget() {
 
     generateCombos(0, [])
 
-    const weights: Record<string, number> = {
-      'Familiar': 1000,
-      'Doble': 100,
-      'Estándar': 10,
-      'Camping': 1,
-      'Bohío': 10000
-    }
-
     results.sort((a, b) => {
       if (a.length !== b.length) return a.length - b.length
-      const wA = a.reduce((sum, r) => sum + weights[r], 0)
-      const wB = b.reduce((sum, r) => sum + weights[r], 0)
-      return wB - wA
+      const wA = a.reduce((sum, r) => sum + (weights[r] || 0), 0)
+      const wB = b.reduce((sum, r) => sum + (weights[r] || 0), 0)
+      return wA - wB // Ascending order: prioritize smaller capacity rooms first
     })
 
     for (const combo of results) {
