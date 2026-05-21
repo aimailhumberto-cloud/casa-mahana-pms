@@ -281,6 +281,16 @@ function detectColumns(fileHeaders) {
   const used = new Set();
   const normalized = fileHeaders.map(h => h.toLowerCase().trim());
 
+  // Helper to safely check if a variant is a full word match in a header
+  const isWordMatch = (header, variant) => {
+    const escaped = variant.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+    // If the variant starts/ends with alphanumeric, enforce boundary, otherwise don't.
+    const startBoundary = /^[a-z0-9]/i.test(variant) ? '\\b' : '';
+    const endBoundary = /[a-z0-9]$/i.test(variant) ? '\\b' : '';
+    const regex = new RegExp(startBoundary + escaped + endBoundary);
+    return regex.test(header);
+  };
+
   for (const [pmsField, variations] of Object.entries(COLUMN_MAP)) {
     for (const variant of variations) {
       const idx = normalized.indexOf(variant);
@@ -296,7 +306,7 @@ function detectColumns(fileHeaders) {
   for (const [pmsField, variations] of Object.entries(COLUMN_MAP)) {
     if (mapping[pmsField]) continue; // already mapped
     for (const variant of variations) {
-      const idx = normalized.findIndex((h, i) => !used.has(i) && h.includes(variant));
+      const idx = normalized.findIndex((h, i) => !used.has(i) && isWordMatch(h, variant));
       if (idx !== -1) {
         mapping[pmsField] = fileHeaders[idx];
         used.add(idx);
@@ -481,7 +491,7 @@ function processRow(row, mapping, rooms, plans, guestsMap) {
   const rawStatus = getValue(row, mapping, 'status');
   let estado = 'Confirmada';
   if (rawStatus) {
-    const mapped = STATUS_MAP[rawStatus.toLowerCase()];
+    const mapped = STATUS_MAP[String(rawStatus).toLowerCase()];
     if (mapped) {
       estado = mapped;
     } else {
@@ -506,7 +516,7 @@ function processRow(row, mapping, rooms, plans, guestsMap) {
   const rawSource = getValue(row, mapping, 'source');
   let fuente = 'Cloudbeds';
   if (rawSource) {
-    const mapped = SOURCE_MAP[rawSource.toLowerCase()];
+    const mapped = SOURCE_MAP[String(rawSource).toLowerCase()];
     fuente = mapped || rawSource;
   }
 
@@ -598,7 +608,7 @@ function processRow(row, mapping, rooms, plans, guestsMap) {
 
 function mapRoomType(cbType) {
   if (!cbType) return '';
-  const lower = cbType.toLowerCase();
+  const lower = String(cbType).toLowerCase();
 
   // Direct matches
   if (lower.includes('familiar') || lower.includes('family')) return 'Familiar';
@@ -764,7 +774,7 @@ function runImport(db, rows, mapping, options = {}) {
         }
         if (data.monto_pagado > 0) {
           db.prepare(
-            'INSERT INTO folio_hotel (reserva_id, tipo, concepto, monto, registrado_por, fecha) VALUES (?, ?, ?, ?, ?)'
+            'INSERT INTO folio_hotel (reserva_id, tipo, concepto, monto, registrado_por, fecha) VALUES (?, ?, ?, ?, ?, ?)'
           ).run(reservaId, 'credito', 'Pago registrado (Cloudbeds)', data.monto_pagado, 'CB Import', data.check_in);
         }
 
