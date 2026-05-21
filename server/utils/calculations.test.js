@@ -137,16 +137,16 @@ describe('Motor de Cotización Estándar (calcReservation)', () => {
 
     const res = calcReservation(data);
     
-    // Subtotal esperado: ((2 * 100) + (1 * 50) + (1 * 20)) * 2 = 270 * 2 = 540
-    expect(res.subtotal).toBe(540);
-    // Impuesto esperado: 540 * 0.10 = 54
-    expect(res.impuesto_monto).toBe(54);
-    // Total esperado: 540 + 54 = 594
-    expect(res.monto_total).toBe(594);
-    // Depósito esperado: 594 * 0.50 = 297
-    expect(res.deposito_sugerido).toBe(297);
-    // Saldo pendiente esperado: 594 - 0 = 594
-    expect(res.saldo_pendiente).toBe(594);
+    // Subtotal esperado (Estadía flat room rate): (100 + (1 * 50) + (1 * 20)) * 2 = 170 * 2 = 340
+    expect(res.subtotal).toBe(340);
+    // Impuesto esperado: 340 * 0.10 = 34
+    expect(res.impuesto_monto).toBe(34);
+    // Total esperado: 340 + 34 = 374
+    expect(res.monto_total).toBe(374);
+    // Depósito esperado: 374 * 0.50 = 187
+    expect(res.deposito_sugerido).toBe(187);
+    // Saldo pendiente esperado: 374 - 0 = 374
+    expect(res.saldo_pendiente).toBe(374);
   });
 
   it('debe añadir correctamente los productos adicionales (extras)', () => {
@@ -223,14 +223,14 @@ describe('Cotización Dinámica por Noche (calcReservationWithRates)', () => {
     // Noches: 2 (2026-05-22 Viernes y 2026-05-23 Sábado)
     const res = calcReservationWithRates(1, '2026-05-22', '2026-05-24', 2, 0, 0);
 
-    // Cada noche de fin de semana: (2 * 120) = 240. Dos noches: 480
-    expect(res.subtotal).toBe(480);
-    expect(res.impuesto_monto).toBe(48); // 10% de 480
-    expect(res.monto_total).toBe(528);
+    // Cada noche de fin de semana (Estadía flat room rate): 120. Dos noches: 240
+    expect(res.subtotal).toBe(240);
+    expect(res.impuesto_monto).toBe(24); // 10% de 240
+    expect(res.monto_total).toBe(264);
     expect(res.desglose.length).toBe(2);
     expect(res.desglose[0].tipo_dia).toBe('fin_de_semana');
     expect(res.desglose[0].precio_adulto).toBe(120);
-    expect(res.desglose[0].total_noche).toBe(240);
+    expect(res.desglose[0].total_noche).toBe(120);
   });
 
   it('debe calcular de forma precisa y en base a persona para planes Pasadía con desglose de 1 día', () => {

@@ -193,9 +193,9 @@ describe('Double Approval (4-eyes) Workflow Endpoints', () => {
       const updatedReserva = db.prepare('SELECT * FROM reservas_hotel WHERE id = 10').get();
       expect(updatedReserva.check_out).toBe('2026-06-14');
       expect(updatedReserva.noches).toBe(4);
-      expect(updatedReserva.subtotal).toBe(400.0);
-      expect(updatedReserva.monto_total).toBe(440.0);
-      expect(updatedReserva.saldo_pendiente).toBe(440.0);
+      expect(updatedReserva.subtotal).toBe(200.0);
+      expect(updatedReserva.monto_total).toBe(220.0);
+      expect(updatedReserva.saldo_pendiente).toBe(220.0);
       expect(updatedReserva.estado).toBe('Confirmada'); // Restored from locked state
     });
 

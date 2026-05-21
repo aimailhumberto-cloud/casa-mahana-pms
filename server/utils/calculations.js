@@ -94,7 +94,8 @@ function calcReservation(data) {
   const esPasadia = plan && plan.categoria === 'Pasadía';
   const subtotalMultiplier = esPasadia ? 1 : noches;
 
-  const subtotal = Math.round(((adultos * precioAdulto) + (menores * precioMenor) + (mascotas * precioMascota)) * subtotalMultiplier * 100) / 100;
+  const baseAdultosMonto = esPasadia ? (adultos * precioAdulto) : precioAdulto;
+  const subtotal = Math.round((baseAdultosMonto + (menores * precioMenor) + (mascotas * precioMascota)) * subtotalMultiplier * 100) / 100;
   const impuestoMonto = Math.round((subtotal + extras) * (impuestoPct / 100) * 100) / 100;
   const montoTotal = Math.round((subtotal + extras + impuestoMonto) * 100) / 100;
   const depositoSugerido = Math.round(montoTotal * (depositoPct / 100) * 100) / 100;
@@ -163,7 +164,8 @@ function calcReservationWithRates(planId, checkIn, checkOut, adultos, menores, m
       pMascota = plan ? plan.precio_mascota_noche : 0;
     }
 
-    const nightTotal = Math.round(((adultos * pAdulto) + (menores * pMenor) + (mascotas * pMascota)) * 100) / 100;
+    const baseAdultosMonto = esPasadia ? (adultos * pAdulto) : pAdulto;
+    const nightTotal = Math.round((baseAdultosMonto + (menores * pMenor) + (mascotas * pMascota)) * 100) / 100;
     subtotal += nightTotal;
 
     // Check if holiday
