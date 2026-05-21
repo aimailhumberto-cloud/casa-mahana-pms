@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings, Bell, RefreshCw, Mail, Phone, Calendar, ShieldAlert, CheckCircle2, XCircle, ArrowRightLeft, Eye, HelpCircle, AlertCircle, ExternalLink, Edit3, Undo, Save, ChevronLeft, Sparkles, MessageSquare, List } from 'lucide-react';
+import { Settings, Bell, RefreshCw, Mail, Phone, Calendar, Shield, ShieldAlert, CheckCircle2, XCircle, ArrowRightLeft, Eye, HelpCircle, AlertCircle, ExternalLink, Edit3, Undo, Save, ChevronLeft, Sparkles, MessageSquare, List } from 'lucide-react';
 import { api } from '../api/client';
 
 interface LogNotificacion {
@@ -124,6 +124,7 @@ export default function Configuracion({ user }: { user: User }) {
   const [waEnabled, setWaEnabled] = useState(false);
   
   const [hotelTelefono, setHotelTelefono] = useState('');
+  const [hotelDireccion, setHotelDireccion] = useState('');
   const [hotelPoliticaCancelacion, setHotelPoliticaCancelacion] = useState('');
   const [hotelPoliticaReembolso, setHotelPoliticaReembolso] = useState('');
   
@@ -131,6 +132,11 @@ export default function Configuracion({ user }: { user: User }) {
   const [savingConfig, setSavingConfig] = useState(false);
   const [configSuccessMsg, setConfigSuccessMsg] = useState('');
   const [configErrorMsg, setConfigErrorMsg] = useState('');
+
+  // SMTP Test states
+  const [testEmail, setTestEmail] = useState('');
+  const [testingSmtp, setTestingSmtp] = useState(false);
+  const [smtpTestResult, setSmtpTestResult] = useState<{ success: boolean; message: string; details?: any } | null>(null);
 
   // Tab 2: Logs de Notificaciones
   const [logs, setLogs] = useState<LogNotificacion[]>([]);
@@ -163,6 +169,11 @@ export default function Configuracion({ user }: { user: User }) {
   const [savingPlantilla, setSavingPlantilla] = useState(false);
   const [lastFocusedInput, setLastFocusedInput] = useState<'asunto' | 'contenido'>('contenido');
 
+  // Safe editor states
+  const [editorMode, setEditorMode] = useState<'safe' | 'advanced'>('safe');
+  const [safeHeader, setSafeHeader] = useState('');
+  const [safeIntro, setSafeIntro] = useState('');
+
   // 1. Load System Config
   const loadConfig = () => {
     setLoadingConfig(true);
@@ -184,6 +195,7 @@ export default function Configuracion({ user }: { user: User }) {
           setWaEnabled(c.wa_enabled === 1);
           
           setHotelTelefono(c.hotel_telefono || '');
+          setHotelDireccion(c.hotel_direccion || '');
           setHotelPoliticaCancelacion(c.hotel_politica_cancelacion || '');
           setHotelPoliticaReembolso(c.hotel_politica_reembolso || '');
         }
@@ -318,19 +330,29 @@ export default function Configuracion({ user }: { user: User }) {
         setEditAsunto(prev => prev + placeholder);
       }
     } else {
-      const txtEl = document.getElementById('edit-contenido') as HTMLTextAreaElement;
+      const txtEl = (document.getElementById('edit-contenido-safe') || document.getElementById('edit-contenido')) as HTMLTextAreaElement;
       if (txtEl) {
         const start = txtEl.selectionStart || 0;
         const end = txtEl.selectionEnd || 0;
-        const text = editContenido;
+        const text = editorMode === 'safe' ? safeIntro : editContenido;
         const newText = text.substring(0, start) + placeholder + text.substring(end);
-        setEditContenido(newText);
+        
+        if (editorMode === 'safe') {
+          setSafeIntro(newText);
+        } else {
+          setEditContenido(newText);
+        }
+        
         setTimeout(() => {
           txtEl.focus();
           txtEl.setSelectionRange(start + placeholder.length, start + placeholder.length);
         }, 0);
       } else {
-        setEditContenido(prev => prev + placeholder);
+        if (editorMode === 'safe') {
+          setSafeIntro(prev => prev + placeholder);
+        } else {
+          setEditContenido(prev => prev + placeholder);
+        }
       }
     }
   };
@@ -346,6 +368,50 @@ export default function Configuracion({ user }: { user: User }) {
       loadPlantillas();
     }
   }, [activeTab, logsPage, reversionesPage, filterType, filterChannel]);
+
+  // Synchronize safe fields back into editContenido in Safe Mode
+  useEffect(() => {
+    if (!selectedPlantilla || editorMode !== 'safe') return;
+    
+    if (selectedPlantilla.canal === 'email') {
+      let updatedHtml = editContenido;
+      
+      const h2Regex = /(<h2[^>]*>).*?(<\/h2>)/i;
+      if (h2Regex.test(updatedHtml)) {
+        updatedHtml = updatedHtml.replace(h2Regex, `$1${safeHeader}$2`);
+      } else if (safeHeader) {
+        // If <h2> is somehow missing but safeHeader has content, try to wrap or ignore.
+        // Let's assume standard default template structure is present.
+      }
+      
+      const pRegex = /(<p style="color:#4a5568;">).*?(<\/p>)/i;
+      if (pRegex.test(updatedHtml)) {
+        updatedHtml = updatedHtml.replace(pRegex, `$1${safeIntro}$2`);
+      }
+      
+      if (updatedHtml !== editContenido) {
+        setEditContenido(updatedHtml);
+      }
+    } else {
+      if (safeIntro !== editContenido) {
+        setEditContenido(safeIntro);
+      }
+    }
+  }, [safeHeader, safeIntro, editorMode, selectedPlantilla]);
+
+  const handleToggleEditorMode = (mode: 'safe' | 'advanced') => {
+    if (mode === 'safe') {
+      if (selectedPlantilla?.canal === 'email') {
+        const h2Match = editContenido.match(/<h2[^>]*>(.*?)<\/h2>/i);
+        setSafeHeader(h2Match ? h2Match[1] : '');
+        const pMatch = editContenido.match(/<p style="color:#4a5568;">(.*?)<\/p>/i);
+        setSafeIntro(pMatch ? pMatch[1] : '');
+      } else {
+        setSafeIntro(editContenido);
+      }
+    }
+    setEditorMode(mode);
+  };
 
   // Handle save configuration
   const handleSaveConfig = async (e: React.FormEvent) => {
@@ -369,6 +435,7 @@ export default function Configuracion({ user }: { user: User }) {
         wa_from_number: waFromNumber || null,
         wa_enabled: waEnabled ? 1 : 0,
         hotel_telefono: hotelTelefono || null,
+        hotel_direccion: hotelDireccion || null,
         hotel_politica_cancelacion: hotelPoliticaCancelacion || null,
         hotel_politica_reembolso: hotelPoliticaReembolso || null
       };
@@ -380,6 +447,43 @@ export default function Configuracion({ user }: { user: User }) {
       setConfigErrorMsg(err.response?.data?.error?.message || 'Error al guardar la configuración');
     } finally {
       setSavingConfig(false);
+    }
+  };
+
+  const handleTestSmtp = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!testEmail) {
+      alert('Por favor ingrese un correo destinatario para realizar la prueba.');
+      return;
+    }
+    setTestingSmtp(true);
+    setSmtpTestResult(null);
+    try {
+      const res = await api.post('/admin/configuracion/test-smtp', {
+        smtp_host: smtpHost,
+        smtp_port: smtpPort,
+        smtp_user: smtpUser,
+        smtp_pass: smtpPass,
+        smtp_from: smtpFrom,
+        destinatario: testEmail,
+        hotel_telefono: hotelTelefono,
+        hotel_direccion: hotelDireccion
+      });
+      setSmtpTestResult({
+        success: true,
+        message: res.data?.message || 'Conexión SMTP exitosa. Correo de prueba enviado.'
+      });
+    } catch (err: any) {
+      const errorData = err.response?.data?.error || {
+        message: err.message || 'Error desconocido al probar la conexión SMTP.'
+      };
+      setSmtpTestResult({
+        success: false,
+        message: errorData.message,
+        details: errorData.details || errorData
+      });
+    } finally {
+      setTestingSmtp(false);
     }
   };
 
@@ -643,9 +747,94 @@ export default function Configuracion({ user }: { user: User }) {
                       className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm disabled:bg-gray-50 disabled:text-gray-400"
                       placeholder="admin@casamahana.com"
                     />
-                  </div>
                 </div>
               </div>
+
+              {/* SMTP Tester Card */}
+              {isAdmin && (
+                <div className="bg-gray-50 border border-gray-200 rounded-xl p-5 mt-4 space-y-4">
+                  <div className="flex items-center gap-2">
+                    <Sparkles size={16} className="text-mahana-600 animate-pulse" />
+                    <h3 className="font-bold text-gray-800 text-sm">🧪 Probar Conexión de Correo (SMTP) en Vivo</h3>
+                  </div>
+                  <p className="text-xs text-gray-500 font-sans">
+                    Verifique que las credenciales SMTP ingresadas arriba sean correctas enviando un correo de prueba estructurado y con diseño corporativo al instante.
+                  </p>
+                  
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <div className="flex-1">
+                      <input
+                        type="email"
+                        value={testEmail}
+                        onChange={e => setTestEmail(e.target.value)}
+                        className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm bg-white"
+                        placeholder="correo-destinatario@example.com"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleTestSmtp}
+                      disabled={testingSmtp}
+                      className="px-5 py-2 bg-mahana-600 text-white font-semibold rounded-xl text-xs hover:bg-mahana-700 transition flex items-center justify-center gap-1.5 shadow-sm disabled:opacity-50 font-sans"
+                    >
+                      {testingSmtp ? (
+                        <>
+                          <RefreshCw size={14} className="animate-spin" />
+                          Probando...
+                        </>
+                      ) : (
+                        <>
+                          <span>Probar Conexión SMTP</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {smtpTestResult && (
+                    <div className="animate-fadeIn">
+                      {smtpTestResult.success ? (
+                        <div className="bg-green-50 border border-green-200 text-green-800 p-4 rounded-xl text-xs flex items-start gap-2.5 font-sans">
+                          <CheckCircle2 size={16} className="text-green-600 shrink-0 mt-0.5" />
+                          <div>
+                            <h5 className="font-bold text-green-900">¡Conexión y Envío Exitoso!</h5>
+                            <p className="mt-0.5 text-green-755">{smtpTestResult.message}</p>
+                            <p className="mt-1 text-[10px] text-green-600 italic">
+                              Revise la bandeja de entrada (y la carpeta de spam/correo no deseado) del destinatario <strong>{testEmail}</strong>.
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="bg-red-50 border border-red-200 text-red-800 p-4 rounded-xl text-xs space-y-2 font-sans">
+                          <div className="flex items-start gap-2.5">
+                            <XCircle size={16} className="text-red-600 shrink-0 mt-0.5" />
+                            <div>
+                              <h5 className="font-bold text-red-900">Fallo en la Prueba SMTP</h5>
+                              <p className="mt-0.5 text-red-755">{smtpTestResult.message}</p>
+                            </div>
+                          </div>
+                          
+                          {smtpTestResult.details && (
+                            <div className="mt-2">
+                              <span className="font-semibold text-[10px] text-red-500 uppercase tracking-wider block mb-1">Traza del Diagnóstico Técnico:</span>
+                              <pre className="bg-gray-950 text-green-400 p-3 rounded-lg font-mono text-[10px] overflow-x-auto max-h-48 border border-gray-800 shadow-inner">
+                                {typeof smtpTestResult.details === 'object' 
+                                  ? JSON.stringify(smtpTestResult.details, null, 2) 
+                                  : String(smtpTestResult.details)}
+                              </pre>
+                              <p className="text-[10px] text-red-600 mt-1.5 leading-normal">
+                                💡 <strong>Consejo de Diagnóstico:</strong> 
+                                {smtpTestResult.message?.toLowerCase().includes('connect') && ' Compruebe que el Host SMTP y el Puerto sean válidos y que no estén bloqueados por un firewall.'}
+                                {smtpTestResult.message?.toLowerCase().includes('auth') && ' El usuario o contraseña ingresados son incorrectos. Verifique sus credenciales.'}
+                                {smtpTestResult.message?.toLowerCase().includes('from') && ' Asegúrese de que el "Correo de Remitente (De)" esté autorizado para enviar en nombre de su cuenta SMTP.'}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* WhatsApp Settings */}
               <div className="space-y-4">
@@ -722,7 +911,7 @@ export default function Configuracion({ user }: { user: User }) {
                   </p>
                 </div>
 
-                <div className="grid grid-cols-1 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1 font-sans">
                       Teléfono de Atención (WhatsApp)
@@ -737,6 +926,22 @@ export default function Configuracion({ user }: { user: User }) {
                     />
                     <p className="text-[10px] text-gray-400 mt-1">Número utilizado para el enlace rápido de atención al cliente y pie de página de correos.</p>
                   </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1 font-sans">
+                      Dirección de la Propiedad
+                    </label>
+                    <input
+                      type="text"
+                      disabled={!isAdmin}
+                      value={hotelDireccion}
+                      onChange={e => setHotelDireccion(e.target.value)}
+                      className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm disabled:bg-gray-50 disabled:text-gray-400 font-sans"
+                      placeholder="Playa El Palmar, Chame, Panamá"
+                    />
+                    <p className="text-[10px] text-gray-400 mt-1">Dirección física del hotel que reemplaza las variables dinámicas <code className="bg-gray-100 px-1 py-0.5 rounded text-gray-600 font-mono text-[9px] font-semibold">{"{{hotel_direccion}}"}</code>.</p>
+                  </div>
+                </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
@@ -1175,6 +1380,16 @@ export default function Configuracion({ user }: { user: User }) {
                                 setSelectedPlantilla(plantilla);
                                 setEditAsunto(plantilla.asunto || '');
                                 setEditContenido(plantilla.contenido || '');
+                                setEditorMode('safe');
+                                if (plantilla.canal === 'email') {
+                                  const h2Match = plantilla.contenido.match(/<h2[^>]*>(.*?)<\/h2>/i);
+                                  setSafeHeader(h2Match ? h2Match[1] : '');
+                                  const pMatch = plantilla.contenido.match(/<p style="color:#4a5568;">(.*?)<\/p>/i);
+                                  setSafeIntro(pMatch ? pMatch[1] : '');
+                                } else {
+                                  setSafeHeader('');
+                                  setSafeIntro(plantilla.contenido || '');
+                                }
                               }}
                               className="px-3.5 py-1.5 bg-white border border-gray-200 text-mahana-600 font-semibold rounded-xl text-xs hover:bg-mahana-50 hover:border-mahana-200 hover:shadow-xs transition flex items-center gap-1 font-sans"
                             >
@@ -1257,41 +1472,157 @@ export default function Configuracion({ user }: { user: User }) {
                     </h3>
                   </div>
 
-                  <div className="space-y-4">
-                    {/* Asunto (Solo si es Email) */}
-                    {selectedPlantilla.canal === 'email' && (
+                  {/* Segmented Mode Selector */}
+                  {selectedPlantilla.canal === 'email' && (
+                    <div className="flex bg-gray-100/70 p-1.5 rounded-xl border border-gray-200">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleEditorMode('safe')}
+                        className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-bold rounded-lg transition-all font-sans ${
+                          editorMode === 'safe'
+                            ? 'bg-white text-mahana-700 shadow-xs border border-gray-150'
+                            : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        <Shield size={14} className={editorMode === 'safe' ? 'text-mahana-600 animate-pulse' : ''} />
+                        Modo Seguro (Recomendado)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleEditorMode('advanced')}
+                        className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-bold rounded-lg transition-all font-sans ${
+                          editorMode === 'advanced'
+                            ? 'bg-amber-50 text-amber-800 shadow-xs border border-amber-200'
+                            : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        <ShieldAlert size={14} className={editorMode === 'advanced' ? 'text-amber-600' : ''} />
+                        Modo Avanzado (HTML)
+                      </button>
+                    </div>
+                  )}
+
+                  {editorMode === 'safe' ? (
+                    <div className="space-y-4">
+                      {/* Asunto (Solo si es Email) */}
+                      {selectedPlantilla.canal === 'email' && (
+                        <div>
+                          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5 font-sans">
+                            Asunto del Correo
+                          </label>
+                          <input
+                            id="edit-asunto"
+                            type="text"
+                            value={editAsunto}
+                            onChange={e => setEditAsunto(e.target.value)}
+                            onFocus={() => setLastFocusedInput('asunto')}
+                            className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm font-sans"
+                            placeholder="Ingrese el asunto del correo..."
+                          />
+                        </div>
+                      )}
+
+                      {/* Email Safe Fields */}
+                      {selectedPlantilla.canal === 'email' ? (
+                        <>
+                          <div>
+                            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5 font-sans">
+                              Título de Cabecera (H2)
+                            </label>
+                            <input
+                              type="text"
+                              value={safeHeader}
+                              onChange={e => setSafeHeader(e.target.value)}
+                              className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm font-sans font-semibold text-gray-800"
+                              placeholder="Ej: ✅ ¡Reserva Confirmada!"
+                            />
+                            <p className="text-[10px] text-gray-400 mt-1">Este título se muestra resaltado al inicio del correo electrónico.</p>
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5 font-sans">
+                              Mensaje de Introducción (Cuerpo)
+                            </label>
+                            <textarea
+                              rows={6}
+                              value={safeIntro}
+                              onChange={e => setSafeIntro(e.target.value)}
+                              onFocus={() => setLastFocusedInput('contenido')}
+                              id="edit-contenido-safe"
+                              className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm leading-relaxed resize-y font-sans"
+                              placeholder="Escriba el mensaje principal del correo..."
+                            />
+                            <p className="text-[10px] text-gray-400 mt-1">El texto principal que recibirá el cliente. Los botones y el formato de tabla contable se mantienen intactos automáticamente.</p>
+                          </div>
+                        </>
+                      ) : (
+                        /* WhatsApp Safe Plain Text Editor */
+                        <div>
+                          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5 font-sans">
+                            Mensaje de WhatsApp
+                          </label>
+                          <textarea
+                            id="edit-contenido"
+                            rows={10}
+                            value={safeIntro}
+                            onChange={e => setSafeIntro(e.target.value)}
+                            onFocus={() => setLastFocusedInput('contenido')}
+                            className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm leading-relaxed resize-y font-sans"
+                            placeholder="Escriba el mensaje de WhatsApp..."
+                          />
+                          <p className="text-[10px] text-gray-400 mt-1">Mensaje de texto sin código HTML, seguro de editar y con variables automáticas.</p>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    /* Modo Avanzado Panel */
+                    <div className="space-y-4 animate-fadeIn">
+                      {/* Premium Warning Banner */}
+                      <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex gap-3 text-red-800 text-xs font-sans">
+                        <ShieldAlert size={20} className="text-red-600 shrink-0 mt-0.5" />
+                        <div>
+                          <h4 className="font-bold text-red-950">⚠️ ¡Atención! Estás en Modo Avanzado (HTML)</h4>
+                          <p className="mt-0.5 leading-normal text-red-700">
+                            Modificar directamente el código HTML puede romper el diseño responsivo, las tablas de precios, las fuentes y los enlaces de acción rápida. Proceda con precaución.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Asunto (Solo si es Email) */}
+                      {selectedPlantilla.canal === 'email' && (
+                        <div>
+                          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5 font-sans">
+                            Asunto del Correo
+                          </label>
+                          <input
+                            id="edit-asunto"
+                            type="text"
+                            value={editAsunto}
+                            onChange={e => setEditAsunto(e.target.value)}
+                            onFocus={() => setLastFocusedInput('asunto')}
+                            className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm font-sans"
+                            placeholder="Ingrese el asunto del correo..."
+                          />
+                        </div>
+                      )}
+
+                      {/* Mensaje / Cuerpo HTML */}
                       <div>
                         <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5 font-sans">
-                          Asunto del Correo
+                          Cuerpo del Mensaje (HTML Completo)
                         </label>
-                        <input
-                          id="edit-asunto"
-                          type="text"
-                          value={editAsunto}
-                          onChange={e => setEditAsunto(e.target.value)}
-                          onFocus={() => setLastFocusedInput('asunto')}
-                          className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm font-sans"
-                          placeholder="Ingrese el asunto del correo..."
+                        <textarea
+                          id="edit-contenido"
+                          rows={14}
+                          value={editContenido}
+                          onChange={e => setEditContenido(e.target.value)}
+                          onFocus={() => setLastFocusedInput('contenido')}
+                          className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm font-mono leading-relaxed resize-y"
+                          placeholder="Escriba el código HTML del correo..."
                         />
                       </div>
-                    )}
-
-                    {/* Mensaje / Cuerpo */}
-                    <div>
-                      <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5 font-sans">
-                        Cuerpo del Mensaje {selectedPlantilla.canal === 'whatsapp' ? '(WhatsApp)' : '(HTML)'}
-                      </label>
-                      <textarea
-                        id="edit-contenido"
-                        rows={selectedPlantilla.canal === 'whatsapp' ? 10 : 14}
-                        value={editContenido}
-                        onChange={e => setEditContenido(e.target.value)}
-                        onFocus={() => setLastFocusedInput('contenido')}
-                        className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mahana-400 focus:border-transparent outline-none transition text-sm font-mono leading-relaxed resize-y"
-                        placeholder="Escriba el contenido del mensaje utilizando etiquetas dinámicas..."
-                      />
                     </div>
-                  </div>
+                  )}
 
                   {/* Dynamic Variable Badges Grid */}
                   <div className="space-y-3 bg-gray-50/70 border border-gray-150 p-4 rounded-xl">

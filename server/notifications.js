@@ -179,7 +179,7 @@ function baseTemplate(content, preheader = '', config = null) {
   </div>
   <div class="body">${content}</div>
   <div class="footer">
-    <p>${hotelName} • Playa El Palmar, Chame, Panamá</p>
+    <p>${hotelName} • ${cfg.hotel_direccion || 'Playa El Palmar, Chame, Panamá'}</p>
     <p>📞 ${hotelPhone} • 📧 ${hotelEmail}</p>
     <p><a href="${hotelUrl}">${hotelUrl}</a></p>
   </div>
@@ -267,6 +267,7 @@ function buildTemplateContext(reserva, habitacion, extra = {}) {
     hotel_correo: config.smtp_from || HOTEL_EMAIL_DISPLAY,
     hotel_politica_cancelacion: config.hotel_politica_cancelacion || '',
     hotel_politica_reembolso: config.hotel_politica_reembolso || '',
+    hotel_direccion: config.hotel_direccion || 'Playa El Palmar, Chame, Panamá',
     ...extra
   };
 }
@@ -310,7 +311,7 @@ async function notifyReservationConfirmed(reserva, habitacion) {
 <p style="color:#718096;font-size:14px;">
   <strong>Check-in:</strong> A partir de las 2:00 PM<br>
   <strong>Check-out:</strong> Antes de las 12:00 PM<br>
-  <strong>Dirección:</strong> Playa El Palmar, Chame, Panamá
+  <strong>Dirección:</strong> ` + context.hotel_direccion + `
 </p>
 
 <p style="text-align:center;">
@@ -596,7 +597,7 @@ async function notifyReminder(reserva, habitacion, daysUntil) {
       ` : '') + `
       
       <p style="color:#718096;font-size:14px;">
-        <strong>📍 Dirección:</strong> Playa El Palmar, Chame, Panamá<br>
+        <strong>📍 Dirección:</strong> ` + context.hotel_direccion + `<br>
         <strong>🅿️ Estacionamiento:</strong> Disponible en el hotel<br>
         <strong>📶 WiFi:</strong> Disponible en todo el recinto
       </p>
@@ -618,7 +619,7 @@ async function notifyReminder(reserva, habitacion, daysUntil) {
       `📅 Check-in: ` + reserva.check_in + ` (2:00 PM)\n` +
       `🏠 ` + context.habitacion + `\n` +
       (reserva.saldo_pendiente > 0 ? `💰 Saldo pendiente: ` + context.saldo_pendiente + `\n` : '') +
-      `\n📍 Playa El Palmar, Chame, Panamá\n\n¡Te esperamos! 🌊🌴`;
+      `\n📍 ` + context.hotel_direccion + `\n\n¡Te esperamos! 🌊🌴`;
       
     const rendered = renderNotification('recordatorio', context, null, fallbackMsg, 'whatsapp');
     results.whatsapp = await sendWhatsApp(reserva.whatsapp || reserva.telefono, rendered.body);

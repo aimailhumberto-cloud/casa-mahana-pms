@@ -271,7 +271,8 @@ CREATE TABLE IF NOT EXISTS configuracion_sistema (
   wa_enabled INTEGER DEFAULT 0,
   hotel_telefono TEXT,
   hotel_politica_cancelacion TEXT,
-  hotel_politica_reembolso TEXT
+  hotel_politica_reembolso TEXT,
+  hotel_direccion TEXT
 );
 
 -- ═══ AUDITORÍA DE REVERSIONES CONTABLES ═══

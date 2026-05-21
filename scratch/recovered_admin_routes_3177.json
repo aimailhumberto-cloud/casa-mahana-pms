@@ -1,0 +1,12 @@
+{
+  "AllowMultiple": "false",
+  "Description": "\"Add hotel_telefono, hotel_politica_cancelacion, and hotel_politica_reembolso to allowed fields in PUT /configuracion/sistema.\"",
+  "EndLine": "548",
+  "Instruction": "\"Update the allowed fields array inside PUT /configuracion/sistema.\"",
+  "ReplacementContent": "\"    const allowed = [\\n      'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'smtp_from',\\n      'admin_email', 'notifications_enabled', 'wa_api_url', 'wa_api_token',\\n      'wa_from_number', 'wa_enabled',\\n      'hotel_telefono', 'hotel_politica_cancelacion', 'hotel_politica_reembolso'\\n    ];\"",
+  "StartLine": "541",
+  "TargetContent": "\"    const allowed = [\\n      'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'smtp_from',\\n      'admin_email', 'notifications_enabled', 'wa_api_url', 'wa_api_token',\\n      'wa_from_number', 'wa_enabled'\\n    ];\"",
+  "TargetFile": "\"C:\\\\Users\\\\Usuario\\\\.gemini\\\\antigravity\\\\scratch\\\\casa-mahana-pms\\\\server\\\\routes\\\\admin.js\"",
+  "toolAction": "\"Adding allowed system config properties\"",
+  "toolSummary": "\"Modify admin.js PUT route\""
+}

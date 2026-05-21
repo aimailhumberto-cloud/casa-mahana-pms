@@ -544,7 +544,8 @@ router.put('/configuracion/sistema', requireAuth, requireRole('admin'), (req, re
       'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'smtp_from',
       'admin_email', 'notifications_enabled', 'wa_api_url', 'wa_api_token',
       'wa_from_number', 'wa_enabled',
-      'hotel_telefono', 'hotel_politica_cancelacion', 'hotel_politica_reembolso'
+      'hotel_telefono', 'hotel_politica_cancelacion', 'hotel_politica_reembolso',
+      'hotel_direccion'
     ];
     const updates = [];
     const params = [];
@@ -590,6 +591,117 @@ router.put('/configuracion/sistema', requireAuth, requireRole('admin'), (req, re
   } catch (e) {
     console.error(e);
     err(res, 'SERVER_ERROR', 'Error al actualizar configuración', 500);
+  }
+});
+
+// Route for SMTP Test Diagnostics
+router.post('/configuracion/test-smtp', requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const { smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, destinatario } = req.body;
+    
+    if (!smtp_host || !smtp_port || !smtp_user || !smtp_pass || !smtp_from || !destinatario) {
+      return err(res, 'VALIDATION_ERROR', 'Todos los campos SMTP y el destinatario son requeridos para la prueba.');
+    }
+    
+    const port = parseInt(smtp_port);
+    if (isNaN(port) || port < 1 || port > 65535) {
+      return err(res, 'VALIDATION_ERROR', 'Puerto SMTP inválido');
+    }
+    
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(destinatario)) {
+      return err(res, 'VALIDATION_ERROR', 'Formato de correo destinatario inválido');
+    }
+    
+    console.log(`🧪 Iniciando diagnóstico SMTP para ${destinatario} a través de ${smtp_host}:${port}`);
+    
+    const nodemailer = require('nodemailer');
+    const testTransporter = nodemailer.createTransport({
+      host: smtp_host,
+      port: port,
+      secure: port === 465,
+      auth: {
+        user: smtp_user,
+        pass: smtp_pass
+      },
+      connectionTimeout: 10000, // 10s timeout
+      greetingTimeout: 10000,
+      socketTimeout: 10000
+    });
+    
+    // 1. Verify connection
+    try {
+      await testTransporter.verify();
+      console.log('🧪 SMTP Connection verified successfully');
+    } catch (verifyError) {
+      console.error('❌ SMTP verification failed:', verifyError);
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'SMTP_CONNECTION_FAILED',
+          message: `No se pudo conectar al servidor SMTP: ${verifyError.message}`,
+          details: verifyError.stack || verifyError
+        }
+      });
+    }
+    
+    // 2. Send test premium HTML email
+    const mailBody = `
+      <h2 style="color:#22863a;">🧪 ¡Conexión SMTP Exitosa!</h2>
+      <p style="color:#4a5568;">El PMS de Casa Mahana ha verificado exitosamente la configuración de tu servidor de correo saliente (SMTP).</p>
+      
+      <div class="highlight" style="border-left-color: #22863a; background-color: #f6fdf9; border-left-width: 4px; padding: 15px; border-radius: 8px; margin: 20px 0;">
+        <p style="margin: 0; font-size: 14px; color: #2e7d32;"><strong>Detalles de la conexión:</strong></p>
+        <ul style="margin: 8px 0 0 0; padding-left: 20px; font-size: 13px; color: #2d3748; line-height: 1.6;">
+          <li><strong>Servidor (Host):</strong> <code>${smtp_host}</code></li>
+          <li><strong>Puerto (Port):</strong> <code>${port}</code></li>
+          <li><strong>Usuario (User):</strong> <code>${smtp_user}</code></li>
+          <li><strong>Remitente (From):</strong> <code>${smtp_from}</code></li>
+          <li><strong>Fecha/Hora de Prueba:</strong> <code>${new Date().toLocaleString('es-PA')}</code></li>
+        </ul>
+      </div>
+      
+      <p style="color:#718096;font-size:13px;">Si has recibido este mensaje, significa que los correos automáticos de confirmación, recordatorios y recibos de pago comenzarán a enviarse con normalidad desde este buzón.</p>
+    `;
+    
+    // Dummy system configuration to generate base HTML structure
+    const dummyConfig = {
+      hotel_telefono: req.body.hotel_telefono || '+507 6000-0000',
+      smtp_from: smtp_from,
+      hotel_direccion: req.body.hotel_direccion || 'Playa El Palmar, Chame, Panamá'
+    };
+    
+    const finalHtml = baseTemplate(mailBody, '🧪 Prueba de SMTP Exitosa — Casa Mahana PMS', dummyConfig);
+    
+    try {
+      const info = await testTransporter.sendMail({
+        from: smtp_from,
+        to: destinatario,
+        subject: `🧪 Prueba de SMTP Exitosa — Casa Mahana PMS`,
+        html: finalHtml
+      });
+      
+      console.log(`🧪 Test email sent successfully: ${info.messageId}`);
+      return ok(res, {
+        message: 'Correo de diagnóstico SMTP enviado con éxito.',
+        messageId: info.messageId,
+        response: info.response
+      });
+    } catch (sendError) {
+      console.error('❌ SMTP email send failed:', sendError);
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'SMTP_TEST_FAILED',
+          message: `El servidor SMTP aceptó la conexión pero falló al enviar el mensaje: ${sendError.message}`,
+          details: sendError.stack || sendError
+        }
+      });
+    }
+    
+  } catch (e) {
+    console.error('SMTP test route server error:', e);
+    err(res, 'SERVER_ERROR', `Error del servidor durante la prueba SMTP: ${e.message}`, 500);
   }
 });
 
@@ -881,7 +993,7 @@ const DEFAULT_TEMPLATES = {
 <p style="color:#718096;font-size:14px;">
   <strong>Check-in:</strong> A partir de las 2:00 PM<br>
   <strong>Check-out:</strong> Antes de las 12:00 PM<br>
-  <strong>Dirección:</strong> Playa El Palmar, Chame, Panamá
+  <strong>Dirección:</strong> {{hotel_direccion}}
 </p>
 
 <p style="text-align:center;">
@@ -1041,7 +1153,7 @@ Hola {{cliente_nombre_completo}}, hemos registrado un nuevo pago para tu reserva
 </div>
 
 <p style="color:#718096;font-size:14px;">
-  <strong>📍 Dirección:</strong> Playa El Palmar, Chame, Panamá<br>
+  <strong>📍 Dirección:</strong> {{hotel_direccion}}<br>
   <strong>🅿️ Estacionamiento:</strong> Disponible y gratuito en el hotel<br>
   <strong>📶 WiFi:</strong> Conexión disponible de alta velocidad
 </p>
@@ -1060,7 +1172,7 @@ Te recordamos que tu estadía inicia *{{etiqueta_dias}}*:
 🏠 Habitación: {{habitacion}}
 💰 Saldo pendiente: {{saldo_pendiente}}
 
-📍 Ubicación: Playa El Palmar, Chame, Panamá
+📍 Ubicación: {{hotel_direccion}}
 
 ¡Te esperamos con la mejor energía! 🌊🌴`
     }
@@ -1252,7 +1364,8 @@ router.post('/notificaciones/plantillas/:codigo/:canal/preview', requireAuth, re
       hotel_telefono: config.hotel_telefono || '+507 6000-0000',
       hotel_correo: config.smtp_from || 'reservas@casamahana.com',
       hotel_politica_cancelacion: config.hotel_politica_cancelacion || 'Las cancelaciones realizadas hasta 48 horas antes de la llegada no tienen cargo. Las cancelaciones tardías o no-show tienen una penalidad de 1 noche.',
-      hotel_politica_reembolso: config.hotel_politica_reembolso || 'Los reembolsos se procesarán dentro de los 5-7 días hábiles posteriores a la aprobación, utilizando el mismo método de pago original.'
+      hotel_politica_reembolso: config.hotel_politica_reembolso || 'Los reembolsos se procesarán dentro de los 5-7 días hábiles posteriores a la aprobación, utilizando el mismo método de pago original.',
+      hotel_direccion: config.hotel_direccion || 'Playa El Palmar, Chame, Panamá'
     };
     
     // Load from DB if custom not provided

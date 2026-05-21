@@ -58,6 +58,9 @@ function getDb() {
       if (!sysCols.includes('hotel_politica_reembolso')) {
         db.exec('ALTER TABLE configuracion_sistema ADD COLUMN hotel_politica_reembolso TEXT');
       }
+      if (!sysCols.includes('hotel_direccion')) {
+        db.exec('ALTER TABLE configuracion_sistema ADD COLUMN hotel_direccion TEXT');
+      }
     }
 
     db.exec(schema);
@@ -283,8 +286,8 @@ function getDb() {
         INSERT INTO configuracion_sistema (
           id, smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, admin_email, notifications_enabled,
           wa_api_url, wa_api_token, wa_from_number, wa_enabled,
-          hotel_telefono, hotel_politica_cancelacion, hotel_politica_reembolso
-        ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          hotel_telefono, hotel_politica_cancelacion, hotel_politica_reembolso, hotel_direccion
+        ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         process.env.SMTP_HOST || 'smtp.mailtrap.io',
         parseInt(process.env.SMTP_PORT || '587'),
@@ -299,7 +302,8 @@ function getDb() {
         process.env.WA_ENABLED === 'true' ? 1 : 0,
         '+507 6000-0000',
         'Las cancelaciones realizadas hasta 48 horas antes de la llegada no tienen cargo. Las cancelaciones tardías o no-show tienen una penalidad de 1 noche.',
-        'Los reembolsos se procesarán dentro de los 5-7 días hábiles posteriores a la aprobación, utilizando el mismo método de pago original.'
+        'Los reembolsos se procesarán dentro de los 5-7 días hábiles posteriores a la aprobación, utilizando el mismo método de pago original.',
+        'Playa El Palmar, Chame, Panamá'
       );
       console.log('✅ Seeded configuracion_sistema dynamically from environment variables');
     }
@@ -310,7 +314,8 @@ function getDb() {
       SET 
         hotel_telefono = COALESCE(hotel_telefono, '+507 6000-0000'),
         hotel_politica_cancelacion = COALESCE(hotel_politica_cancelacion, 'Las cancelaciones realizadas hasta 48 horas antes de la llegada no tienen cargo. Las cancelaciones tardías o no-show tienen una penalidad de 1 noche.'),
-        hotel_politica_reembolso = COALESCE(hotel_politica_reembolso, 'Los reembolsos se procesarán dentro de los 5-7 días hábiles posteriores a la aprobación, utilizando el mismo método de pago original.')
+        hotel_politica_reembolso = COALESCE(hotel_politica_reembolso, 'Los reembolsos se procesarán dentro de los 5-7 días hábiles posteriores a la aprobación, utilizando el mismo método de pago original.'),
+        hotel_direccion = COALESCE(hotel_direccion, 'Playa El Palmar, Chame, Panamá')
       WHERE id = 1
     `).run();
 
@@ -348,7 +353,7 @@ function getDb() {
 <p style="color:#718096;font-size:14px;">
   <strong>Check-in:</strong> A partir de las 2:00 PM<br>
   <strong>Check-out:</strong> Antes de las 12:00 PM<br>
-  <strong>Dirección:</strong> Playa El Palmar, Chame, Panamá
+  <strong>Dirección:</strong> {{hotel_direccion}}
 </p>
 
 <p style="text-align:center;">
@@ -524,7 +529,7 @@ Hola {{cliente_nombre_completo}}, hemos registrado un nuevo pago para tu reserva
 </div>
 
 <p style="color:#718096;font-size:14px;">
-  <strong>📍 Dirección:</strong> Playa El Palmar, Chame, Panamá<br>
+  <strong>📍 Dirección:</strong> {{hotel_direccion}}<br>
   <strong>🅿️ Estacionamiento:</strong> Disponible y gratuito en el hotel<br>
   <strong>📶 WiFi:</strong> Conexión disponible de alta velocidad
 </p>
@@ -546,7 +551,7 @@ Te recordamos que tu estadía inicia *{{etiqueta_dias}}*:
 🏠 Habitación: {{habitacion}}
 💰 Saldo pendiente: {{saldo_pendiente}}
 
-📍 Ubicación: Playa El Palmar, Chame, Panamá
+📍 Ubicación: {{hotel_direccion}}
 
 ¡Te esperamos con la mejor energía! 🌊🌴`,
           JSON.stringify(["id", "cliente", "apellido", "cliente_nombre_completo", "check_in", "habitacion", "saldo_pendiente", "etiqueta_dias", "hotel_nombre"])
