@@ -19,6 +19,17 @@ const mockPrepare = vi.fn((sql) => {
       if (sql.includes('reglas_tarifa')) {
         const planId = args[0];
         const tipoDia = args[1];
+        if (planId === 2) {
+          // Pasadía rates
+          if (tipoDia === 'fin_de_semana') {
+            return { precio_adulto: 12, precio_menor: 6, precio_mascota: 3, activo: 1 };
+          }
+          if (tipoDia === 'festivo') {
+            return { precio_adulto: 15, precio_menor: 8, precio_mascota: 4, activo: 1 };
+          }
+          return { precio_adulto: 10, precio_menor: 5, precio_mascota: 2, activo: 1 };
+        }
+        // Estadía rates
         if (tipoDia === 'fin_de_semana') {
           return { precio_adulto: 120, precio_menor: 60, precio_mascota: 25, activo: 1 };
         }
@@ -34,6 +45,30 @@ const mockPrepare = vi.fn((sql) => {
         if (key === 'deposito_sugerido_pct') return { valor: '50' };
         return null;
       }
+      // 4. Plan queries (planes_tarifa)
+      if (sql.includes('planes_tarifa')) {
+        const code = args[0];
+        if (code === 'pasadia_entrada') {
+          return {
+            id: 2,
+            codigo: 'pasadia_entrada',
+            nombre: 'Pasadía Entrada',
+            categoria: 'Pasadía',
+            precio_adulto_noche: 10,
+            precio_menor_noche: 5,
+            precio_mascota_noche: 2
+          };
+        }
+        return {
+          id: 1,
+          codigo: 'todo_incluido',
+          nombre: 'Todo Incluido',
+          categoria: 'Estadía',
+          precio_adulto_noche: 100,
+          precio_menor_noche: 50,
+          precio_mascota_noche: 20
+        };
+      }
       return null;
     }),
     all: vi.fn(() => [])
@@ -46,13 +81,31 @@ const mockDb = {
 
 // Spy on getDb and findById
 const spyGetDb = vi.spyOn(database, 'getDb').mockImplementation(() => mockDb);
-const spyFindById = vi.spyOn(database, 'findById').mockImplementation(() => ({
-  id: 1,
-  codigo: 'todo_incluido',
-  precio_adulto_noche: 100,
-  precio_menor_noche: 50,
-  precio_mascota_noche: 20
-}));
+const spyFindById = vi.spyOn(database, 'findById').mockImplementation((table, id) => {
+  if (table === 'planes_tarifa') {
+    if (id === 2 || id === 'pasadia_entrada') {
+      return {
+        id: 2,
+        codigo: 'pasadia_entrada',
+        nombre: 'Pasadía Entrada',
+        categoria: 'Pasadía',
+        precio_adulto_noche: 10,
+        precio_menor_noche: 5,
+        precio_mascota_noche: 2
+      };
+    }
+    return {
+      id: 1,
+      codigo: 'todo_incluido',
+      nombre: 'Todo Incluido',
+      categoria: 'Estadía',
+      precio_adulto_noche: 100,
+      precio_menor_noche: 50,
+      precio_mascota_noche: 20
+    };
+  }
+  return null;
+});
 
 // Now require calculations (it will get the spied database operations)
 const { calcNoches, calcReservation, getDayType, getRateForDay, calcReservationWithRates } = require('./calculations');
@@ -115,6 +168,30 @@ describe('Motor de Cotización Estándar (calcReservation)', () => {
     // Total esperado: 100 + 50 + 15 = 165
     expect(res.monto_total).toBe(165);
   });
+
+  it('debe calcular correctamente por persona para planes Pasadía (sin multiplicar por noches)', () => {
+    const data = {
+      plan_id: 2, // pasadia_entrada
+      adultos: 3,
+      menores: 2,
+      mascotas: 1,
+      noches: 0, // Pasadías have 0 nights
+      precio_adulto_noche: 10,
+      precio_menor_noche: 5,
+      precio_mascota_noche: 2,
+      impuesto_pct: 10
+    };
+
+    const res = calcReservation(data);
+
+    // Subtotal esperado: (3 * 10) + (2 * 5) + (1 * 2) = 30 + 10 + 2 = 42
+    // For Pasadía, the nights multiplier is bypassed (forced to 1)
+    expect(res.subtotal).toBe(42);
+    // Impuesto esperado: 42 * 0.10 = 4.20
+    expect(res.impuesto_monto).toBe(4.20);
+    // Total esperado: 42 + 4.2 = 46.2
+    expect(res.monto_total).toBe(46.2);
+  });
 });
 
 describe('Determinación de Tipo de Día (getDayType)', () => {
@@ -154,5 +231,21 @@ describe('Cotización Dinámica por Noche (calcReservationWithRates)', () => {
     expect(res.desglose[0].tipo_dia).toBe('fin_de_semana');
     expect(res.desglose[0].precio_adulto).toBe(120);
     expect(res.desglose[0].total_noche).toBe(240);
+  });
+
+  it('debe calcular de forma precisa y en base a persona para planes Pasadía con desglose de 1 día', () => {
+    // Check-in and check-out are the same day
+    const res = calcReservationWithRates(2, '2026-05-22', '2026-05-22', 2, 1, 1);
+
+    // Day is Friday (fin_de_semana).
+    // Fin de semana Pasadía rate: precio_adulto = 12, precio_menor = 6, precio_mascota = 3.
+    // Total esperado: (2 * 12) + (1 * 6) + (1 * 3) = 24 + 6 + 3 = 33
+    expect(res.subtotal).toBe(33);
+    expect(res.impuesto_monto).toBe(3.3); // 10% of 33
+    expect(res.monto_total).toBe(36.3);
+    expect(res.desglose.length).toBe(1);
+    expect(res.desglose[0].tipo_dia).toBe('fin_de_semana');
+    expect(res.desglose[0].precio_adulto).toBe(12);
+    expect(res.desglose[0].total_noche).toBe(33);
   });
 });

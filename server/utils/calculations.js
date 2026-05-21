@@ -7,14 +7,38 @@ function getConfig(key) {
   return row ? row.valor : null;
 }
 
-// Determine day type for a date
+// Robust timezone-proof helper to parse any date input to a UTC timestamp
+function parseDateToUTC(dateInput) {
+  if (!dateInput) return Date.now();
+  if (dateInput instanceof Date) {
+    return Date.UTC(dateInput.getUTCFullYear(), dateInput.getUTCMonth(), dateInput.getUTCDate());
+  }
+  if (typeof dateInput === 'string') {
+    const dateStr = dateInput.includes('T') ? dateInput.split('T')[0] : dateInput;
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10);
+      const day = parseInt(parts[2], 10);
+      return Date.UTC(year, month - 1, day);
+    }
+  }
+  const d = new Date(dateInput);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+// Determine day type for a date (strictly timezone-proof)
 function getDayType(dateStr) {
   const db = getDb();
   // Check holidays first
   const festivo = db.prepare('SELECT id FROM dias_festivos WHERE fecha = ?').get(dateStr);
   if (festivo) return 'festivo';
-  // Check day of week: 0=Sun, 1=Mon...5=Fri, 6=Sat
-  const dow = new Date(dateStr + 'T12:00:00').getDay();
+
+  // Parse using the UTC-based helper
+  const utcTime = parseDateToUTC(dateStr);
+  const d = new Date(utcTime);
+  const dow = d.getUTCDay();
+
   // Fin de semana = Friday(5) and Saturday(6)
   if (dow === 5 || dow === 6) return 'fin_de_semana';
   return 'entre_semana';
@@ -26,7 +50,7 @@ function getRateForDay(planId, tipoDia) {
   return db.prepare('SELECT * FROM reglas_tarifa WHERE plan_id = ? AND tipo_dia = ? AND activo = 1').get(planId, tipoDia);
 }
 
-// Calculate reservation totals (day-aware)
+// Calculate reservation totals (day-aware and category-aware)
 function calcReservation(data) {
   const adultos = parseInt(data.adultos) || 1;
   const menores = parseInt(data.menores) || 0;
@@ -66,7 +90,11 @@ function calcReservation(data) {
 
   const depositoPct = parseFloat(getConfig('deposito_sugerido_pct')) || 50;
 
-  const subtotal = Math.round(((adultos * precioAdulto) + (menores * precioMenor) + (mascotas * precioMascota)) * noches * 100) / 100;
+  // For Pasadía, pricing is per person and not multiplied by nights
+  const esPasadia = plan && plan.categoria === 'Pasadía';
+  const subtotalMultiplier = esPasadia ? 1 : noches;
+
+  const subtotal = Math.round(((adultos * precioAdulto) + (menores * precioMenor) + (mascotas * precioMascota)) * subtotalMultiplier * 100) / 100;
   const impuestoMonto = Math.round((subtotal + extras) * (impuestoPct / 100) * 100) / 100;
   const montoTotal = Math.round((subtotal + extras + impuestoMonto) * 100) / 100;
   const depositoSugerido = Math.round(montoTotal * (depositoPct / 100) * 100) / 100;
@@ -85,7 +113,7 @@ function calcReservation(data) {
   };
 }
 
-// Calculate with day-based rates
+// Calculate with day-based rates (strictly timezone-proof and category-aware)
 function calcReservationWithRates(planId, checkIn, checkOut, adultos, menores, mascotas) {
   const db = getDb();
   const noches = calcNoches(checkIn, checkOut);
@@ -105,10 +133,21 @@ function calcReservationWithRates(planId, checkIn, checkOut, adultos, menores, m
   const desglose = []; // per-night breakdown
   let subtotal = 0;
 
-  for (let i = 0; i < noches; i++) {
-    const d = new Date(checkIn + 'T12:00:00');
-    d.setDate(d.getDate() + i);
-    const dateStr = d.toISOString().split('T')[0];
+  const startUtc = parseDateToUTC(checkIn);
+  const esPasadia = plan && plan.categoria === 'Pasadía';
+
+  // For Pasadía, the loop runs exactly once (since noches = 1 if checkIn === checkOut)
+  const iterations = esPasadia ? 1 : noches;
+
+  for (let i = 0; i < iterations; i++) {
+    const d = new Date(startUtc);
+    d.setUTCDate(d.getUTCDate() + i);
+
+    const year = d.getUTCFullYear();
+    const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    const dateStr = `${year}-${month}-${day}`;
+
     const tipoDia = getDayType(dateStr);
     const rate = getRateForDay(planId, tipoDia);
 
@@ -132,7 +171,7 @@ function calcReservationWithRates(planId, checkIn, checkOut, adultos, menores, m
 
     desglose.push({
       fecha: dateStr,
-      dia: ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'][d.getDay()],
+      dia: ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'][d.getUTCDay()],
       tipo_dia: tipoDia,
       festivo_nombre: festivo?.nombre || null,
       precio_adulto: pAdulto,
@@ -154,11 +193,12 @@ function calcReservationWithRates(planId, checkIn, checkOut, adultos, menores, m
   };
 }
 
-// Calculate nights between two dates
+// Calculate nights between two dates (strictly timezone-proof)
 function calcNoches(checkIn, checkOut) {
-  const d1 = new Date(checkIn);
-  const d2 = new Date(checkOut);
-  const diff = Math.ceil((d2 - d1) / (1000 * 60 * 60 * 24));
+  if (!checkIn || !checkOut) return 1;
+  const t1 = parseDateToUTC(checkIn);
+  const t2 = parseDateToUTC(checkOut);
+  const diff = Math.round((t2 - t1) / (1000 * 60 * 60 * 24));
   return diff > 0 ? diff : 1;
 }
 

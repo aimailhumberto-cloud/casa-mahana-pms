@@ -77,6 +77,7 @@ export default function BookingWidget() {
   const [error, setError] = useState('')
   const [checkIn, setCheckIn] = useState('')
   const [checkOut, setCheckOut] = useState('')
+  const [categoria, setCategoria] = useState<'Estadía' | 'Pasadía'>('Estadía')
   const [adultos, setAdultos] = useState(1)
   const [menores, setMenores] = useState(0)
   const [mascotas, setMascotas] = useState(0)
@@ -132,14 +133,58 @@ export default function BookingWidget() {
     fetch(`${API}/tipo-fotos`).then(r => r.json()).then(d => { if (d.success) setTipoFotos(d.data) })
   }, [])
 
+  // Reset cart when search criteria changes (Cart State Cleanup)
+  useEffect(() => {
+    setCart([])
+  }, [checkIn, checkOut, adultos, menores, mascotas, categoria])
+
+  const parseUTCDate = (dateStr: string) => {
+    if (!dateStr) return null
+    const [year, month, day] = dateStr.split('-').map(Number)
+    return new Date(Date.UTC(year, month - 1, day))
+  }
+
+  const formatUTCDate = (date: Date) => {
+    return date.toISOString().split('T')[0]
+  }
+
   const today = new Date().toISOString().split('T')[0]
-  const minCheckOut = checkIn ? new Date(new Date(checkIn + 'T12:00:00').getTime() + 86400000).toISOString().split('T')[0] : today
-  const noches = checkIn && checkOut ? Math.ceil((new Date(checkOut + 'T12:00:00').getTime() - new Date(checkIn + 'T12:00:00').getTime()) / 86400000) : 0
+  
+  const minCheckOut = (() => {
+    if (!checkIn) return today
+    if (categoria === 'Pasadía') return checkIn
+    const d = parseUTCDate(checkIn)
+    if (!d) return today
+    d.setUTCDate(d.getUTCDate() + 1)
+    return formatUTCDate(d)
+  })()
+
+  const calcNoches = (cIn: string, cOut: string) => {
+    if (!cIn || !cOut) return 0
+    const d1 = parseUTCDate(cIn)
+    const d2 = parseUTCDate(cOut)
+    if (!d1 || !d2) return 0
+    const diff = Math.ceil((d2.getTime() - d1.getTime()) / (1000 * 60 * 60 * 24))
+    return diff >= 0 ? diff : 0
+  }
+
+  const noches = calcNoches(checkIn, checkOut)
+
+  const handleCheckInChange = (val: string) => {
+    setCheckIn(val)
+    if (categoria === 'Pasadía') {
+      setCheckOut(val)
+    } else {
+      if (checkOut && val >= checkOut) {
+        setCheckOut('')
+      }
+    }
+  }
 
   const checkAvailability = async () => {
     setLoading(true); setError('')
     try {
-      const resp = await fetch(`${API}/disponibilidad?check_in=${checkIn}&check_out=${checkOut}`)
+      const resp = await fetch(`${API}/disponibilidad?check_in=${checkIn}&check_out=${checkOut}&categoria=${categoria}`)
       const data = await resp.json()
       if (!data.success) { setError(data.error?.message || 'Error'); return }
       if (data.data.tipos_disponibles.length === 0) { setError('No hay disponibilidad para esas fechas. Prueba con otras fechas.'); return }
@@ -166,6 +211,160 @@ export default function BookingWidget() {
       setSelectedPlans(defaultPlansMap)
       setStep(2)
     } catch { setError('Error de conexión') } finally { setLoading(false) }
+  }
+
+  // Backtracking suggested room distribution engine ("El Sugerido")
+  const findElSugerido = (
+    adults: number,
+    minors: number,
+    pets: number,
+    availableTypes: RoomType[]
+  ) => {
+    const ROOM_CAPACITIES: Record<string, { min: number; max: number }> = {
+      'Familiar': { min: 2, max: 6 },
+      'Doble': { min: 2, max: 4 },
+      'Estándar': { min: 2, max: 3 },
+      'Camping': { min: 1, max: 2 },
+      'Bohío': { min: 1, max: 10 }
+    }
+
+    function solveDistribution(
+      rooms: string[],
+      remAdults: number,
+      remMinors: number,
+      remPets: number
+    ): RoomAllocation[] | null {
+      const result: RoomAllocation[] = []
+
+      function backtrack(
+        idx: number,
+        rAdults: number,
+        rMinors: number,
+        rPets: number
+      ): boolean {
+        if (idx === rooms.length) {
+          return rAdults === 0 && rMinors === 0 && rPets === 0
+        }
+
+        const tipo = rooms[idx]
+        const cap = ROOM_CAPACITIES[tipo] || { min: 1, max: 4 }
+
+        const minAdults = 1
+        const maxAdults = Math.min(rAdults, cap.max)
+
+        for (let a = minAdults; a <= maxAdults; a++) {
+          const minMinors = Math.max(0, cap.min - a)
+          const maxMinors = Math.min(rMinors, cap.max - a)
+
+          for (let m = minMinors; m <= maxMinors; m++) {
+            const maxPets = Math.min(rPets, 2)
+            for (let p = 0; p <= maxPets; p++) {
+              result.push({ tipo, adultos: a, menores: m, mascotas: p })
+              if (backtrack(idx + 1, rAdults - a, rMinors - m, rPets - p)) {
+                return true
+              }
+              result.pop()
+            }
+          }
+        }
+        return false
+      }
+
+      if (backtrack(0, remAdults, remMinors, remPets)) {
+        return result
+      }
+      return null
+    }
+
+    const typeOrder = ['Familiar', 'Doble', 'Estándar', 'Camping', 'Bohío']
+    const availableMap: Record<string, number> = {}
+    
+    availableTypes.forEach(rt => {
+      if (typeOrder.includes(rt.tipo)) {
+        availableMap[rt.tipo] = rt.disponibles
+      }
+    })
+
+    const results: string[][] = []
+
+    function generateCombos(typeIdx: number, currentCombo: string[]) {
+      if (typeIdx === typeOrder.length) {
+        if (currentCombo.length > 0) results.push([...currentCombo])
+        return
+      }
+
+      const type = typeOrder[typeIdx]
+      const maxQty = Math.min(availableMap[type] || 0, adults)
+
+      for (let qty = 0; qty <= maxQty; qty++) {
+        const added = Array(qty).fill(type)
+        generateCombos(typeIdx + 1, [...currentCombo, ...added])
+      }
+    }
+
+    generateCombos(0, [])
+
+    const weights: Record<string, number> = {
+      'Familiar': 1000,
+      'Doble': 100,
+      'Estándar': 10,
+      'Camping': 1,
+      'Bohío': 10000
+    }
+
+    results.sort((a, b) => {
+      if (a.length !== b.length) return a.length - b.length
+      const wA = a.reduce((sum, r) => sum + weights[r], 0)
+      const wB = b.reduce((sum, r) => sum + weights[r], 0)
+      return wB - wA
+    })
+
+    for (const combo of results) {
+      const allocation = solveDistribution(combo, adults, minors, pets)
+      if (allocation) return allocation
+    }
+
+    return null
+  }
+
+  const aplicarElSugerido = async (sugerencia: RoomAllocation[]) => {
+    setLoading(true); setError('')
+    try {
+      const newCartItems: CartItem[] = []
+      
+      for (const alloc of sugerencia) {
+        const plan = selectedPlans[alloc.tipo] || allRoomPlans[alloc.tipo]?.[0]
+        if (!plan) {
+          throw new Error(`No se encontró un plan de tarifa para el tipo ${alloc.tipo}`)
+        }
+        
+        const resp = await fetch(`${API}/cotizar?plan=${plan.codigo}&adultos=${alloc.adultos}&menores=${alloc.menores}&mascotas=${alloc.mascotas}&check_in=${checkIn}&check_out=${checkOut}`)
+        const data = await resp.json()
+        if (!data.success) {
+          throw new Error(data.error?.message || `Error cotizando habitación sugerida de tipo ${alloc.tipo}`)
+        }
+        
+        newCartItems.push({
+          id: `${Date.now()}-${Math.random()}-${alloc.tipo}`,
+          tipo: alloc.tipo,
+          plan,
+          adultos: alloc.adultos,
+          menores: alloc.menores,
+          mascotas: alloc.mascotas,
+          subtotal: data.data.subtotal,
+          impuesto_monto: data.data.impuesto_monto,
+          monto_total: data.data.monto_total,
+          deposito_minimo: data.data.deposito_minimo
+        })
+      }
+      
+      setCart(newCartItems)
+      setStep(3)
+    } catch (e: any) {
+      setError(e.message || 'Error aplicando la sugerencia')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleIncrement = async (rt: RoomType) => {
@@ -459,21 +658,64 @@ export default function BookingWidget() {
           <div className="bg-white rounded-3xl shadow-xl p-6 sm:p-8 border border-amber-100/50">
             <div className="flex items-center gap-3 mb-6">
               <div className="w-10 h-10 rounded-2xl bg-amber-100 flex items-center justify-center"><Calendar className="w-5 h-5 text-amber-700" /></div>
-              <div><h2 className="text-xl font-bold text-gray-800">Selecciona tus fechas</h2><p className="text-sm text-gray-400">Planifica tu estadía perfecta</p></div>
+              <div><h2 className="text-xl font-bold text-gray-800">Selecciona tu experiencia</h2><p className="text-sm text-gray-400">Planifica tu estadía perfecta o un día de relajación</p></div>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+
+            {/* Category Toggle Tabs */}
+            <div className="flex bg-amber-50/50 p-1.5 rounded-2xl border border-amber-200/50 mb-6 gap-2">
+              <button
+                type="button"
+                onClick={() => setCategoria('Estadía')}
+                className={`flex-1 py-3 text-sm font-semibold rounded-xl transition flex items-center justify-center gap-2 ${
+                  categoria === 'Estadía'
+                    ? 'bg-amber-700 text-white shadow-md'
+                    : 'text-amber-800 hover:bg-amber-100/30'
+                }`}
+              >
+                <Bed className="w-4 h-4" />
+                <span>Estadía (Hospedaje)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCategoria('Pasadía');
+                  if (checkIn) setCheckOut(checkIn);
+                }}
+                className={`flex-1 py-3 text-sm font-semibold rounded-xl transition flex items-center justify-center gap-2 ${
+                  categoria === 'Pasadía'
+                    ? 'bg-amber-700 text-white shadow-md'
+                    : 'text-amber-800 hover:bg-amber-100/30'
+                }`}
+              >
+                <Sun className="w-4 h-4" />
+                <span>Pasadía (Por el día)</span>
+              </button>
+            </div>
+
+            <div className={`grid grid-cols-1 ${categoria === 'Pasadía' ? '' : 'sm:grid-cols-2'} gap-4 mb-5`}>
               <div>
-                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Check-in</label>
-                <input type="date" min={today} value={checkIn} onChange={e => { setCheckIn(e.target.value); if (checkOut && e.target.value >= checkOut) setCheckOut('') }}
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">{categoria === 'Pasadía' ? 'Fecha de Visita' : 'Check-in'}</label>
+                <input type="date" min={today} value={checkIn} onChange={e => handleCheckInChange(e.target.value)}
                   className="w-full px-4 py-3.5 rounded-xl border border-gray-200 bg-gray-50/50 focus:ring-2 focus:ring-amber-400 focus:border-transparent focus:bg-white transition text-gray-700" />
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Check-out</label>
-                <input type="date" min={minCheckOut} value={checkOut} onChange={e => setCheckOut(e.target.value)}
-                  className="w-full px-4 py-3.5 rounded-xl border border-gray-200 bg-gray-50/50 focus:ring-2 focus:ring-amber-400 focus:border-transparent focus:bg-white transition text-gray-700" />
-              </div>
+              {categoria !== 'Pasadía' && (
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Check-out</label>
+                  <input type="date" min={minCheckOut} value={checkOut} onChange={e => setCheckOut(e.target.value)}
+                    className="w-full px-4 py-3.5 rounded-xl border border-gray-200 bg-gray-50/50 focus:ring-2 focus:ring-amber-400 focus:border-transparent focus:bg-white transition text-gray-700" />
+                </div>
+              )}
             </div>
-            {noches > 0 && <p className="text-sm text-amber-700 font-medium mb-4 flex items-center gap-1.5"><Clock className="w-4 h-4" /> {noches} noche{noches > 1 ? 's' : ''}</p>}
+            {categoria === 'Pasadía' && checkIn && (
+              <p className="text-sm text-amber-700 font-medium mb-4 flex items-center gap-1.5">
+                <Sun className="w-4 h-4 text-amber-600" /> Pasadía (1 día de acceso completo de 9:00 AM a 5:00 PM)
+              </p>
+            )}
+            {categoria !== 'Pasadía' && noches > 0 && (
+              <p className="text-sm text-amber-700 font-medium mb-4 flex items-center gap-1.5">
+                <Clock className="w-4 h-4" /> {noches} noche{noches > 1 ? 's' : ''}
+              </p>
+            )}
             <div className="grid grid-cols-3 gap-4 mb-6">
               <div>
                 <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5"><Users className="w-3.5 h-3.5 inline mr-1" />Adultos</label>
@@ -509,139 +751,183 @@ export default function BookingWidget() {
         )}
 
         {/* STEP 2: Room Type */}
-        {step === 2 && (
-          <div className="space-y-6 animate-fadeIn">
-            {cart.length > 0 && (
-              <div className="bg-gradient-to-br from-amber-50 to-amber-100/40 border border-amber-200 rounded-3xl p-6 shadow-sm">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="font-bold text-amber-900 text-base flex items-center gap-2">
-                    <span>🛒 Tu Carrito de Habitaciones</span>
-                    <span className="bg-amber-200 text-amber-900 text-xs px-2 py-0.5 rounded-full font-bold">{cart.length}</span>
-                  </h3>
-                  <button
-                    onClick={() => setCart([])}
-                    className="text-xs text-red-600 hover:text-red-800 font-semibold transition"
-                  >
-                    Vaciar carrito
-                  </button>
-                </div>
-                <div className="space-y-3">
-                  {cart.map((item) => (
-                    <div key={item.id} className="flex justify-between items-center bg-white p-4 rounded-2xl border border-gray-100 text-sm shadow-xs">
-                      <div>
-                        <p className="font-bold text-gray-800 flex items-center gap-1.5">
-                          <Bed className="w-4 h-4 text-amber-600" />
-                          <span>{item.tipo}</span>
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">{item.plan.nombre} · {item.adultos} Ad{item.menores > 0 ? ` · ${item.menores} Mn` : ''}{item.mascotas > 0 ? ` · ${item.mascotas} Mc` : ''}</p>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="font-bold text-amber-800">${item.monto_total.toFixed(2)}</span>
-                        <button
-                          onClick={() => setCart(prev => prev.filter(x => x.id !== item.id))}
-                          className="w-7 h-7 rounded-full bg-red-50 text-red-500 flex items-center justify-center hover:bg-red-100 transition"
-                          title="Eliminar de mi carrito"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="flex flex-col sm:flex-row items-center justify-between mt-5 pt-4 border-t border-amber-200/50 gap-4">
-                  <div>
-                    <span className="text-xs text-gray-500 block">Total de tu estadía ({noches} noche{noches > 1 ? 's' : ''})</span>
-                    <p className="text-2xl font-bold text-amber-900">${totalMontoTotal.toFixed(2)}</p>
+        {step === 2 && (() => {
+          const sugerencia = findElSugerido(adultosBuscados, menoresBuscados, mascotasBuscadas, roomTypes)
+          return (
+            <div className="space-y-6 animate-fadeIn">
+              {cart.length > 0 && (
+                <div className="bg-gradient-to-br from-amber-50 to-amber-100/40 border border-amber-200 rounded-3xl p-6 shadow-sm">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-bold text-amber-900 text-base flex items-center gap-2">
+                      <span>🛒 Tu Carrito de Habitaciones</span>
+                      <span className="bg-amber-200 text-amber-900 text-xs px-2 py-0.5 rounded-full font-bold">{cart.length}</span>
+                    </h3>
+                    <button
+                      onClick={() => setCart([])}
+                      className="text-xs text-red-600 hover:text-red-800 font-semibold transition"
+                    >
+                      Vaciar carrito
+                    </button>
                   </div>
-                  <button
-                    onClick={() => setStep(3)}
-                    className="w-full sm:w-auto px-6 py-3 bg-gradient-to-r from-amber-700 to-amber-800 text-white font-bold rounded-xl text-sm hover:shadow-lg transition flex items-center justify-center gap-2"
-                  >
-                    <span>Siguiente: Distribuir Huéspedes</span>
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            )}
-
-            <div className="bg-white rounded-3xl shadow-xl p-6 sm:p-8 border border-amber-100/50">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="w-10 h-10 rounded-2xl bg-amber-100 flex items-center justify-center"><Bed className="w-5 h-5 text-amber-700" /></div>
-                <div><h2 className="text-xl font-bold text-gray-800">Elige una habitación para agregar</h2></div>
-              </div>
-              <p className="text-sm text-gray-400 mb-6 ml-[52px]">{noches} noche{noches > 1 ? 's' : ''} · {adultosBuscados} adulto{adultosBuscados > 1 ? 's' : ''}{menoresBuscados > 0 ? ` · ${menoresBuscados} menor${menoresBuscados > 1 ? 'es' : ''}` : ''}{mascotasBuscadas > 0 ? ` · ${mascotasBuscadas} mascota${mascotasBuscadas > 1 ? 's' : ''}` : ''}</p>
-              <div className="space-y-4">
-                {roomTypes.map(rt => {
-                  const Icon = roomIcons[rt.tipo] || Bed
-                  const img = tipoFotos[rt.tipo] || defaultRoomImages[rt.tipo] || defaultRoomImages['Familiar']
-                  const currentQty = cart.filter(x => x.tipo === rt.tipo).length
-
-                  return (
-                    <div key={rt.tipo}
-                      className="w-full rounded-2xl border border-gray-100 hover:border-amber-300 hover:shadow-md transition-all duration-200 text-left overflow-hidden bg-white">
-                      <div className="flex flex-col sm:flex-row">
-                        <div className="sm:w-44 h-32 sm:h-auto overflow-hidden shrink-0">
-                          <img src={img} alt={rt.tipo} className="w-full h-full object-cover" />
+                  <div className="space-y-3">
+                    {cart.map((item) => (
+                      <div key={item.id} className="flex justify-between items-center bg-white p-4 rounded-2xl border border-gray-100 text-sm shadow-xs">
+                        <div>
+                          <p className="font-bold text-gray-800 flex items-center gap-1.5">
+                            <Bed className="w-4 h-4 text-amber-600" />
+                            <span>{item.tipo}</span>
+                          </p>
+                          <p className="text-xs text-gray-500 mt-1">{item.plan.nombre} · {item.adultos} Ad{item.menores > 0 ? ` · ${item.menores} Mn` : ''}{item.mascotas > 0 ? ` · ${item.mascotas} Mc` : ''}</p>
                         </div>
-                        <div className="flex-1 p-4 sm:p-5 flex flex-col justify-between">
-                          <div>
-                            <h3 className="font-bold text-gray-800 text-lg flex items-center gap-2"><Icon className="w-5 h-5 text-amber-600" /> {rt.tipo}</h3>
-                            <p className="text-sm text-gray-500 mt-1">{rt.capacidad_min}–{rt.capacidad_max} huéspedes</p>
-                            <p className="text-xs text-emerald-600 mt-1 font-medium">{rt.disponibles} disponible{rt.disponibles > 1 ? 's' : ''}</p>
-                          </div>
+                        <div className="flex items-center gap-3">
+                          <span className="font-bold text-amber-800">${item.monto_total.toFixed(2)}</span>
+                          <button
+                            onClick={() => setCart(prev => prev.filter(x => x.id !== item.id))}
+                            className="w-7 h-7 rounded-full bg-red-50 text-red-500 flex items-center justify-center hover:bg-red-100 transition"
+                            title="Eliminar de mi carrito"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex flex-col sm:flex-row items-center justify-between mt-5 pt-4 border-t border-amber-200/50 gap-4">
+                    <div>
+                      <span className="text-xs text-gray-500 block">
+                        {categoria === 'Pasadía' ? 'Total de tu pasadía' : `Total de tu estadía (${noches} noche${noches > 1 ? 's' : ''})`}
+                      </span>
+                      <p className="text-2xl font-bold text-amber-900">${totalMontoTotal.toFixed(2)}</p>
+                    </div>
+                    <button
+                      onClick={() => setStep(3)}
+                      className="w-full sm:w-auto px-6 py-3 bg-gradient-to-r from-amber-700 to-amber-800 text-white font-bold rounded-xl text-sm hover:shadow-lg transition flex items-center justify-center gap-2"
+                    >
+                      <span>Siguiente: Distribuir Huéspedes</span>
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
 
-                          {/* Plan select for this room type */}
-                          <div className="mt-3">
-                            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Plan de Tarifa</label>
-                            <select
-                              value={selectedPlans[rt.tipo]?.codigo || ''}
-                              onChange={(e) => {
-                                const plan = allRoomPlans[rt.tipo]?.find(p => p.codigo === e.target.value)
-                                if (plan) {
-                                  setSelectedPlans(prev => ({ ...prev, [rt.tipo]: plan }))
-                                }
-                              }}
-                              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl bg-white text-gray-700 focus:ring-2 focus:ring-amber-400"
-                            >
-                              {allRoomPlans[rt.tipo]?.map(p => (
-                                <option key={p.codigo} value={p.codigo}>{p.nombre} (${p.precio_adulto_noche}/noche)</option>
-                              ))}
-                            </select>
-                          </div>
+              {/* ✨ El Sugerido Optimization Recommendation Banner */}
+              {sugerencia && (
+                <div className="bg-gradient-to-r from-amber-50 to-orange-50 border-2 border-amber-300 rounded-3xl p-6 shadow-md mb-6 relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-amber-100/30 rounded-full -mr-8 -mt-8 pointer-events-none" />
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                      <span className="inline-flex items-center gap-1 bg-amber-100 text-amber-800 text-xs font-bold px-2.5 py-1 rounded-full uppercase tracking-wider mb-2">
+                        ✨ El Sugerido
+                      </span>
+                      <h3 className="font-extrabold text-amber-900 text-lg sm:text-xl">
+                        Recomendación de Habitación Optimizada
+                      </h3>
+                      <p className="text-sm text-amber-800/80 mt-1 leading-relaxed">
+                        Hemos encontrado la combinación perfecta de habitaciones que minimiza tus costos y se adapta a tus huéspedes y mascotas:
+                      </p>
+                      <div className="flex flex-wrap gap-2 mt-3">
+                        {sugerencia.map((s, idx) => (
+                          <span key={idx} className="bg-white border border-amber-200 text-amber-900 text-xs font-semibold px-3 py-1.5 rounded-xl shadow-xs">
+                            🚪 <b>{s.tipo}</b> ({s.adultos} Ad{s.menores > 0 ? `, ${s.menores} Mn` : ''}{s.mascotas > 0 ? `, ${s.mascotas} Mc` : ''})
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => aplicarElSugerido(sugerencia)}
+                      disabled={loading}
+                      className="bg-amber-700 hover:bg-amber-800 text-white font-bold px-5 py-3 rounded-2xl transition shadow-md hover:shadow-lg text-sm shrink-0 flex items-center justify-center gap-2 self-start sm:self-center"
+                    >
+                      {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>Aceptar Sugerido</span>}
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
 
-                          {/* Sleek quantity selector */}
-                          <div className="flex items-center gap-3 mt-4 pt-3 border-t border-gray-100">
-                            <button
-                              onClick={() => handleDecrement(rt)}
-                              disabled={currentQty === 0 || loading}
-                              className="w-8 h-8 rounded-full border border-gray-200 hover:border-amber-500 flex items-center justify-center font-bold text-gray-500 hover:text-amber-700 disabled:opacity-30 transition"
-                            >
-                              -
-                            </button>
-                            <span className="font-bold text-gray-800 text-sm w-6 text-center">
-                              {currentQty}
-                            </span>
-                            <button
-                              onClick={() => handleIncrement(rt)}
-                              disabled={currentQty >= rt.disponibles || loading}
-                              className="w-8 h-8 rounded-full border border-gray-200 hover:border-amber-500 flex items-center justify-center font-bold text-gray-500 hover:text-amber-700 disabled:opacity-30 transition"
-                            >
-                              +
-                            </button>
-                            <span className="text-xs text-gray-400 ml-auto">
-                              ({rt.disponibles} disponibles)
-                            </span>
+              <div className="bg-white rounded-3xl shadow-xl p-6 sm:p-8 border border-amber-100/50">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="w-10 h-10 rounded-2xl bg-amber-100 flex items-center justify-center"><Bed className="w-5 h-5 text-amber-700" /></div>
+                  <div><h2 className="text-xl font-bold text-gray-800">Elige una habitación para agregar</h2></div>
+                </div>
+                <p className="text-sm text-gray-400 mb-6 ml-[52px]">
+                  {categoria === 'Pasadía' ? 'Pasadía por el día' : `${noches} noche${noches > 1 ? 's' : ''}`} · {adultosBuscados} adulto{adultosBuscados > 1 ? 's' : ''}{menoresBuscados > 0 ? ` · ${menoresBuscados} menor${menoresBuscados > 1 ? 'es' : ''}` : ''}{mascotasBuscadas > 0 ? ` · ${mascotasBuscadas} mascota${mascotasBuscadas > 1 ? 's' : ''}` : ''}
+                </p>
+                <div className="space-y-4">
+                  {roomTypes.map(rt => {
+                    const Icon = roomIcons[rt.tipo] || Bed
+                    const img = tipoFotos[rt.tipo] || defaultRoomImages[rt.tipo] || defaultRoomImages['Familiar']
+                    const currentQty = cart.filter(x => x.tipo === rt.tipo).length
+
+                    return (
+                      <div key={rt.tipo}
+                        className="w-full rounded-2xl border border-gray-100 hover:border-amber-300 hover:shadow-md transition-all duration-200 text-left overflow-hidden bg-white">
+                        <div className="flex flex-col sm:flex-row">
+                          <div className="sm:w-44 h-32 sm:h-auto overflow-hidden shrink-0">
+                            <img src={img} alt={rt.tipo} className="w-full h-full object-cover" />
+                          </div>
+                          <div className="flex-1 p-4 sm:p-5 flex flex-col justify-between">
+                            <div>
+                              <h3 className="font-bold text-gray-800 text-lg flex items-center gap-2"><Icon className="w-5 h-5 text-amber-600" /> {rt.tipo}</h3>
+                              <p className="text-sm text-gray-500 mt-1">{rt.capacidad_min}–{rt.capacidad_max} huéspedes</p>
+                              <p className="text-xs text-emerald-600 mt-1 font-medium">{rt.disponibles} disponible{rt.disponibles > 1 ? 's' : ''}</p>
+                            </div>
+
+                            {/* Plan select for this room type */}
+                            <div className="mt-3">
+                              <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Plan de Tarifa</label>
+                              <select
+                                value={selectedPlans[rt.tipo]?.codigo || ''}
+                                onChange={(e) => {
+                                  const plan = allRoomPlans[rt.tipo]?.find(p => p.codigo === e.target.value)
+                                  if (plan) {
+                                    setSelectedPlans(prev => ({ ...prev, [rt.tipo]: plan }))
+                                  }
+                                }}
+                                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl bg-white text-gray-700 focus:ring-2 focus:ring-amber-400"
+                              >
+                                {allRoomPlans[rt.tipo]?.map(p => (
+                                  <option key={p.codigo} value={p.codigo}>
+                                    {p.nombre} (${p.precio_adulto_noche}/{categoria === 'Pasadía' ? 'persona' : 'noche'})
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            {/* Sleek quantity selector */}
+                            <div className="flex items-center gap-3 mt-4 pt-3 border-t border-gray-100">
+                              <button
+                                onClick={() => handleDecrement(rt)}
+                                disabled={currentQty === 0 || loading}
+                                className="w-8 h-8 rounded-full border border-gray-200 hover:border-amber-500 flex items-center justify-center font-bold text-gray-500 hover:text-amber-700 disabled:opacity-30 transition"
+                              >
+                                -
+                              </button>
+                              <span className="font-bold text-gray-800 text-sm w-6 text-center">
+                                {currentQty}
+                              </span>
+                              <button
+                                onClick={() => handleIncrement(rt)}
+                                disabled={currentQty >= rt.disponibles || loading}
+                                className="w-8 h-8 rounded-full border border-gray-200 hover:border-amber-500 flex items-center justify-center font-bold text-gray-500 hover:text-amber-700 disabled:opacity-30 transition"
+                              >
+                                +
+                              </button>
+                              <span className="text-xs text-gray-400 ml-auto">
+                                ({rt.disponibles} disponibles)
+                              </span>
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  )
-                })}
+                    )
+                  })}
+                </div>
+                <button onClick={() => setStep(1)} className="mt-5 text-sm text-amber-700 hover:text-amber-900 font-medium flex items-center gap-1"><ArrowLeft className="w-4 h-4" /> Cambiar fechas</button>
               </div>
-              <button onClick={() => setStep(1)} className="mt-5 text-sm text-amber-700 hover:text-amber-900 font-medium flex items-center gap-1"><ArrowLeft className="w-4 h-4" /> Cambiar fechas</button>
             </div>
-          </div>
-        )}
+          )
+        })()}
 
         {/* STEP 3: Guest Room Allocation Console */}
         {step === 3 && (
@@ -846,18 +1132,20 @@ export default function BookingWidget() {
           <div className="space-y-5 animate-fadeIn">
             {/* Photo + Summary Card */}
             <div className="bg-white rounded-3xl shadow-xl overflow-hidden border border-amber-100/50">
-              {planImage && (
+            {planImage && (
                 <div className="h-48 sm:h-56 overflow-hidden relative">
                   <img src={planImage} alt="Casa Mahana" className="w-full h-full object-cover" />
                   <div className="absolute inset-0" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.6), transparent 60%)' }} />
                   <div className="absolute bottom-4 left-5 text-white">
                     <h3 className="text-xl font-bold">Resumen de tu reserva</h3>
-                    <p className="text-white/70 text-sm">{cart.length} habitación/es · {noches} noche{noches > 1 ? 's' : ''}</p>
+                    <p className="text-white/70 text-sm">
+                      {cart.length} {categoria === 'Pasadía' ? 'Bohío/s' : 'habitación/es'} · {categoria === 'Pasadía' ? 'Pasadía por el día' : `${noches} noche${noches > 1 ? 's' : ''}`}
+                    </p>
                   </div>
                 </div>
               )}
               <div className="p-6">
-                <h2 className="text-lg font-bold text-gray-800 mb-4">Habitaciones Seleccionadas</h2>
+                <h2 className="text-lg font-bold text-gray-800 mb-4">{categoria === 'Pasadía' ? 'Bohíos Seleccionados' : 'Habitaciones Seleccionadas'}</h2>
                 <div className="space-y-3 mb-6">
                   {cart.map((item) => (
                     <div key={item.id} className="flex justify-between items-start bg-gray-50/70 p-4 rounded-2xl border border-gray-100 text-xs">
@@ -871,7 +1159,7 @@ export default function BookingWidget() {
                       </div>
                       <div className="text-right">
                         <span className="font-bold text-amber-800 text-sm block">${item.monto_total.toFixed(2)}</span>
-                        <span className="text-[10px] text-gray-400">Total habitación</span>
+                        <span className="text-[10px] text-gray-400">{categoria === 'Pasadía' ? 'Total Bohío' : 'Total habitación'}</span>
                       </div>
                     </div>
                   ))}
@@ -879,8 +1167,14 @@ export default function BookingWidget() {
 
                 <h2 className="text-lg font-bold text-gray-800 mb-4">Resumen financiero</h2>
                 <div className="rounded-2xl p-4 space-y-2.5 text-sm" style={{ background: 'linear-gradient(135deg, #fffbeb, #fef3c7)' }}>
-                  <div className="flex justify-between"><span className="text-gray-500 flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5" /> Fechas</span><span className="font-semibold text-gray-700">{checkIn} — {checkOut}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500 flex items-center gap-1.5"><Users className="w-3.5 h-3.5" /> Habitaciones</span><span className="font-semibold text-gray-700">{cart.length}</span></div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500 flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5" /> {categoria === 'Pasadía' ? 'Fecha de Visita' : 'Fechas'}</span>
+                    <span className="font-semibold text-gray-700">{categoria === 'Pasadía' ? checkIn : `${checkIn} — ${checkOut}`}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500 flex items-center gap-1.5"><Users className="w-3.5 h-3.5" /> {categoria === 'Pasadía' ? 'Bohíos' : 'Habitaciones'}</span>
+                    <span className="font-semibold text-gray-700">{cart.length}</span>
+                  </div>
                   <hr className="border-amber-200/50" />
                   <div className="flex justify-between"><span className="text-gray-500">Subtotal</span><span className="font-semibold text-gray-700">${totalSubtotal.toFixed(2)}</span></div>
                   <div className="flex justify-between"><span className="text-gray-500">Impuesto (7%)</span><span className="font-semibold text-gray-700">${totalImpuesto.toFixed(2)}</span></div>
@@ -1004,7 +1298,7 @@ export default function BookingWidget() {
                   </div>
                   {paypalConfig.paypal_enabled && paypalConfig.paypal_client_id ? (
                     <PayPalButtons clientId={paypalConfig.paypal_client_id} mode={paypalConfig.paypal_mode}
-                      monto={montoPagar} descripcion={`Casa Mahana - Reserva de ${cart.length} habitaciones (${noches} noches)`}
+                      monto={montoPagar} descripcion={`Casa Mahana - Reserva de ${cart.length} habitaciones (${categoria === 'Pasadía' ? 'Pasadía' : `${noches} noches`})`}
                       onSuccess={(orderId) => createReservation(orderId)}
                       onError={(msg) => setError(msg)} />
                   ) : (

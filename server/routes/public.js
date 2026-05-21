@@ -42,17 +42,36 @@ router.get('/tipo-fotos', (req, res) => {
 router.get('/disponibilidad', (req, res) => {
   try {
     const { check_in, check_out } = req.query;
+    const categoria = req.query.categoria || 'Estadía';
+    
     if (!check_in || !check_out) return err(res, 'VALIDATION_ERROR', 'check_in y check_out requeridos');
-    if (check_out <= check_in) return err(res, 'VALIDATION_ERROR', 'check_out debe ser posterior a check_in');
+    
+    if (categoria === 'Pasadía') {
+      if (check_out < check_in) return err(res, 'VALIDATION_ERROR', 'check_out no puede ser anterior a check_in');
+    } else {
+      if (check_out <= check_in) return err(res, 'VALIDATION_ERROR', 'check_out debe ser posterior a check_in');
+    }
+    
     const db = getDb();
-    // Get all active rooms
-    const rooms = db.prepare("SELECT id, tipo, categoria, capacidad_min, capacidad_max FROM habitaciones WHERE activa = 1 AND categoria = 'Estadía'").all();
-    // Get conflicting reservations (including Por Aprobar which block rooms)
-    const conflicts = db.prepare(`
-      SELECT habitacion_id FROM reservas_hotel
-      WHERE estado NOT IN ('Cancelada', 'No-Show', 'Check-Out')
-        AND check_in < ? AND check_out > ?
-    `).all(check_out, check_in).map(r => r.habitacion_id);
+    // Get all active rooms filtering by category
+    const rooms = db.prepare("SELECT id, tipo, categoria, capacidad_min, capacidad_max FROM habitaciones WHERE activa = 1 AND categoria = ?").all(categoria);
+    
+    // Get conflicting reservations depending on category
+    let conflicts;
+    if (categoria === 'Pasadía') {
+      conflicts = db.prepare(`
+        SELECT habitacion_id FROM reservas_hotel
+        WHERE estado NOT IN ('Cancelada', 'No-Show', 'Check-Out')
+          AND check_in <= ? AND check_out >= ?
+      `).all(check_out, check_in).map(r => r.habitacion_id);
+    } else {
+      conflicts = db.prepare(`
+        SELECT habitacion_id FROM reservas_hotel
+        WHERE estado NOT IN ('Cancelada', 'No-Show', 'Check-Out')
+          AND check_in < ? AND check_out > ?
+      `).all(check_out, check_in).map(r => r.habitacion_id);
+    }
+    
     // Group by type
     const types = {};
     for (const room of rooms) {
@@ -187,12 +206,23 @@ router.post('/reservar', (req, res) => {
     if (!tipo_habitacion) missing.push('tipo_habitacion');
     if (!plan_codigo) missing.push('plan_codigo');
     if (missing.length) return err(res, 'VALIDATION_ERROR', `Campos requeridos: ${missing.join(', ')}`);
-    if (check_out <= check_in) return err(res, 'VALIDATION_ERROR', 'Check-out debe ser posterior a check_in');
-
-    const todayStr = new Date().toISOString().split('T')[0];
-    if (check_in < todayStr) return err(res, 'VALIDATION_ERROR', 'No se puede reservar en fechas pasadas');
 
     const db = getDb();
+    
+    // Find rooms of the requested type to determine category
+    const rooms = db.prepare("SELECT id, categoria FROM habitaciones WHERE tipo = ? AND activa = 1").all(tipo_habitacion);
+    if (rooms.length === 0) return err(res, 'NOT_FOUND', 'Tipo de habitación no encontrado');
+    const isPasadia = rooms[0].categoria === 'Pasadía';
+
+    if (isPasadia) {
+      if (check_out < check_in) return err(res, 'VALIDATION_ERROR', 'Check-out no puede ser anterior a check_in');
+    } else {
+      if (check_out <= check_in) return err(res, 'VALIDATION_ERROR', 'Check-out debe ser posterior a check_in');
+    }
+
+    const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Panama' });
+    if (check_in < todayStr) return err(res, 'VALIDATION_ERROR', 'No se puede reservar en fechas pasadas');
+
     const plan = db.prepare('SELECT * FROM planes_tarifa WHERE codigo = ? AND activo = 1 AND visible_web = 1').get(plan_codigo);
     if (!plan) return err(res, 'NOT_FOUND', 'Plan no disponible');
 
@@ -210,13 +240,19 @@ router.post('/reservar', (req, res) => {
       }
     }
 
-    // Find an available room of the requested type
-    const rooms = db.prepare("SELECT id FROM habitaciones WHERE tipo = ? AND activa = 1 AND categoria = 'Estadía'").all(tipo_habitacion);
-    const conflicts = db.prepare(`
-      SELECT habitacion_id FROM reservas_hotel
-      WHERE estado NOT IN ('Cancelada', 'No-Show', 'Check-Out')
-        AND check_in < ? AND check_out > ?
-    `).all(check_out, check_in).map(r => r.habitacion_id);
+    // Find conflicting reservations in DB depending on category
+    const conflicts = isPasadia
+      ? db.prepare(`
+          SELECT habitacion_id FROM reservas_hotel
+          WHERE estado NOT IN ('Cancelada', 'No-Show', 'Check-Out')
+            AND check_in <= ? AND check_out >= ?
+        `).all(check_out, check_in).map(r => r.habitacion_id)
+      : db.prepare(`
+          SELECT habitacion_id FROM reservas_hotel
+          WHERE estado NOT IN ('Cancelada', 'No-Show', 'Check-Out')
+            AND check_in < ? AND check_out > ?
+        `).all(check_out, check_in).map(r => r.habitacion_id);
+
     const availableRoom = rooms.find(r => !conflicts.includes(r.id));
     if (!availableRoom) return err(res, 'NO_AVAILABILITY', 'No hay habitaciones disponibles para esas fechas');
 
@@ -357,18 +393,30 @@ router.post('/reservas/multi', upload.single('comprobante'), validateUploadSigna
       const menores = roomReq.menores !== undefined ? +roomReq.menores : 0;
       const mascotas = roomReq.mascotas !== undefined ? +roomReq.mascotas : 0;
 
-      if (!check_in || !check_out) {
-        throw new Error(`check_in y check_out son requeridos para la habitación en el índice ${index}`);
-      }
-      if (check_out <= check_in) {
-        throw new Error(`check_out debe ser posterior a check_in para la habitación en el índice ${index}`);
-      }
-      const todayStr = new Date().toISOString().split('T')[0];
-      if (check_in < todayStr) {
-        throw new Error(`No se puede reservar en fechas pasadas para la habitación en el índice ${index}`);
-      }
       if (!tipo_habitacion) {
         throw new Error(`tipo_habitacion es requerido para la habitación en el índice ${index}`);
+      }
+      
+      const activeRooms = db.prepare("SELECT id, categoria FROM habitaciones WHERE tipo = ? AND activa = 1").all(tipo_habitacion);
+      if (activeRooms.length === 0) {
+        throw new Error(`Tipo de habitación ${tipo_habitacion} no encontrado para la habitación en el índice ${index}`);
+      }
+      
+      const isPasadia = activeRooms[0].categoria === 'Pasadía';
+
+      if (isPasadia) {
+        if (check_out < check_in) {
+          throw new Error(`check_out no puede ser anterior a check_in para la habitación en el índice ${index}`);
+        }
+      } else {
+        if (check_out <= check_in) {
+          throw new Error(`check_out debe ser posterior a check_in para la habitación en el índice ${index}`);
+        }
+      }
+      
+      const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Panama' });
+      if (check_in < todayStr) {
+        throw new Error(`No se puede reservar en fechas pasadas para la habitación en el índice ${index}`);
       }
       if (!plan_codigo) {
         throw new Error(`plan_codigo es requerido para la habitación en el índice ${index}`);
@@ -393,15 +441,18 @@ router.post('/reservas/multi', upload.single('comprobante'), validateUploadSigna
         }
       }
 
-      // Find an available room of the requested type
-      const activeRooms = db.prepare("SELECT id FROM habitaciones WHERE tipo = ? AND activa = 1 AND categoria = 'Estadía'").all(tipo_habitacion);
-      
-      // Find conflicting reservations in DB
-      const conflicts = db.prepare(`
-        SELECT habitacion_id FROM reservas_hotel
-        WHERE estado NOT IN ('Cancelada', 'No-Show', 'Check-Out')
-          AND check_in < ? AND check_out > ?
-      `).all(check_out, check_in).map(r => r.habitacion_id);
+      // Find conflicting reservations in DB depending on category
+      const conflicts = isPasadia
+        ? db.prepare(`
+            SELECT habitacion_id FROM reservas_hotel
+            WHERE estado NOT IN ('Cancelada', 'No-Show', 'Check-Out')
+              AND check_in <= ? AND check_out >= ?
+          `).all(check_out, check_in).map(r => r.habitacion_id)
+        : db.prepare(`
+            SELECT habitacion_id FROM reservas_hotel
+            WHERE estado NOT IN ('Cancelada', 'No-Show', 'Check-Out')
+              AND check_in < ? AND check_out > ?
+          `).all(check_out, check_in).map(r => r.habitacion_id);
 
       // Also filter out any rooms already booked inside THIS multi-room transaction
       const availableRoom = activeRooms.find(r => !conflicts.includes(r.id) && !bookedRoomIdsThisRequest.includes(r.id));
