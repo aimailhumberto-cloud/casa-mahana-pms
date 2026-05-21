@@ -340,7 +340,7 @@ export default function BookingWidget() {
               <div>
                 <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5"><Users className="w-3.5 h-3.5 inline mr-1" />Adultos</label>
                 <select value={adultos} onChange={e => setAdultos(+e.target.value)} className="w-full px-4 py-3.5 rounded-xl border border-gray-200 bg-gray-50/50 focus:ring-2 focus:ring-amber-400 text-gray-700">
-                  {[1,2,3,4,5,6].map(n => <option key={n} value={n}>{n} adulto{n > 1 ? 's' : ''}</option>)}
+                  {Array.from({ length: 30 }, (_, i) => i + 1).map(n => <option key={n} value={n}>{n} adulto{n > 1 ? 's' : ''}</option>)}
                 </select>
               </div>
               <div>
@@ -502,7 +502,7 @@ export default function BookingWidget() {
                             onChange={e => setCartItemAdults(+e.target.value)}
                             className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs bg-white text-gray-700 font-semibold"
                           >
-                            {[1,2,3,4,5,6].map(n => <option key={n} value={n}>{n}</option>)}
+                            {Array.from({ length: 30 }, (_, i) => i + 1).map(n => <option key={n} value={n}>{n}</option>)}
                           </select>
                         </div>
                         <div>

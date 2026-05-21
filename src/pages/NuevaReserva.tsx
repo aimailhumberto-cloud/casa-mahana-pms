@@ -144,7 +144,7 @@ export default function NuevaReserva() {
 
   // Filter plans by category
   const filteredPlanes = useMemo(() => {
-    return planes.filter(p => p.categoria === categoria && p.visible_web === 1);
+    return planes.filter(p => p.categoria === categoria && p.activo === 1);
   }, [planes, categoria]);
 
   // When category changes, reset form selections
@@ -293,7 +293,7 @@ export default function NuevaReserva() {
         });
 
         // Fetch alternative quotes for other plans for group
-        const otherPlanes = filteredPlanes.filter(p => p.codigo !== form.plan_codigo);
+        const otherPlanes = filteredPlanes.filter(p => p.codigo !== form.plan_codigo && p.visible_web === 1);
         const altGroupPromises = otherPlanes.map(p => {
           const subPromises = selectedGroupRooms.map(roomId => {
             const config = roomConfigs[roomId] || {};
@@ -344,7 +344,7 @@ export default function NuevaReserva() {
           }).catch(() => setCotizacion(null));
 
         // Fetch alternative quotes for other plans for single reservation
-        const otherPlanes = filteredPlanes.filter(p => p.codigo !== form.plan_codigo);
+        const otherPlanes = filteredPlanes.filter(p => p.codigo !== form.plan_codigo && p.visible_web === 1);
         const altPromises = otherPlanes.map(p => {
           return api.get(`/hotel/cotizar?plan=${p.codigo}&adultos=${guests}&menores=${form.menores}&mascotas=${form.mascotas}&check_in=${form.check_in}&check_out=${form.check_out}`)
             .then(res => {
@@ -558,7 +558,7 @@ export default function NuevaReserva() {
     if (form.mascotas > 0) huespedesStr += `, ${form.mascotas} Mascota${form.mascotas > 1 ? 's' : ''}`;
 
     let altRatesStr = '';
-    const altPlanesList = filteredPlanes.filter(p => p.codigo !== form.plan_codigo);
+    const altPlanesList = filteredPlanes.filter(p => p.codigo !== form.plan_codigo && p.visible_web === 1);
     if (altPlanesList.length > 0) {
       altRatesStr = '\n✨ *Tarifas Alternativas:*\n' + altPlanesList.map(p => {
         const rate = alternativeQuotes[p.codigo];
@@ -1348,7 +1348,7 @@ ${altRatesStr}
               <div className="mt-4 pt-3 border-t border-gray-200/50">
                 <div className="text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wider">Tarifas en otros planes:</div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                  {filteredPlanes.filter(p => p.codigo !== form.plan_codigo).map(p => {
+                  {filteredPlanes.filter(p => p.codigo !== form.plan_codigo && p.visible_web === 1).map(p => {
                     const rate = alternativeQuotes[p.codigo];
                     if (rate === undefined) return null;
                     return (
