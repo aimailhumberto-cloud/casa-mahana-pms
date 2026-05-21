@@ -144,6 +144,12 @@ export default function Configuracion({ user }: { user: User }) {
   const [paypalSecret, setPaypalSecret] = useState('');
   const [paypalMode, setPaypalMode] = useState<'sandbox' | 'live'>('sandbox');
   const [showPaypalSecret, setShowPaypalSecret] = useState(false);
+
+  // Kommo CRM integration config
+  const [kommoApiToken, setKommoApiToken] = useState('');
+  const [kommoSubdomain, setKommoSubdomain] = useState('');
+  const [kommoEnabled, setKommoEnabled] = useState(false);
+  const [showKommoToken, setShowKommoToken] = useState(false);
   
   const [loadingHotelConfig, setLoadingHotelConfig] = useState(false);
   const [savingHotelConfig, setSavingHotelConfig] = useState(false);
@@ -164,6 +170,9 @@ export default function Configuracion({ user }: { user: User }) {
           setPaypalClientId(c.paypal_client_id || '');
           setPaypalSecret(c.paypal_secret || '');
           setPaypalMode(c.paypal_mode || 'sandbox');
+          setKommoApiToken(c.kommo_api_token || '');
+          setKommoSubdomain(c.kommo_subdomain || '');
+          setKommoEnabled(c.kommo_enabled === '1' || c.kommo_enabled === 1 || c.kommo_enabled === true);
         }
       })
       .catch((err) => {
@@ -210,11 +219,14 @@ export default function Configuracion({ user }: { user: User }) {
         deposito_sugerido_pct: deposit,
         paypal_client_id: paypalClientId ? paypalClientId.trim() : null,
         paypal_secret: paypalSecret ? paypalSecret.trim() : null,
-        paypal_mode: paypalMode
+        paypal_mode: paypalMode,
+        kommo_api_token: kommoApiToken ? kommoApiToken.trim() : null,
+        kommo_subdomain: kommoSubdomain ? kommoSubdomain.trim() : null,
+        kommo_enabled: kommoEnabled ? 1 : 0
       };
       
       await api.put('/admin/configuracion/hotel', payload);
-      setHotelConfigSuccessMsg('Configuración de la propiedad y pasarela guardada exitosamente.');
+      setHotelConfigSuccessMsg('Configuración de la propiedad, pasarela e integración guardada exitosamente.');
       loadHotelConfig();
     } catch (err: any) {
       setHotelConfigErrorMsg(err.response?.data?.error?.message || 'Error al guardar la configuración de hotel');
@@ -1405,6 +1417,90 @@ export default function Configuracion({ user }: { user: User }) {
                       Copia el **Client ID** y presiona **"Show"** bajo *Secret Key* para copiar la clave secreta. Pégalas en los campos superiores y guarda la configuración.
                     </li>
                   </ol>
+                </div>
+
+                {/* 🤖 Kommo CRM Integration Card */}
+                <div className="bg-gradient-to-br from-purple-50/50 via-white to-purple-50/30 border border-purple-100 rounded-2xl p-6 mt-6 space-y-6 shadow-xs">
+                  <div className="flex items-center justify-between border-b border-purple-100/60 pb-3">
+                    <div className="flex items-center gap-2">
+                      <MessageSquare className="text-purple-600" size={20} />
+                      <div>
+                        <h3 className="font-bold text-gray-800 text-sm font-sans">
+                          🤖 Integración con Kommo CRM (amoCRM)
+                        </h3>
+                        <p className="text-xs text-gray-500 font-sans mt-0.5">
+                          Sincroniza y automatiza tus consultas de disponibilidad y el envío de cotizaciones directas a WhatsApp.
+                        </p>
+                      </div>
+                    </div>
+
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        disabled={!isAdmin}
+                        checked={kommoEnabled}
+                        onChange={e => setKommoEnabled(e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-500"></div>
+                      <span className="ml-2 text-xs font-semibold text-purple-700 font-sans">
+                        {kommoEnabled ? 'Habilitado' : 'Deshabilitado'}
+                      </span>
+                    </label>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1 font-sans">
+                        Subdominio de Kommo
+                      </label>
+                      <input
+                        type="text"
+                        disabled={!isAdmin}
+                        value={kommoSubdomain}
+                        onChange={e => setKommoSubdomain(e.target.value)}
+                        className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-purple-400 focus:border-transparent outline-none transition text-sm disabled:bg-gray-50 disabled:text-gray-400 font-sans"
+                        placeholder="Ej: casamahana (sin https:// ni .kommo.com)"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1 font-sans">
+                        Token de Acceso de Larga Duración
+                      </label>
+                      <div className="relative">
+                        <input
+                          type={showKommoToken ? 'text' : 'password'}
+                          disabled={!isAdmin}
+                          value={kommoApiToken}
+                          onChange={e => setKommoApiToken(e.target.value)}
+                          className="w-full pl-4 pr-10 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-purple-400 focus:border-transparent outline-none transition text-sm disabled:bg-gray-50 disabled:text-gray-400 font-sans font-mono"
+                          placeholder="••••••••••••••••••••••••••••••••"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowKommoToken(!showKommoToken)}
+                          className="absolute right-3 top-3.5 text-gray-400 hover:text-gray-600 outline-none"
+                        >
+                          <Eye size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Guide and webhook card */}
+                  <div className="bg-white/80 border border-purple-100 rounded-xl p-4 space-y-3">
+                    <div className="flex items-center gap-1.5 text-purple-800 text-xs font-bold font-sans">
+                      <HelpCircle size={14} />
+                      <span>¿Cómo funciona el webhook de automatización?</span>
+                    </div>
+                    <p className="text-[11px] text-gray-500 leading-relaxed font-sans">
+                      Para automatizar tu CRM, puedes configurar tu Salesbot de Kommo para realizar una petición Webhook tipo <strong>GET</strong> a nuestro endpoint público. Copia y pega la siguiente URL en tu Salesbot:
+                    </p>
+                    <div className="bg-gray-50 p-2.5 rounded-lg border border-gray-150 font-mono text-[10px] text-purple-700 break-all select-all flex items-center justify-between">
+                      <span>https://casa-mahana-pms.onrender.com/api/v1/public/integrations/kommo?lead_id=&#123;&#123;lead.id&#125;&#125;</span>
+                    </div>
+                  </div>
                 </div>
               </div>
 
