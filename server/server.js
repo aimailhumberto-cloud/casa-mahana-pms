@@ -51,6 +51,7 @@ const webRouter = require('./routes/webhooks');
 const adminRouter = require('./routes/admin');
 const publicRouter = require('./routes/public');
 const hotelRouter = require('./routes/hotel');
+const integrationsRouter = require('./routes/integrations');
 
 // ── Mount Routes ──
 app.use('/api/v1/auth', authRouter);
@@ -59,6 +60,7 @@ app.use('/api/v1/api-keys', apiRouter);
 app.use('/api/v1/webhooks', webRouter);
 app.use('/api/v1/admin', adminRouter);
 app.use('/api/v1/public', publicRouter);
+app.use('/api/v1/public/integrations', integrationsRouter);
 app.use('/api/v1', hotelRouter); // serves /hotel/* and /reportes/*
 
 // ── Health Check ──

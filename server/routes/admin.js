@@ -617,7 +617,7 @@ router.get('/configuracion/hotel', requireAuth, requireRole('admin'), (req, res)
     const rows = db.prepare('SELECT clave, valor, descripcion FROM config_hotel').all();
     const config = {};
     for (const r of rows) {
-      if (r.clave === 'paypal_secret' && r.valor) {
+      if ((r.clave === 'paypal_secret' || r.clave === 'kommo_api_token') && r.valor) {
         config[r.clave] = '******';
       } else {
         config[r.clave] = r.valor;
@@ -641,7 +641,10 @@ router.put('/configuracion/hotel', requireAuth, requireRole('admin'), (req, res)
       'moneda',
       'paypal_client_id',
       'paypal_secret',
-      'paypal_mode'
+      'paypal_mode',
+      'kommo_api_token',
+      'kommo_subdomain',
+      'kommo_enabled'
     ];
     
     // Validations
@@ -667,8 +670,8 @@ router.put('/configuracion/hotel', requireAuth, requireRole('admin'), (req, res)
       for (const key of allowed) {
         if (req.body[key] !== undefined) {
           const val = req.body[key] === null ? '' : String(req.body[key]).trim();
-          // Skip updating paypal_secret if it is the masked placeholder
-          if (key === 'paypal_secret' && val === '******') {
+          // Skip updating paypal_secret or kommo_api_token if it is the masked placeholder
+          if ((key === 'paypal_secret' || key === 'kommo_api_token') && val === '******') {
             continue;
           }
           db.prepare(`
@@ -684,7 +687,7 @@ router.put('/configuracion/hotel', requireAuth, requireRole('admin'), (req, res)
     const rows = db.prepare('SELECT clave, valor FROM config_hotel').all();
     const config = {};
     for (const r of rows) {
-      if (r.clave === 'paypal_secret' && r.valor) {
+      if ((r.clave === 'paypal_secret' || r.clave === 'kommo_api_token') && r.valor) {
         config[r.clave] = '******';
       } else {
         config[r.clave] = r.valor;
