@@ -1,0 +1,5 @@
+## 2026-05-21T16:26:00Z
+Perform a comprehensive code audit of the following files:
+1. `server/utils/calculations.js` - Locate `calcReservation` and `calcReservationWithRates`. Identify how adult rate calculations are done, why they are currently flat room/stay based, and design a fix to make them strictly per-person (adults * price per night).
+2. `src/pages/NuevaReserva.tsx` - Find where subsequent rooms in a group booking inherit guest counts (specifically minors) from the primary search form, and design a fix to default subsequent rooms' guest counts (adults, minors, pets) to 0, ensuring only the primary/first room initializes from the search.
+3. `src/pages/ReservaDetalle.tsx` - Locate the Folio summary and the "Registrar Pago" button. Design a clean, stylish glassmorphic "➕ Persona Extra" button and the collapsable card form matching the requirements (purple `bg-purple-50`, defaults to $25/night, calculates total amount as price * nights, allows adjusting details, and submits to POST `/hotel/reservas/:id/folio`).

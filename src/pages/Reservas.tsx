@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import { api } from '../api/client';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Search, MoreHorizontal } from 'lucide-react';
@@ -22,6 +22,40 @@ export default function Reservas() {
   const [filtroCliente, setFiltroCliente] = useState('');
   const [filtroCategoria, setFiltroCategoria] = useState('');
   const [userRole, setUserRole] = useState('receptionist');
+
+  // Sorting States
+  const [sortField, setSortField] = useState<'id' | 'check_in' | 'check_out' | 'monto_total' | 'cliente'>('check_in');
+  const [sortAsc, setSortAsc] = useState<boolean>(false);
+
+  // Grouping States
+  const [groupBy, setGroupBy] = useState<'none' | 'mes' | 'estado' | 'categoria'>('none');
+
+  const getMesAnio = (dateStr: string) => {
+    if (!dateStr) return 'Sin fecha';
+    const parts = dateStr.split('-');
+    if (parts.length < 2) return 'Sin fecha';
+    const meses = [
+      'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+      'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+    ];
+    const mesIndex = parseInt(parts[1]) - 1;
+    if (mesIndex < 0 || mesIndex > 11) return 'Sin fecha';
+    return `${meses[mesIndex]} ${parts[0]}`;
+  };
+
+  const toggleSort = (field: 'id' | 'check_in' | 'check_out' | 'monto_total' | 'cliente') => {
+    if (sortField === field) {
+      setSortAsc(!sortAsc);
+    } else {
+      setSortField(field);
+      setSortAsc(field === 'check_in' || field === 'check_out' ? true : false);
+    }
+  };
+
+  const renderSortIndicator = (field: string) => {
+    if (sortField !== field) return null;
+    return sortAsc ? ' ▲' : ' ▼';
+  };
 
   // Quick Payment Modal States
   const [quickPayReservaId, setQuickPayReservaId] = useState<number | null>(null);
@@ -63,9 +97,18 @@ export default function Reservas() {
   const load = () => {
     setLoading(true);
     let q = '/hotel/reservas?limit=100';
-    if (filtroEstado) q += `&estado=${filtroEstado}`;
+    const apiEstado = (filtroEstado === 'Rechazada' || filtroEstado === 'Cancelada') ? 'Cancelada' : filtroEstado;
+    if (apiEstado) q += `&estado=${apiEstado}`;
     if (filtroCliente) q += `&cliente=${filtroCliente}`;
-    api.get(q).then(r => setReservas(r.data)).finally(() => setLoading(false));
+    api.get(q).then(r => {
+      let data = Array.isArray(r.data) ? r.data : [];
+      if (filtroEstado === 'Rechazada') {
+        data = data.filter((res: any) => res.fuente && res.fuente.toLowerCase().includes('web'));
+      } else if (filtroEstado === 'Cancelada') {
+        data = data.filter((res: any) => !res.fuente || !res.fuente.toLowerCase().includes('web'));
+      }
+      setReservas(data);
+    }).catch(e => console.error(e)).finally(() => setLoading(false));
   };
 
   useEffect(() => { load(); }, [filtroEstado]);
@@ -132,6 +175,23 @@ export default function Reservas() {
     ? reservas.filter(r => r.categoria_habitacion === filtroCategoria)
     : reservas;
 
+  const sortedReservas = [...filteredReservas].sort((a: any, b: any) => {
+    let aVal = a[sortField];
+    let bVal = b[sortField];
+    
+    if (sortField === 'cliente') {
+      aVal = `${a.cliente || ''} ${a.apellido || ''}`.trim().toLowerCase();
+      bVal = `${b.cliente || ''} ${b.apellido || ''}`.trim().toLowerCase();
+    } else if (typeof aVal === 'string') {
+      aVal = aVal.toLowerCase();
+      bVal = bVal.toLowerCase();
+    }
+    
+    if (aVal < bVal) return sortAsc ? -1 : 1;
+    if (aVal > bVal) return sortAsc ? 1 : -1;
+    return 0;
+  });
+
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
@@ -173,6 +233,7 @@ export default function Reservas() {
           <option value="Confirmada">Confirmada</option>
           <option value="Hospedado">Hospedado</option>
           <option value="Check-Out">Check-Out</option>
+          <option value="Rechazada">Rechazada</option>
           <option value="Cancelada">Cancelada</option>
           <option value="No-Show">No-Show</option>
         </select>
@@ -182,78 +243,173 @@ export default function Reservas() {
           <button onClick={() => setFiltroCategoria('Estadía')} className={`px-3 py-2 text-xs rounded-lg font-medium transition ${filtroCategoria === 'Estadía' ? 'bg-ocean-500 text-white' : 'bg-ocean-50 text-ocean-700 hover:bg-ocean-100'}`}>🏨 Estadía</button>
           <button onClick={() => setFiltroCategoria('Pasadía')} className={`px-3 py-2 text-xs rounded-lg font-medium transition ${filtroCategoria === 'Pasadía' ? 'bg-amber-500 text-white' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`}>☀️ Pasadía</button>
         </div>
+        {/* Grouping Selector */}
+        <div className="flex items-center gap-1 border-l border-gray-200 pl-3">
+          <span className="text-xs font-semibold text-gray-400 mr-1">Agrupar:</span>
+          <button onClick={() => setGroupBy('none')} className={`px-2.5 py-2 text-xs rounded-lg font-medium transition ${groupBy === 'none' ? 'bg-gray-800 text-white' : 'bg-gray-105 text-gray-600 hover:bg-gray-200'}`}>Ninguno</button>
+          <button onClick={() => setGroupBy('mes')} className={`px-2.5 py-2 text-xs rounded-lg font-medium transition ${groupBy === 'mes' ? 'bg-ocean-600 text-white' : 'bg-ocean-50 text-ocean-700 hover:bg-ocean-100'}`}>📅 Mes</button>
+          <button onClick={() => setGroupBy('estado')} className={`px-2.5 py-2 text-xs rounded-lg font-medium transition ${groupBy === 'estado' ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'}`}>🏷️ Estado</button>
+          <button onClick={() => setGroupBy('categoria')} className={`px-2.5 py-2 text-xs rounded-lg font-medium transition ${groupBy === 'categoria' ? 'bg-amber-600 text-white' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`}>🏨 Cat</button>
+        </div>
         <button onClick={load} className="px-4 py-2.5 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 text-sm font-medium">Buscar</button>
       </div>
 
       {/* Table */}
       {loading ? <div className="animate-pulse text-gray-400 p-8">Cargando...</div> : (
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-          {filteredReservas.length === 0 ? (
+          {sortedReservas.length === 0 ? (
             <div className="p-12 text-center text-gray-400">No hay reservas</div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 text-gray-500 uppercase text-xs">
                   <tr>
-                    <th className="px-4 py-3 text-left">ID</th>
-                    <th className="px-4 py-3 text-left">Cliente</th>
+                    <th className="px-4 py-3 text-left cursor-pointer hover:bg-gray-100 select-none transition" onClick={() => toggleSort('id')}>ID{renderSortIndicator('id')}</th>
+                    <th className="px-4 py-3 text-left cursor-pointer hover:bg-gray-100 select-none transition" onClick={() => toggleSort('cliente')}>Cliente{renderSortIndicator('cliente')}</th>
                     <th className="px-4 py-3 text-center">Categoría</th>
                     <th className="px-4 py-3 text-left">Habitación</th>
-                    <th className="px-4 py-3 text-left">Check-in</th>
-                    <th className="px-4 py-3 text-left">Check-out</th>
+                    <th className="px-4 py-3 text-left cursor-pointer hover:bg-gray-100 select-none transition" onClick={() => toggleSort('check_in')}>Check-in{renderSortIndicator('check_in')}</th>
+                    <th className="px-4 py-3 text-left cursor-pointer hover:bg-gray-100 select-none transition" onClick={() => toggleSort('check_out')}>Check-out{renderSortIndicator('check_out')}</th>
                     <th className="px-4 py-3 text-center">Noches</th>
                     <th className="px-4 py-3 text-left">Plan</th>
-                    <th className="px-4 py-3 text-right">Total</th>
+                    <th className="px-4 py-3 text-right cursor-pointer hover:bg-gray-100 select-none transition" onClick={() => toggleSort('monto_total')}>Total{renderSortIndicator('monto_total')}</th>
                     <th className="px-4 py-3 text-right">Saldo</th>
                     <th className="px-4 py-3 text-center">Estado</th>
                     <th className="px-4 py-3 text-center">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {filteredReservas.map((r: any) => (
-                    <tr
-                      key={r.id}
-                      className="hover:bg-gray-50 cursor-pointer"
-                      onContextMenu={(e) => {
-                        handleContextMenu(e, { type: 'reserva', reserva: r });
-                      }}
-                    >
-                      <td className="px-4 py-3 text-gray-400 text-xs">{r.id}</td>
-                      <td className="px-4 py-3 font-medium">
-                        <Link to={`/reservas/${r.id}`} className="text-ocean-600 hover:underline">
-                          {r.cliente} {r.plan_nombre ? <span className="text-xs text-gray-400 ml-1">{r.plan_nombre}</span> : ''}
-                        </Link>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${r.categoria_habitacion === 'Pasadía' ? 'bg-amber-100 text-amber-700' : 'bg-ocean-100 text-ocean-700'}`}>
-                          {r.categoria_habitacion === 'Pasadía' ? '☀️' : '🏨'} {r.categoria_habitacion || 'Estadía'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-gray-500">{r.habitacion_nombre || r.tipo_habitacion || '-'}</td>
-                      <td className="px-4 py-3 text-gray-500">{r.check_in}</td>
-                      <td className="px-4 py-3 text-gray-500">{r.check_out}</td>
-                      <td className="px-4 py-3 text-center text-gray-500">{r.noches}</td>
-                      <td className="px-4 py-3 text-gray-500">{r.plan_nombre || '-'}</td>
-                      <td className="px-4 py-3 text-right font-medium">${r.monto_total?.toFixed(2)}</td>
-                      <td className={`px-4 py-3 text-right font-medium ${r.saldo_pendiente > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                        ${r.saldo_pendiente?.toFixed(2)}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${estadoColor[r.estado] || 'bg-gray-100'}`}>{r.estado}</span>
-                      </td>
-                      <td className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>
-                        <button
-                          onClick={(e) => {
+                  {(() => {
+                    if (groupBy === 'none') {
+                      return sortedReservas.map((r: any) => (
+                        <tr
+                          key={r.id}
+                          className="hover:bg-gray-50 cursor-pointer"
+                          onContextMenu={(e) => {
                             handleContextMenu(e, { type: 'reserva', reserva: r });
                           }}
-                          className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition"
-                          title="Opciones"
                         >
-                          <MoreHorizontal size={18} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                          <td className="px-4 py-3 text-gray-400 text-xs">{r.id}</td>
+                          <td className="px-4 py-3 font-medium">
+                            <Link to={`/reservas/${r.id}`} className="text-ocean-600 hover:underline">
+                              {r.cliente} {r.plan_nombre ? <span className="text-xs text-gray-400 ml-1">{r.plan_nombre}</span> : ''}
+                            </Link>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${r.categoria_habitacion === 'Pasadía' ? 'bg-amber-100 text-amber-700' : 'bg-ocean-100 text-ocean-700'}`}>
+                              {r.categoria_habitacion === 'Pasadía' ? '☀️' : '🏨'} {r.categoria_habitacion || 'Estadía'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-gray-500">{r.habitacion_nombre || r.tipo_habitacion || '-'}</td>
+                          <td className="px-4 py-3 text-gray-500">{r.check_in}</td>
+                          <td className="px-4 py-3 text-gray-500">{r.check_out}</td>
+                          <td className="px-4 py-3 text-center text-gray-500">{r.noches}</td>
+                          <td className="px-4 py-3 text-gray-500">{r.plan_nombre || '-'}</td>
+                          <td className="px-4 py-3 text-right font-medium">${r.monto_total?.toFixed(2)}</td>
+                          <td className={`px-4 py-3 text-right font-medium ${r.saldo_pendiente > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                            ${r.saldo_pendiente?.toFixed(2)}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${estadoColor[r.estado] || 'bg-gray-100'}`}>
+                              {r.estado === 'Cancelada' && r.fuente && r.fuente.toLowerCase().includes('web') ? 'Rechazada' : r.estado}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>
+                            <button
+                              onClick={(e) => {
+                                handleContextMenu(e, { type: 'reserva', reserva: r });
+                              }}
+                              className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition"
+                              title="Opciones"
+                            >
+                              <MoreHorizontal size={18} />
+                            </button>
+                          </td>
+                        </tr>
+                      ));
+                    }
+
+                    // Otherwise group them
+                    const groups: Record<string, any[]> = {};
+                    sortedReservas.forEach((r: any) => {
+                      let key = '';
+                      if (groupBy === 'mes') {
+                        key = getMesAnio(r.check_in);
+                      } else if (groupBy === 'estado') {
+                        key = r.estado === 'Cancelada' && r.fuente && r.fuente.toLowerCase().includes('web') ? 'Rechazada' : r.estado;
+                      } else if (groupBy === 'categoria') {
+                        key = r.categoria_habitacion || 'Estadía';
+                      }
+                      if (!groups[key]) groups[key] = [];
+                      groups[key].push(r);
+                    });
+
+                    // Order groups chronologically if mes is selected
+                    const groupEntries = Object.entries(groups);
+                    if (groupBy === 'mes') {
+                      groupEntries.sort((a, b) => {
+                        const dateA = a[1][0]?.check_in || '';
+                        const dateB = b[1][0]?.check_in || '';
+                        return sortAsc ? dateA.localeCompare(dateB) : dateB.localeCompare(dateA);
+                      });
+                    }
+
+                    return groupEntries.map(([groupName, items]) => (
+                      <Fragment key={groupName}>
+                        <tr className="bg-gray-50/70 select-none">
+                          <td colSpan={12} className="px-4 py-2 text-left uppercase tracking-wider font-semibold text-ocean-700 bg-ocean-50/20 text-[10px] border-y border-gray-100">
+                            {groupName} ({items.length})
+                          </td>
+                        </tr>
+                        {items.map((r: any) => (
+                          <tr
+                            key={r.id}
+                            className="hover:bg-gray-50 cursor-pointer"
+                            onContextMenu={(e) => {
+                              handleContextMenu(e, { type: 'reserva', reserva: r });
+                            }}
+                          >
+                            <td className="px-4 py-3 text-gray-400 text-xs">{r.id}</td>
+                            <td className="px-4 py-3 font-medium">
+                              <Link to={`/reservas/${r.id}`} className="text-ocean-600 hover:underline">
+                                {r.cliente} {r.plan_nombre ? <span className="text-xs text-gray-400 ml-1">{r.plan_nombre}</span> : ''}
+                              </Link>
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${r.categoria_habitacion === 'Pasadía' ? 'bg-amber-100 text-amber-700' : 'bg-ocean-100 text-ocean-700'}`}>
+                                {r.categoria_habitacion === 'Pasadía' ? '☀️' : '🏨'} {r.categoria_habitacion || 'Estadía'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-gray-500">{r.habitacion_nombre || r.tipo_habitacion || '-'}</td>
+                            <td className="px-4 py-3 text-gray-500">{r.check_in}</td>
+                            <td className="px-4 py-3 text-gray-500">{r.check_out}</td>
+                            <td className="px-4 py-3 text-center text-gray-500">{r.noches}</td>
+                            <td className="px-4 py-3 text-gray-500">{r.plan_nombre || '-'}</td>
+                            <td className="px-4 py-3 text-right font-medium">${r.monto_total?.toFixed(2)}</td>
+                            <td className={`px-4 py-3 text-right font-medium ${r.saldo_pendiente > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                              ${r.saldo_pendiente?.toFixed(2)}
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${estadoColor[r.estado] || 'bg-gray-100'}`}>
+                                {r.estado === 'Cancelada' && r.fuente && r.fuente.toLowerCase().includes('web') ? 'Rechazada' : r.estado}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>
+                              <button
+                                onClick={(e) => {
+                                  handleContextMenu(e, { type: 'reserva', reserva: r });
+                                }}
+                                className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition"
+                                title="Opciones"
+                              >
+                                <MoreHorizontal size={18} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </Fragment>
+                    ));
+                  })()}
                 </tbody>
               </table>
             </div>

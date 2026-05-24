@@ -369,7 +369,9 @@ export default function Aprobaciones() {
                     <div key={res.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-gray-50/20 transition">
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
-                          <strong className="text-gray-700 text-sm">{res.cliente} {res.apellido || ''}</strong>
+                          <Link to={`/reservas/${res.id}`} className="font-bold text-gray-700 text-sm hover:text-ocean-600 hover:underline transition">
+                            {res.cliente} {res.apellido || ''}
+                          </Link>
                           <span className="text-[10px] text-gray-400">#{res.id}</span>
                           <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold border ${
                             isApproved
@@ -383,7 +385,13 @@ export default function Aprobaciones() {
                           {res.check_in} al {res.check_out} ({res.noches} noches) · {res.habitacion_nombre || res.tipo_habitacion} · Total: <strong>${total.toFixed(2)}</strong>
                         </p>
                       </div>
-                      <div>
+                      <div className="flex items-center gap-2">
+                        <Link
+                          to={`/reservas/${res.id}`}
+                          className="px-3 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-600 rounded-xl text-xs font-semibold transition"
+                        >
+                          Ver Ficha
+                        </Link>
                         {isApproved ? (
                           <button
                             onClick={() => handleReject(res.id, res.cliente, true)}
