@@ -38,7 +38,7 @@ export default function Aprobaciones() {
           // Pendientes
           setReservas(r.data.filter((res: any) => res.estado === 'Pendiente'));
           // Historial de decisiones web (Aprobadas / Rechazadas)
-          setHistory(r.data.filter((res: any) => res.fuente === 'Web' && (res.estado === 'Confirmada' || res.estado === 'Cancelada')));
+          setHistory(r.data.filter((res: any) => res.fuente && res.fuente.toLowerCase().includes('web') && (res.estado === 'Confirmada' || res.estado === 'Cancelada')));
         }
       })
       .catch(e => console.error('Error fetching reservations:', e))
