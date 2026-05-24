@@ -94,7 +94,7 @@ function PayPalButtons({ clientId, mode, monto, descripcion, onSuccess, onError 
 // Room type icon mapping
 const roomIcons: Record<string, typeof Bed> = { 'Familiar': Bed, 'Doble': Bed, 'Estándar': Bed, 'Camping': Sun }
 const defaultRoomImages: Record<string, string> = {
-  'Familiar': 'https://images.unsplash.com/photo-1590490360182-c72a1b3c73b6?w=400&h=250&fit=crop',
+  'Familiar': '/habitacion_familiar.jpg',
   'Doble': 'https://images.unsplash.com/photo-1631049307264-da0ec9d70304?w=400&h=250&fit=crop',
   'Estándar': 'https://images.unsplash.com/photo-1584132967334-10e028bd69f7?w=400&h=250&fit=crop',
   'Camping': 'https://images.unsplash.com/photo-1504280390367-361c6d9f38f4?w=400&h=250&fit=crop',
@@ -411,8 +411,14 @@ export default function BookingWidget() {
 
     setLoading(true); setError('')
     try {
-      // Fetch or compute the cotizacion for the room using selected plan, default guest counts (adultos = 1, menores = 0, mascotas = 0)
-      const resp = await fetch(`${API}/cotizar?plan=${plan.codigo}&adultos=1&menores=0&mascotas=0&check_in=${checkIn}&check_out=${checkOut}`)
+      const isFirstItem = cart.length === 0
+      const initAdultos = isFirstItem ? Math.max(rt.capacidad_min, Math.min(adultosBuscados, rt.capacidad_max)) : rt.capacidad_min
+      const maxRemainingGuests = isFirstItem ? Math.max(0, rt.capacidad_max - initAdultos) : 0
+      const initMenores = isFirstItem ? Math.min(menoresBuscados, maxRemainingGuests) : 0
+      const initMascotas = isFirstItem ? Math.min(mascotasBuscadas, 2) : 0
+
+      // Fetch or compute the cotizacion for the room using selected plan and dynamic initial guest counts based on Step 1 criteria
+      const resp = await fetch(`${API}/cotizar?plan=${plan.codigo}&adultos=${initAdultos}&menores=${initMenores}&mascotas=${initMascotas}&check_in=${checkIn}&check_out=${checkOut}`)
       const data = await resp.json()
       if (!data.success) { setError(data.error?.message || 'Error cotizando'); return }
       
@@ -420,9 +426,9 @@ export default function BookingWidget() {
         id: `${Date.now()}-${Math.random()}`,
         tipo: rt.tipo,
         plan,
-        adultos: 1,
-        menores: 0,
-        mascotas: 0,
+        adultos: initAdultos,
+        menores: initMenores,
+        mascotas: initMascotas,
         subtotal: data.data.subtotal,
         impuesto_monto: data.data.impuesto_monto,
         monto_total: data.data.monto_total,
@@ -931,6 +937,9 @@ export default function BookingWidget() {
 
                             {/* Sleek quantity selector */}
                             <div className="flex items-center gap-3 mt-4 pt-3 border-t border-gray-100">
+                              <span className="text-xs font-bold text-amber-900 bg-amber-50 px-2 py-1 rounded-lg border border-amber-200/50">
+                                Habitaciones a reservar:
+                              </span>
                               <button
                                 onClick={() => handleDecrement(rt)}
                                 disabled={currentQty === 0 || loading}
@@ -958,6 +967,26 @@ export default function BookingWidget() {
                     )
                   })}
                 </div>
+                
+                {/* Bottom cart summary in Step 2 so users don't have to scroll back up! */}
+                {cart.length > 0 && (
+                  <div className="mt-6 p-5 bg-gradient-to-br from-amber-50 to-amber-100/40 border border-amber-200 rounded-3xl flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm animate-fadeIn">
+                    <div>
+                      <span className="text-xs text-gray-500 block">
+                        Subtotal de tu selección ({cart.length} {cart.length === 1 ? 'habitación' : 'habitaciones'})
+                      </span>
+                      <p className="text-2xl font-bold text-amber-950">${totalMontoTotal.toFixed(2)}</p>
+                    </div>
+                    <button
+                      onClick={() => setStep(3)}
+                      className="w-full sm:w-auto px-6 py-3.5 bg-gradient-to-r from-amber-700 to-amber-800 text-white font-bold rounded-2xl text-sm hover:shadow-lg transition flex items-center justify-center gap-2"
+                    >
+                      <span>Siguiente: Distribuir Huéspedes</span>
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+                
                 <button onClick={() => setStep(1)} className="mt-5 text-sm text-amber-700 hover:text-amber-900 font-medium flex items-center gap-1"><ArrowLeft className="w-4 h-4" /> Cambiar fechas</button>
               </div>
             </div>
