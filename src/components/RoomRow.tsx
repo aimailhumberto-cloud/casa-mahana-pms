@@ -52,13 +52,23 @@ function getBarStyle(reserva: any, dates: Date[]) {
   const barEnd = resEnd > viewEnd ? viewEnd : resEnd;
   const totalViewDays = dates.length;
   const startOffset = daysBetween(formatDate(viewStart), formatDate(barStart));
-  const barDays = daysBetween(formatDate(barStart), formatDate(barEnd));
+  let barDays = daysBetween(formatDate(barStart), formatDate(barEnd));
+  
+  // Same-day reservations (e.g. Pasadía) occupy exactly 1 day
+  if (barDays === 0) {
+    barDays = 1;
+  }
+  
   const left = (startOffset / totalViewDays) * 100;
   const width = (barDays / totalViewDays) * 100;
   return { left: `${left}%`, width: `${Math.min(width, 100 - left)}%` };
 }
 
 function getCheckoutIndicator(reserva: any, dates: Date[]) {
+  // Same-day reservations do not have a separate check-out day indicator
+  if (reserva.check_in === reserva.check_out) {
+    return null;
+  }
   const coDate = new Date(reserva.check_out + 'T12:00:00');
   const viewStart = dates[0];
   const viewEnd = addDays(dates[dates.length - 1], 1);
