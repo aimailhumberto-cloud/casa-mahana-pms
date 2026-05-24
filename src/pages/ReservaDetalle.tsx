@@ -173,7 +173,7 @@ export default function ReservaDetalle() {
   }, []);
 
   useEffect(() => {
-    api.get('/hotel/habitaciones')
+    api.get('/habitaciones')
       .then(r => {
         if (Array.isArray(r.data)) setRooms(r.data);
       })
