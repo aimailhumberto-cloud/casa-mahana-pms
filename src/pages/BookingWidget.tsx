@@ -4,7 +4,7 @@ import { Calendar, Users, ChevronRight, Check, CreditCard, Loader2, MapPin, Star
 const API = '/api/v1/public'
 
 type RoomType = { tipo: string; categoria: string; capacidad_min: number; capacidad_max: number; total: number; disponibles: number }
-type Plan = { id: number; codigo: string; nombre: string; descripcion: string; precio_adulto_noche: number; precio_menor_noche: number; incluye: string[]; horario: string; extras_disponibles: string[]; imagen: string | null }
+type Plan = { id: number; codigo: string; nombre: string; descripcion: string; precio_adulto_noche: number; precio_menor_noche: number; precio_mascota_noche?: number; incluye: string[]; horario: string; extras_disponibles: string[]; imagen: string | null }
 type Cotizacion = { plan: { codigo: string; nombre: string }; noches: number; subtotal: number; impuesto_pct: number; impuesto_monto: number; monto_total: number; deposito_minimo: number; deposito_pct: number; desglose: { fecha: string; dia: string; tipo_dia: string; precio_adulto: number; total_noche: number }[] }
 type RoomAllocation = { tipo: string; adultos: number; menores: number; mascotas: number }
 
@@ -1210,20 +1210,111 @@ export default function BookingWidget() {
               )}
               <div className="p-6">
                 <h2 className="text-lg font-bold text-gray-800 mb-4">{categoria === 'Pasadía' ? 'Bohíos Seleccionados' : 'Habitaciones Seleccionadas'}</h2>
-                <div className="space-y-3 mb-6">
+                <div className="space-y-4 mb-6">
                   {cart.map((item) => (
-                    <div key={item.id} className="flex justify-between items-start bg-gray-50/70 p-4 rounded-2xl border border-gray-100 text-xs">
-                      <div>
-                        <p className="font-bold text-gray-800 flex items-center gap-1.5">
-                          <Bed className="w-3.5 h-3.5 text-amber-600" />
-                          <span>{item.tipo}</span>
-                        </p>
-                        <p className="text-gray-500 mt-1">{item.plan.nombre}</p>
-                        <p className="text-gray-400 mt-1">{item.adultos} Ad{item.menores > 0 ? ` · ${item.menores} Mn` : ''}{item.mascotas > 0 ? ` · ${item.mascotas} Mc` : ''}</p>
+                    <div key={item.id} className="bg-gradient-to-br from-white to-amber-50/10 p-5 rounded-2xl border border-amber-100/50 shadow-sm text-xs">
+                      {/* Card Header */}
+                      <div className="flex justify-between items-start mb-3 pb-3 border-b border-gray-100/80">
+                        <div>
+                          <p className="font-extrabold text-gray-800 text-sm flex items-center gap-2">
+                            <Bed className="w-4 h-4 text-amber-700" />
+                            <span>{item.tipo}</span>
+                          </p>
+                          <p className="text-[10px] font-semibold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-lg border border-amber-200/30 mt-1.5 inline-block">
+                            📋 Plan: {item.plan.nombre}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <span className="font-black text-amber-900 text-base block">${item.monto_total.toFixed(2)}</span>
+                          <span className="text-[10px] font-semibold text-amber-750/60 uppercase tracking-wide">
+                            {categoria === 'Pasadía' ? 'Total Bohío' : 'Total Habitación'}
+                          </span>
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <span className="font-bold text-amber-800 text-sm block">${item.monto_total.toFixed(2)}</span>
-                        <span className="text-[10px] text-gray-400">{categoria === 'Pasadía' ? 'Total Bohío' : 'Total habitación'}</span>
+
+                      {/* Detailed Breakdown */}
+                      <div className="space-y-2 text-gray-600 bg-gray-50/50 p-3.5 rounded-xl border border-gray-100/80">
+                        {/* Adults Breakdown Row */}
+                        <div className="flex justify-between items-center py-0.5">
+                          <span className="flex items-center gap-1.5 text-gray-700 font-medium">
+                            <span>🧑</span>
+                            <span>{item.adultos} {item.adultos === 1 ? 'Adulto' : 'Adultos'}</span>
+                            <span className="text-gray-400 font-normal">×</span>
+                            <span>{categoria === 'Pasadía' ? '1 día' : `${noches} ${noches === 1 ? 'noche' : 'noches'}`}</span>
+                            <span className="text-gray-400 font-normal">×</span>
+                            <span>${item.plan.precio_adulto_noche.toFixed(2)}</span>
+                          </span>
+                          <span className="font-bold text-gray-800">${(item.adultos * item.plan.precio_adulto_noche * (categoria === 'Pasadía' ? 1 : noches)).toFixed(2)}</span>
+                        </div>
+
+                        {/* Minors Breakdown Row */}
+                        {item.menores > 0 && (
+                          <div className="flex justify-between items-center py-0.5">
+                            <span className="flex items-center gap-1.5 text-gray-700 font-medium">
+                              <span>👧</span>
+                              <span>{item.menores} {item.menores === 1 ? 'Menor' : 'Menores'}</span>
+                              <span className="text-gray-400 font-normal">×</span>
+                              <span>{categoria === 'Pasadía' ? '1 día' : `${noches} ${noches === 1 ? 'noche' : 'noches'}`}</span>
+                              <span className="text-gray-400 font-normal">×</span>
+                              <span>${item.plan.precio_menor_noche.toFixed(2)}</span>
+                            </span>
+                            <span className="font-bold text-gray-800">${(item.menores * item.plan.precio_menor_noche * (categoria === 'Pasadía' ? 1 : noches)).toFixed(2)}</span>
+                          </div>
+                        )}
+
+                        {/* Pets Breakdown Row */}
+                        {item.mascotas > 0 && (() => {
+                          const petRate = item.plan.precio_mascota_noche || 0;
+                          const petTotal = item.mascotas * petRate * (categoria === 'Pasadía' ? 1 : noches);
+                          return (
+                            <div className="flex justify-between items-center py-0.5">
+                              <span className="flex items-center gap-1.5 text-gray-700 font-medium">
+                                <span>🐶</span>
+                                <span>{item.mascotas} {item.mascotas === 1 ? 'Mascota' : 'Mascotas'}</span>
+                                <span className="text-gray-400 font-normal">×</span>
+                                <span>{categoria === 'Pasadía' ? '1 día' : `${noches} ${noches === 1 ? 'noche' : 'noches'}`}</span>
+                                <span className="text-gray-400 font-normal">×</span>
+                                <span>${petRate.toFixed(2)}</span>
+                              </span>
+                              <span className="font-bold text-gray-800">${petTotal.toFixed(2)}</span>
+                            </div>
+                          );
+                        })()}
+
+                        {/* Suplemento / Ajuste por Fin de Semana o Feriado */}
+                        {(() => {
+                          const baseSubtotal = (
+                            (item.adultos * item.plan.precio_adulto_noche) +
+                            (item.menores * item.plan.precio_menor_noche) +
+                            (item.mascotas * (item.plan.precio_mascota_noche || 0))
+                          ) * (categoria === 'Pasadía' ? 1 : noches);
+                          
+                          const diff = item.subtotal - baseSubtotal;
+                          if (diff > 0.05) {
+                            return (
+                              <div className="flex justify-between items-center py-0.5 text-amber-800 bg-amber-50/50 px-2 py-1 rounded-md border border-amber-200/30">
+                                <span className="flex items-center gap-1.5 font-medium">
+                                  <span>💼</span>
+                                  <span>Suplemento (fin de semana/feriado)</span>
+                                </span>
+                                <span className="font-bold">${diff.toFixed(2)}</span>
+                              </div>
+                            );
+                          }
+                          return null;
+                        })()}
+
+                        {/* Subtotal & Taxes Section */}
+                        <div className="mt-2 pt-2 border-t border-gray-200/60 space-y-1 text-gray-500 font-medium">
+                          <div className="flex justify-between text-[11px]">
+                            <span>Subtotal Habitación</span>
+                            <span>${item.subtotal.toFixed(2)}</span>
+                          </div>
+                          <div className="flex justify-between text-[11px]">
+                            <span>Impuesto de Turismo (7%)</span>
+                            <span>${item.impuesto_monto.toFixed(2)}</span>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -1568,6 +1659,133 @@ export default function BookingWidget() {
                   </button>
                 </div>
               )}
+
+              {/* Collapsible Detailed Reservation Summary */}
+              <div className="mt-8 border-t border-gray-100 pt-6">
+                <details className="group bg-gray-50/50 rounded-2xl border border-gray-100 overflow-hidden">
+                  <summary className="flex items-center justify-between p-4 cursor-pointer font-bold text-gray-700 hover:bg-amber-50/20 select-none text-xs">
+                    <span className="flex items-center gap-2">
+                      <span>📋</span>
+                      <span>Ver resumen detallado de tu reserva</span>
+                    </span>
+                    <span className="text-[10px] text-amber-800 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200/50 group-open:hidden">
+                      Mostrar
+                    </span>
+                    <span className="text-[10px] text-amber-800 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200/50 hidden group-open:inline">
+                      Ocultar
+                    </span>
+                  </summary>
+                  <div className="p-4 border-t border-gray-100 space-y-4 bg-white">
+                    {cart.map((item) => (
+                      <div key={item.id} className="bg-gradient-to-br from-white to-amber-50/10 p-5 rounded-2xl border border-amber-100/50 shadow-sm text-xs text-left">
+                        {/* Card Header */}
+                        <div className="flex justify-between items-start mb-3 pb-3 border-b border-gray-100/80">
+                          <div>
+                            <p className="font-extrabold text-gray-800 text-sm flex items-center gap-2">
+                              <Bed className="w-4 h-4 text-amber-700" />
+                              <span>{item.tipo}</span>
+                            </p>
+                            <p className="text-[10px] font-semibold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-lg border border-amber-200/30 mt-1.5 inline-block">
+                              📋 Plan: {item.plan.nombre}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <span className="font-black text-amber-900 text-base block">${item.monto_total.toFixed(2)}</span>
+                            <span className="text-[10px] font-semibold text-amber-750/60 uppercase tracking-wide">
+                              {categoria === 'Pasadía' ? 'Total Bohío' : 'Total Habitación'}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Detailed Breakdown */}
+                        <div className="space-y-2 text-gray-600 bg-gray-50/50 p-3.5 rounded-xl border border-gray-100/80">
+                          {/* Adults Breakdown Row */}
+                          <div className="flex justify-between items-center py-0.5">
+                            <span className="flex items-center gap-1.5 text-gray-700 font-medium">
+                              <span>🧑</span>
+                              <span>{item.adultos} {item.adultos === 1 ? 'Adulto' : 'Adultos'}</span>
+                              <span className="text-gray-400 font-normal">×</span>
+                              <span>{categoria === 'Pasadía' ? '1 día' : `${noches} ${noches === 1 ? 'noche' : 'noches'}`}</span>
+                              <span className="text-gray-400 font-normal">×</span>
+                              <span>${item.plan.precio_adulto_noche.toFixed(2)}</span>
+                            </span>
+                            <span className="font-bold text-gray-800">${(item.adultos * item.plan.precio_adulto_noche * (categoria === 'Pasadía' ? 1 : noches)).toFixed(2)}</span>
+                          </div>
+
+                          {/* Minors Breakdown Row */}
+                          {item.menores > 0 && (
+                            <div className="flex justify-between items-center py-0.5">
+                              <span className="flex items-center gap-1.5 text-gray-700 font-medium">
+                                <span>👧</span>
+                                <span>{item.menores} {item.menores === 1 ? 'Menor' : 'Menores'}</span>
+                                <span className="text-gray-400 font-normal">×</span>
+                                <span>{categoria === 'Pasadía' ? '1 día' : `${noches} ${noches === 1 ? 'noche' : 'noches'}`}</span>
+                                <span className="text-gray-400 font-normal">×</span>
+                                <span>${item.plan.precio_menor_noche.toFixed(2)}</span>
+                              </span>
+                              <span className="font-bold text-gray-800">${(item.menores * item.plan.precio_menor_noche * (categoria === 'Pasadía' ? 1 : noches)).toFixed(2)}</span>
+                            </div>
+                          )}
+
+                          {/* Pets Breakdown Row */}
+                          {item.mascotas > 0 && (() => {
+                            const petRate = item.plan.precio_mascota_noche || 0;
+                            const petTotal = item.mascotas * petRate * (categoria === 'Pasadía' ? 1 : noches);
+                            return (
+                              <div className="flex justify-between items-center py-0.5">
+                                <span className="flex items-center gap-1.5 text-gray-700 font-medium">
+                                  <span>🐶</span>
+                                  <span>{item.mascotas} {item.mascotas === 1 ? 'Mascota' : 'Mascotas'}</span>
+                                  <span className="text-gray-400 font-normal">×</span>
+                                  <span>{categoria === 'Pasadía' ? '1 día' : `${noches} ${noches === 1 ? 'noche' : 'noches'}`}</span>
+                                  <span className="text-gray-400 font-normal">×</span>
+                                  <span>${petRate.toFixed(2)}</span>
+                                </span>
+                                <span className="font-bold text-gray-800">${petTotal.toFixed(2)}</span>
+                              </div>
+                            );
+                          })()}
+
+                          {/* Suplemento / Ajuste por Fin de Semana o Feriado */}
+                          {(() => {
+                            const baseSubtotal = (
+                              (item.adultos * item.plan.precio_adulto_noche) +
+                              (item.menores * item.plan.precio_menor_noche) +
+                              (item.mascotas * (item.plan.precio_mascota_noche || 0))
+                            ) * (categoria === 'Pasadía' ? 1 : noches);
+                            
+                            const diff = item.subtotal - baseSubtotal;
+                            if (diff > 0.05) {
+                              return (
+                                <div className="flex justify-between items-center py-0.5 text-amber-800 bg-amber-50/50 px-2 py-1 rounded-md border border-amber-200/30">
+                                  <span className="flex items-center gap-1.5 font-medium">
+                                    <span>💼</span>
+                                    <span>Suplemento (fin de semana/feriado)</span>
+                                  </span>
+                                  <span className="font-bold">${diff.toFixed(2)}</span>
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
+
+                          {/* Subtotal & Taxes Section */}
+                          <div className="mt-2 pt-2 border-t border-gray-200/60 space-y-1 text-gray-500 font-medium">
+                            <div className="flex justify-between text-[11px]">
+                              <span>Subtotal Habitación</span>
+                              <span>${item.subtotal.toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between text-[11px]">
+                              <span>Impuesto de Turismo (7%)</span>
+                              <span>${item.impuesto_monto.toFixed(2)}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              </div>
 
               <button onClick={() => setStep(4)} className="mt-5 text-sm text-amber-700 hover:text-amber-900 font-medium flex items-center gap-1 mx-auto"><ArrowLeft className="w-4 h-4" /> Volver al resumen</button>
             </div>
