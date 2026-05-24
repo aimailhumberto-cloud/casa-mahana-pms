@@ -242,6 +242,18 @@ if (fs.existsSync(distPath)) {
 const server = app.listen(PORT, () => {
   const db = getDb(); // Initialize on startup
 
+  // ── Auto-patch Familiar Room Type Photo (R2 / UX Fix) ──
+  try {
+    const key = 'foto_tipo_Familiar';
+    const row = db.prepare("SELECT valor FROM config_hotel WHERE clave = ?").get(key);
+    if (row && row.valor.includes('20230510_172634_1.jpg')) {
+      db.prepare("UPDATE config_hotel SET valor = ? WHERE clave = ?").run('/habitacion_familiar.jpg', key);
+      console.log('Auto-patched foto_tipo_Familiar database row to point to /habitacion_familiar.jpg');
+    }
+  } catch (err) {
+    console.error('Failed to auto-patch foto_tipo_Familiar database row:', err);
+  }
+
   // Start background scheduler
   try {
     startScheduler();
