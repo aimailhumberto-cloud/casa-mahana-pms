@@ -647,7 +647,7 @@ export default function BookingWidget() {
     }
   }
 
-  const isGuestValid = guest.nombre && guest.email && guest.apellido
+  const isGuestValid = !!(guest.nombre && guest.apellido && guest.email && guest.whatsapp)
   const montoPagar = pagoTipo === 'total' ? totalMontoTotal : totalDepositoMinimo
   const planImage = cart[0]?.plan.imagen || (cart[0]?.tipo ? (tipoFotos[cart[0].tipo] || defaultRoomImages[cart[0].tipo]) : '') || defaultRoomImages['Familiar']
 
@@ -800,7 +800,7 @@ export default function BookingWidget() {
                 <div className="bg-gradient-to-br from-amber-50 to-amber-100/40 border border-amber-200 rounded-3xl p-6 shadow-sm">
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-2">
                     <h3 className="font-bold text-amber-900 text-base flex items-center gap-2">
-                      <span>🛒 Tu Carrito de Habitaciones</span>
+                      <span>Tu Carrito de Habitaciones</span>
                       <span className="bg-amber-200 text-amber-900 text-xs px-2 py-0.5 rounded-full font-bold">{cart.length}</span>
                     </h3>
                     <button
@@ -858,18 +858,18 @@ export default function BookingWidget() {
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
                       <span className="inline-flex items-center gap-1 bg-amber-100 text-amber-800 text-xs font-bold px-2.5 py-1 rounded-full uppercase tracking-wider mb-2">
-                        ✨ El Sugerido
+                        El Sugerido
                       </span>
                       <h3 className="font-extrabold text-amber-900 text-lg sm:text-xl">
                         Recomendación de Habitación Optimizada
                       </h3>
                       <p className="text-sm text-amber-800/80 mt-1 leading-relaxed">
-                        Hemos encontrado la combinación perfecta de habitaciones que minimiza tus costos y se adapta a tus huéspedes y mascotas:
+                        Hemos encontrado la combinación perfecta de habitaciones que minimiza tus costos and se adapta a tus huéspedes y mascotas:
                       </p>
                       <div className="flex flex-wrap gap-2 mt-3">
                         {sugerencia.map((s, idx) => (
                           <span key={idx} className="bg-white border border-amber-200 text-amber-900 text-xs font-semibold px-3 py-1.5 rounded-xl shadow-xs">
-                            🚪 <b>{s.tipo}</b> ({s.adultos} Ad{s.menores > 0 ? `, ${s.menores} Mn` : ''}{s.mascotas > 0 ? `, ${s.mascotas} Mc` : ''})
+                            <b>{s.tipo}</b> ({s.adultos} Ad{s.menores > 0 ? `, ${s.menores} Mn` : ''}{s.mascotas > 0 ? `, ${s.mascotas} Mc` : ''})
                           </span>
                         ))}
                       </div>
@@ -1221,7 +1221,7 @@ export default function BookingWidget() {
                             <span>{item.tipo}</span>
                           </p>
                           <p className="text-[10px] font-semibold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-lg border border-amber-200/30 mt-1.5 inline-block">
-                            📋 Plan: {item.plan.nombre}
+                            Plan: {item.plan.nombre}
                           </p>
                         </div>
                         <div className="text-right">
@@ -1237,7 +1237,6 @@ export default function BookingWidget() {
                         {/* Adults Breakdown Row */}
                         <div className="flex justify-between items-center py-0.5">
                           <span className="flex items-center gap-1.5 text-gray-700 font-medium">
-                            <span>🧑</span>
                             <span>{item.adultos} {item.adultos === 1 ? 'Adulto' : 'Adultos'}</span>
                             <span className="text-gray-400 font-normal">×</span>
                             <span>{categoria === 'Pasadía' ? '1 día' : `${noches} ${noches === 1 ? 'noche' : 'noches'}`}</span>
@@ -1251,7 +1250,6 @@ export default function BookingWidget() {
                         {item.menores > 0 && (
                           <div className="flex justify-between items-center py-0.5">
                             <span className="flex items-center gap-1.5 text-gray-700 font-medium">
-                              <span>👧</span>
                               <span>{item.menores} {item.menores === 1 ? 'Menor' : 'Menores'}</span>
                               <span className="text-gray-400 font-normal">×</span>
                               <span>{categoria === 'Pasadía' ? '1 día' : `${noches} ${noches === 1 ? 'noche' : 'noches'}`}</span>
@@ -1269,7 +1267,6 @@ export default function BookingWidget() {
                           return (
                             <div className="flex justify-between items-center py-0.5">
                               <span className="flex items-center gap-1.5 text-gray-700 font-medium">
-                                <span>🐶</span>
                                 <span>{item.mascotas} {item.mascotas === 1 ? 'Mascota' : 'Mascotas'}</span>
                                 <span className="text-gray-400 font-normal">×</span>
                                 <span>{categoria === 'Pasadía' ? '1 día' : `${noches} ${noches === 1 ? 'noche' : 'noches'}`}</span>
@@ -1294,7 +1291,6 @@ export default function BookingWidget() {
                             return (
                               <div className="flex justify-between items-center py-0.5 text-amber-800 bg-amber-50/50 px-2 py-1 rounded-md border border-amber-200/30">
                                 <span className="flex items-center gap-1.5 font-medium">
-                                  <span>💼</span>
                                   <span>Suplemento (fin de semana/feriado)</span>
                                 </span>
                                 <span className="font-bold">${diff.toFixed(2)}</span>
@@ -1311,7 +1307,7 @@ export default function BookingWidget() {
                             <span>${item.subtotal.toFixed(2)}</span>
                           </div>
                           <div className="flex justify-between text-[11px]">
-                            <span>Impuesto de Turismo (7%)</span>
+                            <span>Impuesto de Turismo (10%)</span>
                             <span>${item.impuesto_monto.toFixed(2)}</span>
                           </div>
                         </div>
@@ -1332,7 +1328,7 @@ export default function BookingWidget() {
                   </div>
                   <hr className="border-amber-200/50" />
                   <div className="flex justify-between"><span className="text-gray-500">Subtotal</span><span className="font-semibold text-gray-700">${totalSubtotal.toFixed(2)}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">Impuesto (7%)</span><span className="font-semibold text-gray-700">${totalImpuesto.toFixed(2)}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">Impuesto (10%)</span><span className="font-semibold text-gray-700">${totalImpuesto.toFixed(2)}</span></div>
                   <div className="flex justify-between text-lg font-bold text-amber-900 pt-1 border-t border-amber-200/50"><span>Total</span><span>${totalMontoTotal.toFixed(2)}</span></div>
                 </div>
 
@@ -1377,7 +1373,7 @@ export default function BookingWidget() {
                     className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50/50 focus:ring-2 focus:ring-amber-400 focus:bg-white transition" placeholder="juan@email.com" />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5"><Phone className="w-3 h-3 inline mr-1" />WhatsApp</label>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5"><Phone className="w-3 h-3 inline mr-1" />WhatsApp *</label>
                   <input type="tel" value={guest.whatsapp} onChange={e => setGuest({ ...guest, whatsapp: e.target.value })}
                     className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50/50 focus:ring-2 focus:ring-amber-400 focus:bg-white transition" placeholder="+507 6XXX-XXXX" />
                 </div>
@@ -1415,6 +1411,19 @@ export default function BookingWidget() {
               {pagoTipo === 'deposito' && (
                 <p className="text-center text-xs text-gray-400 mb-5">Saldo restante de <b>${(totalMontoTotal - montoPagar).toFixed(2)}</b> se cancela en check-in</p>
               )}
+
+              {/* Warning/Verification Note (No Emojis) */}
+              <div className="bg-amber-50/60 border border-amber-200/60 rounded-2xl p-4 sm:p-5 mb-6 text-left shadow-xs">
+                <h4 className="text-xs font-bold text-amber-950 uppercase tracking-wider mb-2">
+                  Importante: Verificación y Aprobación de Reserva
+                </h4>
+                <p className="text-[11px] sm:text-xs text-amber-900/90 leading-relaxed">
+                  Por favor, asegúrese de verificar que todos sus datos de contacto (email y WhatsApp) sean correctos, ya que nos comunicaremos con usted a través de estas vías para la validación definitiva.
+                </p>
+                <p className="text-[11px] sm:text-xs text-amber-900/90 leading-relaxed mt-2 border-t border-amber-200/30 pt-2 font-medium">
+                  Para garantizar la seguridad de su estadía, toda reserva en Casa Mahana requiere de una revisión y aprobación manual por nuestro equipo. El procesamiento del pago seguro o la carga de su comprobante de transferencia inicia el trámite de su solicitud, pero <strong>no garantiza la reserva definitiva hasta recibir el correo electrónico oficial de aprobación de Casa Mahana.</strong>
+                </p>
+              </div>
 
               {/* Segmented Tab Control */}
               <div className="flex bg-amber-50/50 p-1.5 rounded-2xl border border-amber-200/50 mb-6 gap-2">
@@ -1481,7 +1490,7 @@ export default function BookingWidget() {
                           : 'border-gray-200 hover:border-amber-300 text-gray-500 bg-white'
                       }`}
                     >
-                      🏦 Transferencia Bancaria
+                      Transferencia Bancaria
                     </button>
                     <button
                       type="button"
@@ -1492,7 +1501,7 @@ export default function BookingWidget() {
                           : 'border-gray-200 hover:border-amber-300 text-gray-500 bg-white'
                       }`}
                     >
-                      📱 Yappy (Banco General)
+                      Yappy (Banco General)
                     </button>
                     <button
                       type="button"
@@ -1503,7 +1512,7 @@ export default function BookingWidget() {
                           : 'border-gray-200 hover:border-amber-300 text-gray-500 bg-white'
                       }`}
                     >
-                      🎟️ Oferta Simple (Cupón)
+                      Oferta Simple (Cupón)
                     </button>
                     <button
                       type="button"
@@ -1514,7 +1523,7 @@ export default function BookingWidget() {
                           : 'border-gray-200 hover:border-amber-300 text-gray-500 bg-white'
                       }`}
                     >
-                      🎟️ PaHoy (Cupón)
+                      PaHoy (Cupón)
                     </button>
                   </div>
 
@@ -1575,7 +1584,7 @@ export default function BookingWidget() {
 
                   {/* Sleek drag & drop zone */}
                   <div className="mb-5">
-                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">📸 Adjuntar Comprobante de Pago *</label>
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Adjuntar Comprobante de Pago *</label>
                     <div
                       onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
                       onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
@@ -1665,7 +1674,6 @@ export default function BookingWidget() {
                 <details className="group bg-gray-50/50 rounded-2xl border border-gray-100 overflow-hidden">
                   <summary className="flex items-center justify-between p-4 cursor-pointer font-bold text-gray-700 hover:bg-amber-50/20 select-none text-xs">
                     <span className="flex items-center gap-2">
-                      <span>📋</span>
                       <span>Ver resumen detallado de tu reserva</span>
                     </span>
                     <span className="text-[10px] text-amber-800 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200/50 group-open:hidden">
@@ -1686,7 +1694,7 @@ export default function BookingWidget() {
                               <span>{item.tipo}</span>
                             </p>
                             <p className="text-[10px] font-semibold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-lg border border-amber-200/30 mt-1.5 inline-block">
-                              📋 Plan: {item.plan.nombre}
+                              Plan: {item.plan.nombre}
                             </p>
                           </div>
                           <div className="text-right">
@@ -1702,7 +1710,6 @@ export default function BookingWidget() {
                           {/* Adults Breakdown Row */}
                           <div className="flex justify-between items-center py-0.5">
                             <span className="flex items-center gap-1.5 text-gray-700 font-medium">
-                              <span>🧑</span>
                               <span>{item.adultos} {item.adultos === 1 ? 'Adulto' : 'Adultos'}</span>
                               <span className="text-gray-400 font-normal">×</span>
                               <span>{categoria === 'Pasadía' ? '1 día' : `${noches} ${noches === 1 ? 'noche' : 'noches'}`}</span>
@@ -1716,7 +1723,6 @@ export default function BookingWidget() {
                           {item.menores > 0 && (
                             <div className="flex justify-between items-center py-0.5">
                               <span className="flex items-center gap-1.5 text-gray-700 font-medium">
-                                <span>👧</span>
                                 <span>{item.menores} {item.menores === 1 ? 'Menor' : 'Menores'}</span>
                                 <span className="text-gray-400 font-normal">×</span>
                                 <span>{categoria === 'Pasadía' ? '1 día' : `${noches} ${noches === 1 ? 'noche' : 'noches'}`}</span>
@@ -1734,7 +1740,6 @@ export default function BookingWidget() {
                             return (
                               <div className="flex justify-between items-center py-0.5">
                                 <span className="flex items-center gap-1.5 text-gray-700 font-medium">
-                                  <span>🐶</span>
                                   <span>{item.mascotas} {item.mascotas === 1 ? 'Mascota' : 'Mascotas'}</span>
                                   <span className="text-gray-400 font-normal">×</span>
                                   <span>{categoria === 'Pasadía' ? '1 día' : `${noches} ${noches === 1 ? 'noche' : 'noches'}`}</span>
@@ -1759,7 +1764,6 @@ export default function BookingWidget() {
                               return (
                                 <div className="flex justify-between items-center py-0.5 text-amber-800 bg-amber-50/50 px-2 py-1 rounded-md border border-amber-200/30">
                                   <span className="flex items-center gap-1.5 font-medium">
-                                    <span>💼</span>
                                     <span>Suplemento (fin de semana/feriado)</span>
                                   </span>
                                   <span className="font-bold">${diff.toFixed(2)}</span>
@@ -1776,7 +1780,7 @@ export default function BookingWidget() {
                               <span>${item.subtotal.toFixed(2)}</span>
                             </div>
                             <div className="flex justify-between text-[11px]">
-                              <span>Impuesto de Turismo (7%)</span>
+                              <span>Impuesto de Turismo (10%)</span>
                               <span>${item.impuesto_monto.toFixed(2)}</span>
                             </div>
                           </div>
@@ -1801,7 +1805,7 @@ export default function BookingWidget() {
             <h2 className="text-2xl font-bold text-emerald-700 mb-2">Reserva recibida</h2>
             {paymentMethod !== 'paypal' && (
               <p className="text-xs text-amber-700 bg-amber-50 py-2 px-4 rounded-xl inline-flex items-center gap-1.5 mx-auto mb-4 border border-amber-200/50">
-                <span>🧾 Comprobante de pago ({paymentMethod.toUpperCase()}) recibido y en revisión.</span>
+                <span>Comprobante de pago ({paymentMethod.toUpperCase()}) recibido y en revisión.</span>
               </p>
             )}
             <p className="text-gray-500 mb-6">{result.mensaje}</p>
