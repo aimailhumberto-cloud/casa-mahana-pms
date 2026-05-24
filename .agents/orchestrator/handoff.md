@@ -1,27 +1,25 @@
-# Orchestrator Handoff (State Dump) — Casa Mahana PMS Follow-up Requirements
+# Orchestrator Handoff (State Dump) — Casa Mahana PMS Security & Mobile Layout
 
 ## Milestone State
-- [x] R1. Quotes and alternative rates filtering by `visible_web = 1` in `NuevaReserva.tsx` — **DONE**
-- [x] R2. Suggested deposit quick fill buttons and dynamic initialization in `NuevaReserva.tsx` — **DONE**
-- [x] R3. Integrated PayPal & mandatory payment attachments for internal booking flow in `NuevaReserva.tsx` — **DONE**
-- [x] R4. Resend integration for email deliverability in `server/notifications.js` and settings panel — **DONE**
-- [x] R5. Multi-room public booking widget with shopping cart in `BookingWidget.tsx` and group booking API call — **DONE**
-- [x] Final build and regression tests passed successfully (61/61 tests passing) — **DONE**
+- [x] M1: Public Endpoint Security & Isolation Audit — **DONE** (Implemented and verified)
+- [x] M2: Mobile Viewport Layout Alignment (UI/UX) — **DONE** (Implemented and verified)
+- [x] M3: Verification & Integration Testing — **DONE** (107/107 tests pass, production build succeeds, and forensic audit verdict is **CLEAN**)
 
 ## Active Subagents
-- **None** — All subagents (`explorer_1`, `worker_1`, `reviewer_1`, `auditor_1`) have completed their respective runs and reported back successfully.
+- **None** — All subagents (`explorer_sec_layout`, `worker_sec_layout`, `reviewer_sec_layout_1`, `reviewer_sec_layout_2`, and `auditor_sec_layout`) have completed their work and reported back.
 
 ## Pending Decisions
-- **None** — All requirements have been implemented fully and verified without any outstanding architectural disputes.
+- **None** — All requirements are fully implemented, verified by reviewers, and audited with a CLEAN verdict by the Forensic Auditor.
 
 ## Remaining Work
-- **Handoff to User** — Send the final completion message to the user outlining the changes and how to run verification commands.
+- **Final synthesis to Sentinel** — Report project completion to Sentinel (main agent).
 
 ## Key Artifacts
 - **Verbatim user prompt**: `C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\.agents\orchestrator\original_prompt.md`
 - **Orchestrator Briefing**: `C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\.agents\orchestrator\BRIEFING.md`
 - **Orchestrator Progress Tracker**: `C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\.agents\orchestrator\progress.md`
-- **Explorer Report**: `C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\.agents\teamwork_preview_explorer_followup\analysis.md`
-- **Worker Handoff & Test Logs**: `C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\.agents\teamwork_preview_worker_followup\handoff.md`
-- **Reviewer Handoff & QA Report**: `C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\.agents\teamwork_preview_reviewer_followup\handoff.md`
-- **Forensic Auditor Handoff (Verdict: CLEAN)**: `C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\.agents\teamwork_preview_auditor_followup\handoff.md`
+- **Security & Layout Explorer Analysis**: `C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\.agents\explorer_security_layout\handoff.md`
+- **Worker Handoff Report**: `C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\.agents\worker_sec_layout\handoff.md`
+- **Lead QA Reviewer Report (Reviewer 1)**: `C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\.agents\reviewer_sec_layout_1\handoff.md`
+- **UX & Security Code Auditor Report (Reviewer 2)**: `C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\.agents\reviewer_sec_layout_2\handoff.md`
+- **Forensic Auditor Handoff (Verdict: CLEAN)**: `C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms\.agents\auditor_sec_layout\handoff.md`

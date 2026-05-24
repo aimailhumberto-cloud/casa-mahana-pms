@@ -109,6 +109,8 @@ CREATE TABLE IF NOT EXISTS reservas_hotel (
   notas TEXT,
   grupo_codigo TEXT,
   es_maestra INTEGER DEFAULT 0,
+  metodo_pago TEXT,
+  referencia TEXT,
   parent_reserva_id INTEGER,
   facturacion_consolidada INTEGER DEFAULT 1,
   created_by TEXT,

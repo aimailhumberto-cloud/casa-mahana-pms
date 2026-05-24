@@ -323,6 +323,8 @@ router.post('/reservar', (req, res) => {
       monto_total: totals.monto_total, deposito_sugerido: totals.deposito_sugerido,
       monto_pagado: paidAmount, saldo_pendiente: Math.round((totals.monto_total - paidAmount) * 100) / 100,
       estado: 'Pendiente', fuente: 'Website',
+      metodo_pago: metodo_pago || (paypal_order_id ? 'paypal' : null),
+      referencia: referencia || paypal_order_id || null,
       notas: metodo_pago ? `${metodo_pago.toUpperCase()} Ref: ${referencia || 'N/A'}` : (paypal_order_id ? `PayPal Order: ${paypal_order_id}` : ''),
       created_by: 'Web Booking'
     };
@@ -363,9 +365,20 @@ router.post('/reservar', (req, res) => {
 // Public upload of transaction receipt/comprobante
 router.post('/reservas/:id/comprobante', upload.single('comprobante'), validateUploadSignature, (req, res) => {
   try {
-    if (!req.file) return err(res, 'VALIDATION_ERROR', 'Archivo requerido (JPEG, PNG, WebP, PDF, máx 10MB)');
+    const providedEmail = ((req.query.email || req.body.email || '') + '').trim().toLowerCase();
+    if (!providedEmail) {
+      return err(res, 'UNAUTHORIZED', 'Email no proporcionado', 401);
+    }
+
     const reserva = findById('reservas_hotel', req.params.id);
     if (!reserva) return err(res, 'NOT_FOUND', 'Reserva no encontrada', 404);
+    
+    const dbEmail = (reserva.email || '').trim().toLowerCase();
+    if (dbEmail !== providedEmail) {
+      return err(res, 'UNAUTHORIZED', 'Email no coincide con la reserva', 401);
+    }
+
+    if (!req.file) return err(res, 'VALIDATION_ERROR', 'Archivo requerido (JPEG, PNG, WebP, PDF, máx 10MB)');
     
     const db = getDb();
     const tipo = 'recibo';
@@ -550,9 +563,12 @@ router.post('/reservas/multi', upload.single('comprobante'), validateUploadSigna
         saldo_pendiente: Math.round((totals.monto_total - paidAmount) * 100) / 100,
         estado: 'Pendiente',
         fuente: 'Website',
+        metodo_pago: metodo_pago || (paypal_order_id ? 'paypal' : null),
+        referencia: referencia || paypal_order_id || null,
         notas: metodo_pago ? `${metodo_pago.toUpperCase()} Ref: ${referencia || 'N/A'}` : (paypal_order_id ? `PayPal Order: ${paypal_order_id}` : ''),
         created_by: 'Web Booking',
-        grupo_codigo
+        grupo_codigo,
+        es_maestra: index === 0 ? 1 : 0
       };
 
       const reserva = create('reservas_hotel', data);

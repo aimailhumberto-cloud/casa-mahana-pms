@@ -697,7 +697,7 @@ export default function BookingWidget() {
             </div>
 
             {/* Category Toggle Tabs */}
-            <div className="flex bg-amber-50/50 p-1.5 rounded-2xl border border-amber-200/50 mb-6 gap-2">
+            <div className="flex flex-col sm:flex-row bg-amber-50/50 p-1.5 rounded-2xl border border-amber-200/50 mb-6 gap-2">
               <button
                 type="button"
                 onClick={() => setCategoria('Estadía')}
@@ -751,20 +751,20 @@ export default function BookingWidget() {
                 <Clock className="w-4 h-4" /> {noches} noche{noches > 1 ? 's' : ''}
               </p>
             )}
-            <div className="grid grid-cols-3 gap-4 mb-6">
-              <div>
+            <div className="flex flex-col sm:flex-row gap-4 mb-6">
+              <div className="flex-1">
                 <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5"><Users className="w-3.5 h-3.5 inline mr-1" />Adultos</label>
                 <select value={adultos} onChange={e => setAdultos(+e.target.value)} className="w-full px-4 py-3.5 rounded-xl border border-gray-200 bg-gray-50/50 focus:ring-2 focus:ring-amber-400 text-gray-700">
                   {Array.from({ length: 30 }, (_, i) => i + 1).map(n => <option key={n} value={n}>{n} adulto{n > 1 ? 's' : ''}</option>)}
                 </select>
               </div>
-              <div>
+              <div className="flex-1">
                 <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Menores</label>
                 <select value={menores} onChange={e => setMenores(+e.target.value)} className="w-full px-4 py-3.5 rounded-xl border border-gray-200 bg-gray-50/50 focus:ring-2 focus:ring-amber-400 text-gray-700">
                   {Array.from({ length: 16 }, (_, i) => i).map(n => <option key={n} value={n}>{n} menor{n !== 1 ? 'es' : ''}</option>)}
                 </select>
               </div>
-              <div>
+              <div className="flex-1">
                 <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Mascotas</label>
                 <select value={mascotas} onChange={e => setMascotas(+e.target.value)} className="w-full px-4 py-3.5 rounded-xl border border-gray-200 bg-gray-50/50 focus:ring-2 focus:ring-amber-400 text-gray-700">
                   {Array.from({ length: 11 }, (_, i) => i).map(n => <option key={n} value={n}>{n} mascota{n !== 1 ? 's' : ''}</option>)}
@@ -792,7 +792,7 @@ export default function BookingWidget() {
             <div className="space-y-6 animate-fadeIn">
               {cart.length > 0 && (
                 <div className="bg-gradient-to-br from-amber-50 to-amber-100/40 border border-amber-200 rounded-3xl p-6 shadow-sm">
-                  <div className="flex justify-between items-center mb-4">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-2">
                     <h3 className="font-bold text-amber-900 text-base flex items-center gap-2">
                       <span>🛒 Tu Carrito de Habitaciones</span>
                       <span className="bg-amber-200 text-amber-900 text-xs px-2 py-0.5 rounded-full font-bold">{cart.length}</span>
@@ -806,7 +806,7 @@ export default function BookingWidget() {
                   </div>
                   <div className="space-y-3">
                     {cart.map((item) => (
-                      <div key={item.id} className="flex justify-between items-center bg-white p-4 rounded-2xl border border-gray-100 text-sm shadow-xs">
+                      <div key={item.id} className="flex flex-col sm:flex-row sm:justify-between sm:items-center bg-white p-4 rounded-2xl border border-gray-100 text-sm shadow-xs gap-3">
                         <div>
                           <p className="font-bold text-gray-800 flex items-center gap-1.5">
                             <Bed className="w-4 h-4 text-amber-600" />
@@ -814,7 +814,7 @@ export default function BookingWidget() {
                           </p>
                           <p className="text-xs text-gray-500 mt-1">{item.plan.nombre} · {item.adultos} Ad{item.menores > 0 ? ` · ${item.menores} Mn` : ''}{item.mascotas > 0 ? ` · ${item.mascotas} Mc` : ''}</p>
                         </div>
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
                           <span className="font-bold text-amber-800">${item.monto_total.toFixed(2)}</span>
                           <button
                             onClick={() => setCart(prev => prev.filter(x => x.id !== item.id))}
@@ -827,8 +827,8 @@ export default function BookingWidget() {
                       </div>
                     ))}
                   </div>
-                  <div className="flex flex-col sm:flex-row items-center justify-between mt-5 pt-4 border-t border-amber-200/50 gap-4">
-                    <div>
+                  <div className="flex flex-col sm:flex-row items-center sm:justify-between mt-5 pt-4 border-t border-amber-200/50 gap-4 w-full">
+                    <div className="text-center sm:text-left w-full sm:w-auto">
                       <span className="text-xs text-gray-500 block">
                         {categoria === 'Pasadía' ? 'Total de tu pasadía' : `Total de tu estadía (${noches} noche${noches > 1 ? 's' : ''})`}
                       </span>
@@ -966,7 +966,7 @@ export default function BookingWidget() {
 
         {/* STEP 3: Guest Room Allocation Console */}
         {step === 3 && (
-          <div className="space-y-6 animate-fadeIn pb-32">
+          <div className="space-y-6 animate-fadeIn pb-36 sm:pb-32">
             <div className="bg-white rounded-3xl shadow-xl p-6 sm:p-8 border border-amber-100/50">
               <div className="flex items-center gap-3 mb-2">
                 <div className="w-10 h-10 rounded-2xl bg-amber-100 flex items-center justify-center"><Users className="w-5 h-5 text-amber-700" /></div>
@@ -1091,7 +1091,7 @@ export default function BookingWidget() {
 
             {/* Floating Glassmorphic Validation Panel at the bottom */}
             <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/80 backdrop-blur-xl border-t border-amber-200/50 shadow-2xl py-5 px-6">
-              <div className="max-w-3xl mx-auto flex flex-col md:flex-row items-center justify-between gap-5">
+              <div className="max-w-3xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-5">
                 <div className="flex-1 w-full space-y-3">
                   {/* Status Stats */}
                   <div className="grid grid-cols-4 gap-4 text-center md:text-left">
@@ -1145,13 +1145,13 @@ export default function BookingWidget() {
                   </div>
                 </div>
 
-                <div className="w-full md:w-auto flex flex-col items-center sm:items-end gap-1">
+                <div className="w-full sm:w-auto flex flex-col items-center sm:items-end gap-1">
                   <span className="text-[10px] text-gray-400 block">Total a Pagar</span>
                   <p className="text-2xl font-black text-amber-900 mb-2">${totalMontoTotal.toFixed(2)}</p>
                   <button
                     disabled={!allMatch}
                     onClick={() => setStep(4)}
-                    className="w-full md:w-auto px-6 py-4 bg-gradient-to-r from-amber-700 to-amber-800 text-white font-bold rounded-2xl text-base hover:shadow-xl disabled:opacity-40 disabled:pointer-events-none transition flex items-center justify-center gap-2"
+                    className="w-full sm:w-auto px-6 py-4 bg-gradient-to-r from-amber-700 to-amber-800 text-white font-bold rounded-2xl text-base hover:shadow-xl disabled:opacity-40 disabled:pointer-events-none transition flex items-center justify-center gap-2"
                   >
                     <span>Siguiente: Datos de Huésped</span>
                     <ChevronRight className="w-5 h-5" />

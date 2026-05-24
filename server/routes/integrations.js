@@ -17,6 +17,17 @@ function err(res, code, message, status = 400) {
 // Kommo CRM Webhook handler
 router.post('/kommo', async (req, res) => {
   try {
+    const db = getDb();
+    const secretRow = db.prepare("SELECT valor FROM config_hotel WHERE clave = 'kommo_webhook_secret'").get();
+    const configuredSecret = (secretRow ? secretRow.valor : null) || process.env.KOMMO_WEBHOOK_SECRET;
+
+    if (configuredSecret) {
+      const clientSecret = req.query.secret || (req.headers && req.headers['x-kommo-secret']);
+      if (!clientSecret || clientSecret !== configuredSecret) {
+        return err(res, 'UNAUTHORIZED', 'Invalid or missing webhook secret', 401);
+      }
+    }
+
     logger.info('📩 Kommo Webhook received:', JSON.stringify(req.body));
 
     // 1. Detect lead_id from various possible webhook payload structures of Kommo
@@ -42,7 +53,6 @@ router.post('/kommo', async (req, res) => {
     }
 
     // 2. Fetch Kommo Config from SQLite Database
-    const db = getDb();
     const tokenRow = db.prepare("SELECT valor FROM config_hotel WHERE clave = 'kommo_api_token'").get();
     const subdomainRow = db.prepare("SELECT valor FROM config_hotel WHERE clave = 'kommo_subdomain'").get();
     const enabledRow = db.prepare("SELECT valor FROM config_hotel WHERE clave = 'kommo_enabled'").get();
@@ -313,6 +323,22 @@ router.post('/kommo', async (req, res) => {
 
 // GET query fallback (so user can manually test or debug in their browser!)
 router.get('/kommo', async (req, res) => {
+  try {
+    const db = getDb();
+    const secretRow = db.prepare("SELECT valor FROM config_hotel WHERE clave = 'kommo_webhook_secret'").get();
+    const configuredSecret = (secretRow ? secretRow.valor : null) || process.env.KOMMO_WEBHOOK_SECRET;
+
+    if (configuredSecret) {
+      const clientSecret = req.query.secret || (req.headers && req.headers['x-kommo-secret']);
+      if (!clientSecret || clientSecret !== configuredSecret) {
+        return err(res, 'UNAUTHORIZED', 'Invalid or missing webhook secret', 401);
+      }
+    }
+  } catch (e) {
+    logger.error('Error validating webhook secret in GET fallback:', e);
+    return err(res, 'SERVER_ERROR', 'Error validating webhook secret', 500);
+  }
+
   // Redirect to POST execution context by passing query parameters
   req.body = req.query;
   return router.handle(req, res);

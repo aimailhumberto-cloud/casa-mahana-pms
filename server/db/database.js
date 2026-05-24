@@ -15,6 +15,7 @@ function getDb() {
     const DB_PATH = path.join(DB_DIR, dbName);
     db = new Database(DB_PATH);
     db.pragma('journal_mode = WAL');
+    db.pragma('busy_timeout = 5000');
     db.pragma('foreign_keys = ON');
 
     // Initialize schema
@@ -29,6 +30,12 @@ function getDb() {
       }
       if (!resCols.includes('es_maestra')) {
         db.exec('ALTER TABLE reservas_hotel ADD COLUMN es_maestra INTEGER DEFAULT 0');
+      }
+      if (!resCols.includes('metodo_pago')) {
+        db.exec('ALTER TABLE reservas_hotel ADD COLUMN metodo_pago TEXT');
+      }
+      if (!resCols.includes('referencia')) {
+        db.exec('ALTER TABLE reservas_hotel ADD COLUMN referencia TEXT');
       }
       if (!resCols.includes('parent_reserva_id')) {
         db.exec('ALTER TABLE reservas_hotel ADD COLUMN parent_reserva_id INTEGER');

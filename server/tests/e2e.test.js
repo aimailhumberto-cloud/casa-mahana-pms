@@ -5,6 +5,7 @@ import path from 'path';
 // Force test environment
 process.env.PORT = '3299';
 process.env.NODE_ENV = 'test';
+process.env.TEST_DB_NAME = 'casa-mahana-test.db';
 process.env.NOTIFICATIONS_ENABLED = 'true';
 
 // Mock nodemailer transporter globally before importing notifications
@@ -95,8 +96,16 @@ beforeAll(async () => {
   // Initialize and seed database
   const db = getDb();
   
-  // Seed distinct roles for RBAC testing
+  // Truncate tables for a completely clean test suite state
+  db.pragma('foreign_keys = OFF');
+  db.prepare('DELETE FROM reservas_hotel').run();
+  db.prepare('DELETE FROM folio_hotel').run();
+  db.prepare('DELETE FROM notificaciones_log').run();
   db.prepare('DELETE FROM usuarios').run();
+  db.pragma('foreign_keys = ON');
+  
+  // Force enable notifications in configurations for this test run
+  db.prepare('UPDATE configuracion_sistema SET notifications_enabled = 1, wa_enabled = 1 WHERE id = 1').run();
   
   const insertUser = db.prepare('INSERT INTO usuarios (email, password_hash, nombre, rol, activo) VALUES (?, ?, ?, ?, ?)');
   
@@ -118,7 +127,6 @@ afterAll(async () => {
 });
 
 describe('Casa Mahana PMS — Opaque-box E2E Test Suite', () => {
-
   // Helper function to hit endpoints
   async function apiRequest(endpoint, options = {}) {
     const url = endpoint.startsWith('http') ? endpoint : `${BASE_URL}${endpoint}`;
@@ -171,6 +179,10 @@ describe('Casa Mahana PMS — Opaque-box E2E Test Suite', () => {
         method: 'POST',
         body: payload
       });
+
+      if (status !== 201) {
+        fs.writeFileSync('C:\\Users\\Usuario\\.gemini\\antigravity\\scratch\\casa-mahana-pms\\.agents\\worker_sec_layout\\e2e_diag.txt', JSON.stringify({ status, data }, null, 2), 'utf-8');
+      }
 
       expect(status).toBe(201);
       expect(data.success).toBe(true);

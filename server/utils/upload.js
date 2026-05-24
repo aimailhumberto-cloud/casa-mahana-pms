@@ -37,12 +37,41 @@ function checkSignature(buffer, signatureHex) {
 }
 
 // ── Magic Bytes Validation Middleware (Disk Uploads) ──
-function validateUploadSignature(req, res, next) {
+async function validateUploadSignature(req, res, next) {
   if (!req.file) return next();
 
   const filePath = req.file.path;
+  let attempts = 0;
+  const maxAttempts = 10;
+  let fd;
+
+  while (attempts < maxAttempts) {
+    try {
+      if (fs.existsSync(filePath)) {
+        fd = fs.openSync(filePath, 'r');
+        break;
+      }
+    } catch (e) {
+      // ignore and retry
+    }
+    attempts++;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+
+  if (!fd) {
+    try {
+      fd = fs.openSync(filePath, 'r');
+    } catch (err) {
+      console.error('Magic bytes disk check error:', err);
+      try { fs.unlinkSync(filePath); } catch (e) {}
+      return res.status(500).json({
+        success: false,
+        error: { code: 'SERVER_ERROR', message: 'Error validando firmas de archivo' }
+      });
+    }
+  }
+
   try {
-    const fd = fs.openSync(filePath, 'r');
     const buffer = Buffer.alloc(12);
     const bytesRead = fs.readSync(fd, buffer, 0, 12, 0);
     fs.closeSync(fd);
@@ -82,6 +111,7 @@ function validateUploadSignature(req, res, next) {
     });
   }
 }
+
 
 // ── Magic Bytes Validation Middleware (Memory Import Uploads) ──
 function validateImportSignature(req, res, next) {

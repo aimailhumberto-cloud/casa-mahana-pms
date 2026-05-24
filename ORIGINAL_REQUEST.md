@@ -413,3 +413,35 @@ Integrity mode: development
 ### Quality & Tests
 - [ ] All 73 Vitest tests pass cleanly (`npm test -- --run`).
 - [ ] Zero typescript compile errors (`npm run build`).
+
+## Follow-up — 2026-05-24T18:55:16Z
+
+# Teamwork Project Prompt — Draft
+
+Review public endpoint security and fix mobile layout issues for the Casa Mahana PMS Booking Widget based on screenshot analysis.
+
+Working directory: `C:\Users\Usuario\.gemini\antigravity\scratch\casa-mahana-pms`
+Integrity mode: development
+
+## Requirements
+
+### R1. Public Endpoint Security & Isolation Audit
+Verify that the public route endpoints (e.g., `/api/v1/public/*`) do not expose administrative functions or databases, and that access control middleware (`requireAuth`, etc.) is securely applied to all private hotel routes in the backend (`server/server.js`, `server/routes/*.js`). Ensure that an unauthenticated user cannot manipulate reservation states, access other guests' data, or query administrative configurations.
+
+### R2. Mobile Viewport Layout Alignment (UI/UX)
+Fix the mobile responsiveness and design alignment of the public Booking Widget (`src/pages/BookingWidget.tsx` and related styles). Specifically resolve:
+- The overcrowding of the experience toggle tab ("Estadía (Hospedaje)" / "Pasadía (Por el día)"), shortening or wrapping labels on small screens.
+- The truncation of guest counts (e.g., "0 mascc...") by making the layout responsive (e.g., stacking guest selections vertically or adjusting paddings on mobile viewports).
+- Ensure the bottom floating validation panel and all multi-room cart lists fit perfectly and do not overflow or overlap on viewport widths down to 320px.
+
+## Acceptance Criteria
+
+### Security
+- [ ] No private or administrative API endpoint (such as `/api/v1/hotel/*` or `/api/v1/admin/*`) is accessible without a valid JWT token.
+- [ ] Public endpoints only return public data (active rooms, public rates, public availability) and do not leak user lists, database configurations, API keys, or financial stats.
+
+### Mobile UX & Responsiveness
+- [ ] The public booking page toggle tab and guest count selections do not cut off text or overflow horizontally on screen widths down to 320px.
+- [ ] The experience selector (Estadía / Pasadía) uses responsive styling to prevent text crowding.
+- [ ] Guest select dropdowns display complete text (e.g., "0 mascotas", "1 adulto") on mobile screens without truncation.
+- [ ] The bottom floating validation bar fits all components and buttons cleanly on mobile without overlapping adjacent content or covering too much vertical viewport height.
