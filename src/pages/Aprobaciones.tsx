@@ -7,6 +7,7 @@ export default function Aprobaciones() {
   const navigate = useNavigate();
   const [reservas, setReservas] = useState<any[]>([]);
   const [solicitudes, setSolicitudes] = useState<any[]>([]);
+  const [history, setHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingSolicitudes, setLoadingSolicitudes] = useState(false);
   const [userRole, setUserRole] = useState('receptionist');
@@ -31,13 +32,16 @@ export default function Aprobaciones() {
 
   const loadPending = () => {
     setLoading(true);
-    api.get('/hotel/reservas?estado=Pendiente')
+    api.get('/hotel/reservas?limit=100')
       .then(r => {
         if (Array.isArray(r.data)) {
-          setReservas(r.data);
+          // Pendientes
+          setReservas(r.data.filter((res: any) => res.estado === 'Pendiente'));
+          // Historial de decisiones web (Aprobadas / Rechazadas)
+          setHistory(r.data.filter((res: any) => res.fuente === 'Web' && (res.estado === 'Confirmada' || res.estado === 'Cancelada')));
         }
       })
-      .catch(e => console.error('Error fetching pending reservations:', e))
+      .catch(e => console.error('Error fetching reservations:', e))
       .finally(() => setLoading(false));
   };
 
@@ -75,8 +79,11 @@ export default function Aprobaciones() {
     }
   };
 
-  const handleReject = async (id: number, name: string) => {
-    if (!confirm(`¿Estás seguro de que deseas rechazar y cancelar la reserva pendiente de ${name}?`)) {
+  const handleReject = async (id: number, name: string, isAlreadyProcessed = false) => {
+    const msg = isAlreadyProcessed 
+      ? `¿Estás seguro de que deseas revertir la decisión y RECHAZAR la reserva de ${name}?`
+      : `¿Estás seguro de que deseas rechazar y cancelar la reserva pendiente de ${name}?`;
+    if (!confirm(msg)) {
       return;
     }
     setActionLoadingId(id);
@@ -343,6 +350,66 @@ export default function Aprobaciones() {
               })}
             </div>
           )}
+
+          {/* Historial Reciente de Decisiones (Web) Section */}
+          <div className="mt-10 border-t border-gray-100 pt-8">
+            <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+              Historial Reciente de Decisiones (Web)
+            </h2>
+            {history.length === 0 ? (
+              <div className="bg-gray-50/50 rounded-2xl border border-gray-100/50 p-6 text-center text-xs text-gray-400 italic">
+                No hay decisiones registradas recientemente en esta sesión.
+              </div>
+            ) : (
+              <div className="bg-white rounded-2xl border border-gray-100 divide-y divide-gray-50 overflow-hidden shadow-xs">
+                {history.map((res: any) => {
+                  const total = res.monto_total || 0;
+                  const isApproved = res.estado === 'Confirmada';
+                  return (
+                    <div key={res.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-gray-50/20 transition">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <strong className="text-gray-700 text-sm">{res.cliente} {res.apellido || ''}</strong>
+                          <span className="text-[10px] text-gray-400">#{res.id}</span>
+                          <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold border ${
+                            isApproved
+                              ? 'bg-green-50 text-green-700 border-green-200'
+                              : 'bg-red-50 text-red-700 border-red-200'
+                          }`}>
+                            {isApproved ? 'Aprobada' : 'Rechazada'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-400 mt-1">
+                          {res.check_in} al {res.check_out} ({res.noches} noches) · {res.habitacion_nombre || res.tipo_habitacion} · Total: <strong>${total.toFixed(2)}</strong>
+                        </p>
+                      </div>
+                      <div>
+                        {isApproved ? (
+                          <button
+                            onClick={() => handleReject(res.id, res.cliente, true)}
+                            disabled={actionLoadingId !== null}
+                            className="flex items-center gap-1.5 px-3 py-1.5 border border-red-200 hover:bg-red-50 text-red-600 rounded-xl text-xs font-semibold transition disabled:opacity-50"
+                          >
+                            <X size={12} />
+                            Rechazar (Revertir)
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleApprove(res.id)}
+                            disabled={actionLoadingId !== null}
+                            className="flex items-center gap-1.5 px-3 py-1.5 border border-green-200 hover:bg-green-50 text-green-700 rounded-xl text-xs font-semibold transition disabled:opacity-50"
+                          >
+                            <Check size={12} />
+                            Aprobar (Revertir)
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </>
       )}
 
