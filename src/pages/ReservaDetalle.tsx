@@ -72,6 +72,7 @@ export default function ReservaDetalle() {
   const [reserva, setReserva] = useState<any>(null);
   const [groupReservations, setGroupReservations] = useState<any[]>([]);
   const [rooms, setRooms] = useState<any[]>([]);
+  const [availableRooms, setAvailableRooms] = useState<any[]>([]);
 
   // Double approval workflow states
   const [showEditReservaModal, setShowEditReservaModal] = useState(false);
@@ -179,6 +180,16 @@ export default function ReservaDetalle() {
       })
       .catch(e => console.error('Error fetching rooms:', e));
   }, []);
+
+  useEffect(() => {
+    if (reserva?.check_in && reserva?.check_out) {
+      api.get(`/hotel/disponibilidad?check_in=${reserva.check_in}&check_out=${reserva.check_out}`)
+        .then(r => {
+          if (Array.isArray(r.data)) setAvailableRooms(r.data);
+        })
+        .catch(e => console.error('Error fetching availability:', e));
+    }
+  }, [reserva?.check_in, reserva?.check_out]);
 
   useEffect(() => {
     if (!pagoFile) {
@@ -841,8 +852,11 @@ export default function ReservaDetalle() {
                       className="input w-full select py-2 font-medium"
                     >
                       <option value="">Por asignar / Sin habitación</option>
-                      {rooms
-                        .filter(room => room.activa === 1 && room.categoria === reservaCategory)
+                      {availableRooms
+                        .filter(room => {
+                          const isCurrentRoom = room.id === reserva.habitacion_id;
+                          return room.activa === 1 && room.categoria === reservaCategory && (room.disponible || isCurrentRoom);
+                        })
                         .map(room => (
                           <option key={room.id} value={room.id}>
                             {room.nombre} — {room.tipo} ({room.categoria})
