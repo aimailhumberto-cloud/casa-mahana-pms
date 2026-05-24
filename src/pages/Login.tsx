@@ -20,9 +20,7 @@ export default function Login({ onLogin }: { onLogin: (email: string, password: 
     <div className="min-h-screen bg-gradient-to-br from-mahana-400 via-mahana-500 to-ocean-600 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8">
         <div className="text-center mb-8">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-mahana-500 to-mahana-600 flex items-center justify-center mx-auto mb-4 shadow-lg">
-            <Hotel size={32} className="text-white" />
-          </div>
+          <img src="/logo.png" alt="Casa Mahana" className="w-20 h-20 rounded-2xl object-cover mx-auto mb-4 shadow-lg border-2 border-white/20" />
           <h1 className="text-2xl font-bold text-gray-800">Casa Mahana</h1>
           <p className="text-gray-400 text-sm mt-1">Sistema de Gestión Hotelera</p>
         </div>
