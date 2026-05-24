@@ -830,10 +830,15 @@ router.put('/hotel/reservas/:id', requireAuth, (req, res) => {
       Object.assign(data, totals);
     }
 
+    // Sanitize empty string room assignments to null
+    if (data.habitacion_id === '') {
+      data.habitacion_id = null;
+    }
+
     // Validate room availability if changing room or dates
-    if (data.habitacion_id || data.check_in || data.check_out) {
+    if (data.hasOwnProperty('habitacion_id') || data.check_in || data.check_out) {
       const db = getDb();
-      const roomId = data.habitacion_id || existing.habitacion_id;
+      const roomId = data.hasOwnProperty('habitacion_id') ? data.habitacion_id : existing.habitacion_id;
       const ci = data.check_in || existing.check_in;
       const co = data.check_out || existing.check_out;
       if (roomId) {

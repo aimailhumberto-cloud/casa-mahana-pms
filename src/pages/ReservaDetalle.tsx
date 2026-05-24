@@ -457,12 +457,19 @@ export default function ReservaDetalle() {
       return;
     }
     setEditLoading(true);
+    const cleanedForm = {
+      ...editForm,
+      habitacion_id: editForm.habitacion_id ? parseInt(editForm.habitacion_id) : null
+    };
     try {
-      await api.put(`/hotel/reservas/${id}`, editForm);
+      await api.put(`/hotel/reservas/${id}`, cleanedForm);
       setEditing(false);
       load();
-    } catch (err: any) { alert(err.message); }
-    finally { setEditLoading(false); }
+    } catch (err: any) {
+      alert(err?.response?.data?.error?.message || err.message || 'Error al guardar los cambios');
+    } finally {
+      setEditLoading(false);
+    }
   };
 
   const handleRequestEditReserva = async () => {
@@ -471,11 +478,15 @@ export default function ReservaDetalle() {
       return;
     }
     setEditLoading(true);
+    const cleanedForm = {
+      ...editForm,
+      habitacion_id: editForm.habitacion_id ? parseInt(editForm.habitacion_id) : null
+    };
     try {
       await api.post(`/hotel/reservas/${id}/solicitar-cambio`, {
         tipo_modificacion: 'editar_reserva',
         justificacion: justificacionReserva,
-        snapshot_datos: editForm
+        snapshot_datos: cleanedForm
       });
       setShowEditReservaModal(false);
       setEditing(false);
@@ -536,6 +547,9 @@ export default function ReservaDetalle() {
 
   if (loading) return <div className="animate-pulse text-gray-400 p-8">Cargando...</div>;
   if (!reserva) return <div className="p-8 text-red-500">Reserva no encontrada</div>;
+
+  const reservaRoom = rooms.find(r => r.id === reserva.habitacion_id);
+  const reservaCategory = reservaRoom?.categoria || (rooms.find(r => r.tipo === reserva.tipo_habitacion)?.categoria) || 'Estadía';
 
   const isClosed = ['Cancelada', 'No-Show'].includes(reserva.estado);
   const totalPagado = reserva.monto_pagado || 0;
@@ -811,7 +825,7 @@ export default function ReservaDetalle() {
                   <div><label className="text-xs text-gray-500">Teléfono</label><input value={editForm.telefono} onChange={e => setEditForm((f: any) => ({ ...f, telefono: e.target.value }))} className="input" /></div>
                   <div><label className="text-xs text-gray-500">Nacionalidad</label><input value={editForm.nacionalidad} onChange={e => setEditForm((f: any) => ({ ...f, nacionalidad: e.target.value }))} className="input" /></div>
                   <div className="col-span-2">
-                    <label className="text-xs font-semibold text-gray-500 block mb-1">Reasignar Habitación / Bohío (Mismo Tipo: {reserva.tipo_habitacion})</label>
+                    <label className="text-xs font-semibold text-gray-500 block mb-1">Reasignar Habitación / Bohío (Categoría: {reservaCategory})</label>
                     <select
                       value={editForm.habitacion_id || ''}
                       onChange={e => {
@@ -827,11 +841,14 @@ export default function ReservaDetalle() {
                       className="input w-full select py-2 font-medium"
                     >
                       <option value="">Por asignar / Sin habitación</option>
-                      {rooms.filter(room => room.activa === 1 && room.tipo === reserva.tipo_habitacion).map(room => (
-                        <option key={room.id} value={room.id}>
-                          {room.nombre} — {room.tipo} ({room.categoria})
-                        </option>
-                      ))}
+                      {rooms
+                        .filter(room => room.activa === 1 && room.categoria === reservaCategory)
+                        .map(room => (
+                          <option key={room.id} value={room.id}>
+                            {room.nombre} — {room.tipo} ({room.categoria})
+                          </option>
+                        ))
+                      }
                     </select>
                   </div>
                 </div>
