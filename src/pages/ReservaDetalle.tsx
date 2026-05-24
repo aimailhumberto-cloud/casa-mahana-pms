@@ -71,6 +71,7 @@ export default function ReservaDetalle() {
   const isAdmin = JSON.parse(localStorage.getItem('pms_user') || '{}')?.rol === 'admin';
   const [reserva, setReserva] = useState<any>(null);
   const [groupReservations, setGroupReservations] = useState<any[]>([]);
+  const [rooms, setRooms] = useState<any[]>([]);
 
   // Double approval workflow states
   const [showEditReservaModal, setShowEditReservaModal] = useState(false);
@@ -169,6 +170,14 @@ export default function ReservaDetalle() {
         if (r.data) setPaypalConfig(r.data);
       })
       .catch(e => console.error('Error fetching paypal config:', e));
+  }, []);
+
+  useEffect(() => {
+    api.get('/hotel/habitaciones')
+      .then(r => {
+        if (Array.isArray(r.data)) setRooms(r.data);
+      })
+      .catch(e => console.error('Error fetching rooms:', e));
   }, []);
 
   useEffect(() => {
@@ -436,6 +445,8 @@ export default function ReservaDetalle() {
       nacionalidad: reserva.nacionalidad || '',
       notas: reserva.notas || '',
       hora_llegada: reserva.hora_llegada || '',
+      habitacion_id: reserva.habitacion_id || '',
+      tipo_habitacion: reserva.tipo_habitacion || '',
     });
     setEditing(true);
   };
@@ -799,6 +810,30 @@ export default function ReservaDetalle() {
                   <div><label className="text-xs text-gray-500">WhatsApp</label><input value={editForm.whatsapp} onChange={e => setEditForm((f: any) => ({ ...f, whatsapp: e.target.value }))} className="input" /></div>
                   <div><label className="text-xs text-gray-500">Teléfono</label><input value={editForm.telefono} onChange={e => setEditForm((f: any) => ({ ...f, telefono: e.target.value }))} className="input" /></div>
                   <div><label className="text-xs text-gray-500">Nacionalidad</label><input value={editForm.nacionalidad} onChange={e => setEditForm((f: any) => ({ ...f, nacionalidad: e.target.value }))} className="input" /></div>
+                  <div className="col-span-2">
+                    <label className="text-xs font-semibold text-gray-500 block mb-1">Reasignar Habitación / Bohío (Mismo Tipo: {reserva.tipo_habitacion})</label>
+                    <select
+                      value={editForm.habitacion_id || ''}
+                      onChange={e => {
+                        const val = e.target.value;
+                        const roomId = val ? parseInt(val) : null;
+                        const selectedRoom = rooms.find(r => r.id === roomId);
+                        setEditForm((f: any) => ({
+                          ...f,
+                          habitacion_id: roomId,
+                          tipo_habitacion: selectedRoom ? selectedRoom.tipo : f.tipo_habitacion
+                        }));
+                      }}
+                      className="input w-full select py-2 font-medium"
+                    >
+                      <option value="">Por asignar / Sin habitación</option>
+                      {rooms.filter(room => room.activa === 1 && room.tipo === reserva.tipo_habitacion).map(room => (
+                        <option key={room.id} value={room.id}>
+                          {room.nombre} — {room.tipo} ({room.categoria})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
                 <div><label className="text-xs text-gray-500">Notas</label><textarea value={editForm.notas} onChange={e => setEditForm((f: any) => ({ ...f, notas: e.target.value }))} className="input min-h-[60px]" /></div>
                 <div className="flex gap-2">
