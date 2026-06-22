@@ -329,6 +329,55 @@ CREATE TABLE IF NOT EXISTS notificaciones_plantillas (
   PRIMARY KEY (codigo, canal)
 );
 
+-- ═══ CRM & COTIZACIONES CUSTOM ═══
+CREATE TABLE IF NOT EXISTS leads_clientes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  nombre TEXT NOT NULL,
+  apellido TEXT,
+  email TEXT,
+  telefono TEXT,
+  notas TEXT,
+  estado TEXT DEFAULT 'Borrador', -- Borrador, Enviada, En Negociación, Aceptada, Rechazada
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS cotizaciones_custom (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  lead_id INTEGER NOT NULL,
+  check_in TEXT,
+  check_out TEXT,
+  noches INTEGER,
+  adultos INTEGER DEFAULT 1,
+  menores INTEGER DEFAULT 0,
+  mascotas INTEGER DEFAULT 0,
+  plan_codigo TEXT,
+  habitaciones_seleccionadas TEXT, -- JSON array de IDs de habitaciones: [1, 2]
+  items_adicionales TEXT,          -- JSON array de items: [{"nombre": "DJ", "precio": 300}, ...]
+  subtotal REAL DEFAULT 0,
+  descuento REAL DEFAULT 0,
+  descuento_tipo TEXT DEFAULT 'fijo', -- 'fijo' o 'porcentaje'
+  impuesto_pct REAL DEFAULT 10,
+  impuesto_monto REAL DEFAULT 0,
+  monto_total REAL DEFAULT 0,
+  deposito_sugerido REAL DEFAULT 0,
+  notas TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (lead_id) REFERENCES leads_clientes(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS servicios_adicionales (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  nombre TEXT NOT NULL UNIQUE,
+  descripcion TEXT,
+  precio_base REAL NOT NULL,
+  activo INTEGER DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_leads_estado ON leads_clientes(estado);
+CREATE INDEX IF NOT EXISTS idx_cotizaciones_lead ON cotizaciones_custom(lead_id);
+
+
 
 
 

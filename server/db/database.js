@@ -613,8 +613,26 @@ Te recordamos que tu estadía inicia *{{etiqueta_dias}}*:
       console.log('✅ Seeded notificaciones_plantillas database tables successfully');
     }
 
+    // ── Seed servicios_adicionales ──
+    const servicesTableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='servicios_adicionales'").get();
+    if (servicesTableExists) {
+      const activeServices = db.prepare('SELECT COUNT(*) as c FROM servicios_adicionales').get().c;
+      if (activeServices === 0) {
+        const insertService = db.prepare('INSERT INTO servicios_adicionales (nombre, descripcion, precio_base, activo) VALUES (?, ?, ?, 1)');
+        const seedServices = db.transaction(() => {
+          insertService.run('Desayuno para Grupo 👥', 'Servicio de buffet de desayuno para grupos', 10.00);
+          insertService.run('Tour Guiado 🌴', 'Tour guiado por las áreas de playa y senderos', 25.00);
+          insertService.run('Servicio de Animador 🎉', 'Animación y juegos grupales', 150.00);
+          insertService.run('Servicio de DJ 🎵', 'DJ con equipamiento de sonido completo', 300.00);
+          insertService.run('Transporte Especial 🚐', 'Servicio de van de ida y vuelta para grupos', 80.00);
+        });
+        seedServices();
+        console.log('✅ Seeded servicios_adicionales successfully');
+      }
+    }
 
     console.log('✅ Database initialized at', DB_PATH);
+
   }
   return db;
 }
@@ -624,8 +642,9 @@ const VALID_TABLES = [
   'habitaciones', 'planes_tarifa', 'reservas_hotel', 'folio_hotel', 
   'huespedes_reserva', 'huespedes', 'usuarios', 'config_hotel',
   'configuracion_sistema', 'reversiones_log', 'solicitudes_modificacion',
-  'notificaciones_plantillas'
+  'notificaciones_plantillas', 'leads_clientes', 'cotizaciones_custom', 'servicios_adicionales'
 ];
+
 
 
 function validateTable(table) {

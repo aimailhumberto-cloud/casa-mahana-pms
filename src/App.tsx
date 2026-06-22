@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, Link, useNavigate, useLocation } from 'react-router-dom';
 import { api, setToken, clearToken, isLoggedIn } from './api/client';
-import { Hotel, CalendarDays, BedDouble, DollarSign, LogOut, Menu, X, LayoutGrid, Settings, Package, ExternalLink, BarChart3, Upload, Users, Bell, ShieldCheck, Wrench } from 'lucide-react';
+import { Hotel, CalendarDays, BedDouble, DollarSign, LogOut, Menu, X, LayoutGrid, Settings, Package, ExternalLink, BarChart3, Upload, Users, Bell, ShieldCheck, Wrench, Calculator } from 'lucide-react';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Reservas from './pages/Reservas';
@@ -19,6 +19,8 @@ import Huespedes from './pages/Huespedes';
 import Aprobaciones from './pages/Aprobaciones';
 import Usuarios from './pages/Usuarios';
 import Configuracion from './pages/Configuracion';
+import CotizadorCRM from './pages/CotizadorCRM';
+
 
 function App() {
   const [user, setUser] = useState<any>(null);
@@ -89,6 +91,7 @@ function App() {
     { path: '/calendario', label: 'Calendario', icon: LayoutGrid },
     { path: '/aprobaciones', label: 'Aprobaciones', icon: Bell, badge: pendingCount > 0 ? pendingCount : undefined },
     { path: '/reservas', label: 'Reservas', icon: CalendarDays },
+    { path: '/crm', label: 'Cotizador / CRM', icon: Calculator },
     { path: '/habitaciones', label: 'Habitaciones', icon: BedDouble },
     { path: '/productos', label: 'Productos', icon: Package },
     { path: '/admin/habitaciones', label: 'Config Rooms', icon: Settings },
@@ -187,6 +190,7 @@ function App() {
                 <Route path="/reservas" element={<Reservas />} />
                 <Route path="/reservas/nueva" element={<NuevaReserva />} />
                 <Route path="/reservas/:id" element={<ReservaDetalle />} />
+                <Route path="/crm" element={<CotizadorCRM />} />
                 <Route path="/admin/habitaciones" element={<AdminHabitaciones />} />
                 <Route path="/productos" element={<Productos />} />
                 <Route path="/saldos" element={<Saldos />} />
