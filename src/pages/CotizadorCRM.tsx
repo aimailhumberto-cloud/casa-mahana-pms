@@ -43,6 +43,7 @@ type Plan = {
 export default function CotizadorCRM() {
   // Navigation & UI state
   const [activeTab, setActiveTab] = useState<'leads' | 'builder'>('leads');
+  const [subTab, setSubTab] = useState<'leads' | 'catalog'>('leads');
   const [leads, setLeads] = useState<Lead[]>([]);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [leadQuotes, setLeadQuotes] = useState<any[]>([]);
@@ -66,6 +67,17 @@ export default function CotizadorCRM() {
     notas: '',
     estado: 'Borrador'
   });
+
+  // Services Catalog form state
+  const [showServiceModal, setShowServiceModal] = useState(false);
+  const [editingServiceId, setEditingServiceId] = useState<number | null>(null);
+  const [serviceForm, setServiceForm] = useState({
+    nombre: '',
+    descripcion: '',
+    precio_base: 0,
+    activo: true
+  });
+
 
   // Quotation Builder Form State
   const [quoteForm, setQuoteForm] = useState({
@@ -122,7 +134,54 @@ export default function CotizadorCRM() {
     }
   };
 
+  const fetchServicesCatalog = async () => {
+    try {
+      const res = await api.get('/crm/servicios', { params: { include_inactive: 'true' } });
+      setPreloadedServices(res.data || []);
+    } catch (e) {
+      setError('Error al cargar catálogo de servicios.');
+    }
+  };
+
+  const handleServiceSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!serviceForm.nombre || serviceForm.precio_base < 0) {
+      setError('Nombre y precio base válidos son requeridos.');
+      return;
+    }
+    setError('');
+    try {
+      if (editingServiceId) {
+        await api.put(`/crm/servicios/${editingServiceId}`, serviceForm);
+        setSuccess('Servicio actualizado con éxito.');
+      } else {
+        await api.post('/crm/servicios', serviceForm);
+        setSuccess('Servicio creado con éxito.');
+      }
+      setShowServiceModal(false);
+      setServiceForm({ nombre: '', descripcion: '', precio_base: 0, activo: true });
+      setEditingServiceId(null);
+      fetchServicesCatalog();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Error al guardar el servicio.');
+    }
+  };
+
+  const handleDeactivateService = async (id: number) => {
+    if (!window.confirm('¿Estás seguro de desactivar este servicio?')) return;
+    try {
+      await api.delete(`/crm/servicios/${id}`);
+      setSuccess('Servicio desactivado.');
+      fetchServicesCatalog();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (e) {
+      setError('Error al desactivar el servicio.');
+    }
+  };
+
   const selectLeadDetails = async (lead: Lead) => {
+
     setSelectedLead(lead);
     setLoading(true);
     try {
@@ -380,9 +439,35 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
         </div>
       )}
 
-      {/* Main Tab Switch */}
+      {/* Sub-tabs to toggle between leads and catalog management */}
       {activeTab === 'leads' && (
+        <div className="flex border-b border-gray-200 mb-4">
+          <button
+            onClick={() => {
+              setSubTab('leads');
+              fetchLeads();
+              fetchPreloadedData();
+            }}
+            className={`py-3 px-6 font-bold text-sm border-b-2 transition ${subTab === 'leads' ? 'border-mahana-600 text-mahana-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+          >
+            📋 Prospectos y Cotizaciones
+          </button>
+          <button
+            onClick={() => {
+              setSubTab('catalog');
+              fetchServicesCatalog();
+            }}
+            className={`py-3 px-6 font-bold text-sm border-b-2 transition ${subTab === 'catalog' ? 'border-mahana-600 text-mahana-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+          >
+            ⚙️ Catálogo de Servicios Precargados
+          </button>
+        </div>
+      )}
+
+      {/* Main Tab Switch */}
+      {activeTab === 'leads' && subTab === 'leads' && (
         <div className="flex flex-col lg:flex-row gap-6">
+
           {/* Left Column: Leads List & Actions */}
           <div className="w-full lg:w-1/3 space-y-4">
             <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm space-y-4">
@@ -758,7 +843,154 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
         </div>
       )}
 
+      {/* Services Catalog management Tab */}
+      {activeTab === 'leads' && subTab === 'catalog' && (
+        <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-4">
+          <div className="flex justify-between items-center pb-2 border-b">
+            <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+              <ClipboardList className="text-mahana-600" />
+              Catálogo de Servicios Adicionales Precargados
+            </h2>
+            <button
+              onClick={() => {
+                setEditingServiceId(null);
+                setServiceForm({ nombre: '', descripcion: '', precio_base: 0, activo: true });
+                setShowServiceModal(true);
+              }}
+              className="px-3 py-1.5 bg-mahana-600 text-white rounded-lg hover:bg-mahana-700 transition flex items-center gap-1 text-xs font-bold"
+            >
+              <Plus size={14} />
+              Nuevo Servicio
+            </button>
+          </div>
+
+          {/* Service form modal inside page */}
+          {showServiceModal && (
+            <form onSubmit={handleServiceSubmit} className="p-4 bg-gray-50 rounded-xl border border-gray-200 space-y-3 max-w-lg">
+              <h3 className="font-bold text-sm text-gray-700">{editingServiceId ? 'Editar Servicio' : 'Nuevo Servicio'}</h3>
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-gray-500">Nombre del Servicio</label>
+                <input 
+                  type="text" required placeholder="Ej. Servicio de DJ, Desayuno de Grupo"
+                  className="p-2 text-sm border rounded-lg w-full bg-white"
+                  value={serviceForm.nombre}
+                  onChange={e => setServiceForm({...serviceForm, nombre: e.target.value})}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-gray-500">Descripción / Detalles</label>
+                <textarea 
+                  placeholder="Describe lo que incluye este servicio..." rows={2}
+                  className="p-2 text-sm border rounded-lg w-full bg-white"
+                  value={serviceForm.descripcion}
+                  onChange={e => setServiceForm({...serviceForm, descripcion: e.target.value})}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-gray-500">Precio Sugerido Base ($)</label>
+                  <input 
+                    type="number" required min={0} step="0.01"
+                    className="p-2 text-sm border rounded-lg w-full bg-white"
+                    value={serviceForm.precio_base || ''}
+                    onChange={e => setServiceForm({...serviceForm, precio_base: parseFloat(e.target.value) || 0})}
+                  />
+                </div>
+                <div className="space-y-1 flex flex-col justify-end pb-2">
+                  <label className="flex items-center gap-2 text-xs font-bold text-gray-600 cursor-pointer">
+                    <input 
+                      type="checkbox"
+                      checked={serviceForm.activo}
+                      onChange={e => setServiceForm({...serviceForm, activo: e.target.checked})}
+                      className="rounded text-mahana-600 focus:ring-mahana-500"
+                    />
+                    Servicio Activo
+                  </label>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <button 
+                  type="button" onClick={() => setShowServiceModal(false)}
+                  className="px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-150 rounded-lg"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit"
+                  className="px-3 py-1.5 text-xs bg-mahana-600 text-white font-medium rounded-lg hover:bg-mahana-700"
+                >
+                  Guardar Servicio
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* Services list table */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm border-collapse">
+              <thead>
+                <tr className="border-b border-gray-200 text-gray-400 font-bold uppercase tracking-wider text-xs">
+                  <th className="py-3 px-4">Servicio</th>
+                  <th className="py-3 px-4">Descripción</th>
+                  <th className="py-3 px-4">Precio Sugerido</th>
+                  <th className="py-3 px-4">Estado</th>
+                  <th className="py-3 px-4 text-right">Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {preloadedServices.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-gray-400 text-sm">No hay servicios en el catálogo.</td>
+                  </tr>
+                ) : (
+                  preloadedServices.map(service => (
+                    <tr key={service.id} className="border-b border-gray-100 hover:bg-gray-50/50 transition">
+                      <td className="py-3 px-4 font-bold text-gray-800">{service.nombre}</td>
+                      <td className="py-3 px-4 text-xs text-gray-500 max-w-xs truncate" title={service.descripcion}>{service.descripcion || 'Sin descripción'}</td>
+                      <td className="py-3 px-4 font-semibold text-gray-700">${service.precio_base.toFixed(2)}</td>
+                      <td className="py-3 px-4">
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${service.activo ? 'bg-green-50 text-green-700 border-green-200' : 'bg-gray-100 text-gray-700 border-gray-200'}`}>
+                          {service.activo ? 'Activo' : 'Inactivo'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-right space-x-2">
+                        <button
+                          onClick={() => {
+                            setEditingServiceId(service.id);
+                            setServiceForm({
+                              nombre: service.nombre,
+                              descripcion: service.descripcion || '',
+                              precio_base: service.precio_base,
+                              activo: !!service.activo
+                            });
+                            setShowServiceModal(true);
+                          }}
+                          className="p-1 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded transition"
+                          title="Editar"
+                        >
+                          <Edit2 size={14} className="inline" />
+                        </button>
+                        {!!service.activo && (
+                          <button
+                            onClick={() => handleDeactivateService(service.id)}
+                            className="p-1 text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition"
+                            title="Desactivar"
+                          >
+                            <Trash2 size={14} className="inline" />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Quotation Builder View */}
+
       {activeTab === 'builder' && selectedLead && (
         <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-6">
           <div className="flex justify-between items-center pb-4 border-b">

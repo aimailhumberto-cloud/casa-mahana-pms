@@ -17,6 +17,9 @@ function findRouteHandler(router, path, method) {
 describe('CRM & Custom Quotations Router Endpoints', () => {
   let db;
   let getServicesHandler;
+  let createServiceHandler;
+  let updateServiceHandler;
+  let deleteServiceHandler;
   let listLeadsHandler;
   let getLeadHandler;
   let createLeadHandler;
@@ -24,6 +27,7 @@ describe('CRM & Custom Quotations Router Endpoints', () => {
   let createQuoteHandler;
 
   beforeAll(() => {
+
     resetDb();
 
     const fs = require('fs');
@@ -39,6 +43,9 @@ describe('CRM & Custom Quotations Router Endpoints', () => {
     db = getDb();
 
     getServicesHandler = findRouteHandler(crmRouter, '/servicios', 'get');
+    createServiceHandler = findRouteHandler(crmRouter, '/servicios', 'post');
+    updateServiceHandler = findRouteHandler(crmRouter, '/servicios/:id', 'put');
+    deleteServiceHandler = findRouteHandler(crmRouter, '/servicios/:id', 'delete');
     listLeadsHandler = findRouteHandler(crmRouter, '/leads', 'get');
     getLeadHandler = findRouteHandler(crmRouter, '/leads/:id', 'get');
     createLeadHandler = findRouteHandler(crmRouter, '/leads', 'post');
@@ -196,5 +203,78 @@ describe('CRM & Custom Quotations Router Endpoints', () => {
     // Confirm DB reflects the status update
     const leadRow = db.prepare('SELECT estado FROM leads_clientes WHERE id = 1').get();
     expect(leadRow.estado).toBe('En Negociación');
+  });
+
+  it('should successfully create a new preloaded service', () => {
+    const req = {
+      user: { id: 1, rol: 'admin' },
+      body: {
+        nombre: 'Servicio de Yoga 🧘',
+        descripcion: 'Sesión de yoga grupal al amanecer',
+        precio_base: 15.00
+      }
+    };
+    let resStatus = 200;
+    let resData = null;
+    const res = {
+      status: (code) => { resStatus = code; return res; },
+      json: (data) => { resData = data; return res; }
+    };
+
+    createServiceHandler(req, res);
+
+    expect(resStatus).toBe(201);
+    expect(resData.success).toBe(true);
+    expect(resData.data.id).toBeDefined();
+    expect(resData.data.nombre).toBe('Servicio de Yoga 🧘');
+    expect(resData.data.precio_base).toBe(15.00);
+  });
+
+  it('should successfully update a preloaded service', () => {
+    const req = {
+      user: { id: 1, rol: 'admin' },
+      params: { id: 1 }, // updates the first seeded service
+      body: {
+        nombre: 'Desayuno Buffet Premium 🥞',
+        descripcion: 'Desayuno buffet completo con café ilimitado',
+        precio_base: 12.50,
+        activo: true
+      }
+    };
+    let resStatus = 200;
+    let resData = null;
+    const res = {
+      status: (code) => { resStatus = code; return res; },
+      json: (data) => { resData = data; return res; }
+    };
+
+    updateServiceHandler(req, res);
+
+    expect(resStatus).toBe(200);
+    expect(resData.success).toBe(true);
+    expect(resData.data.nombre).toBe('Desayuno Buffet Premium 🥞');
+    expect(resData.data.precio_base).toBe(12.50);
+  });
+
+  it('should successfully deactivate a preloaded service', () => {
+    const req = {
+      user: { id: 1, rol: 'admin' },
+      params: { id: 1 }
+    };
+    let resStatus = 200;
+    let resData = null;
+    const res = {
+      status: (code) => { resStatus = code; return res; },
+      json: (data) => { resData = data; return res; }
+    };
+
+    deleteServiceHandler(req, res);
+
+    expect(resStatus).toBe(200);
+    expect(resData.success).toBe(true);
+
+    // Verify it is deactivated in DB
+    const serviceRow = db.prepare('SELECT activo FROM servicios_adicionales WHERE id = 1').get();
+    expect(serviceRow.activo).toBe(0);
   });
 });

@@ -15,13 +15,82 @@ function err(res, message, status = 400) {
 router.get('/servicios', requireAuth, (req, res) => {
   try {
     const db = getDb();
-    const services = db.prepare('SELECT * FROM servicios_adicionales WHERE activo = 1 ORDER BY nombre ASC').all();
+    const { include_inactive } = req.query || {};
+    let query = 'SELECT * FROM servicios_adicionales';
+    if (include_inactive !== 'true') {
+      query += ' WHERE activo = 1';
+    }
+    query += ' ORDER BY nombre ASC';
+    const services = db.prepare(query).all();
     return ok(res, services);
   } catch (e) {
     console.error('CRM Services error:', e);
     return err(res, 'Error al obtener servicios', 500);
   }
 });
+
+// ── POST /api/v1/crm/servicios ──
+router.post('/servicios', requireAuth, (req, res) => {
+  try {
+    const { nombre, descripcion, precio_base, activo } = req.body;
+    if (!nombre || precio_base === undefined) return err(res, 'Nombre y precio base requeridos');
+    const db = getDb();
+    const result = db.prepare(`
+      INSERT INTO servicios_adicionales (nombre, descripcion, precio_base, activo)
+      VALUES (?, ?, ?, ?)
+    `).run(nombre, descripcion || '', precio_base, activo !== undefined ? (activo ? 1 : 0) : 1);
+    
+    const newService = db.prepare('SELECT * FROM servicios_adicionales WHERE id = ?').get(result.lastInsertRowid);
+    return ok(res, newService, 201);
+  } catch (e) {
+    console.error('CRM Service create error:', e);
+    if (e.message.includes('UNIQUE constraint failed')) {
+      return err(res, 'Ya existe un servicio con ese nombre');
+    }
+    return err(res, 'Error al crear servicio', 500);
+  }
+});
+
+// ── PUT /api/v1/crm/servicios/:id ──
+router.put('/servicios/:id', requireAuth, (req, res) => {
+  try {
+    const { nombre, descripcion, precio_base, activo } = req.body;
+    if (!nombre || precio_base === undefined) return err(res, 'Nombre y precio base requeridos');
+    const db = getDb();
+    const result = db.prepare(`
+      UPDATE servicios_adicionales
+      SET nombre = ?, descripcion = ?, precio_base = ?, activo = ?
+      WHERE id = ?
+    `).run(nombre, descripcion || '', precio_base, activo ? 1 : 0, req.params.id);
+    
+    if (result.changes === 0) return err(res, 'Servicio no encontrado', 404);
+    const updated = db.prepare('SELECT * FROM servicios_adicionales WHERE id = ?').get(req.params.id);
+    return ok(res, updated);
+  } catch (e) {
+    console.error('CRM Service update error:', e);
+    return err(res, 'Error al actualizar servicio', 500);
+  }
+});
+
+// ── DELETE /api/v1/crm/servicios/:id ──
+router.delete('/servicios/:id', requireAuth, (req, res) => {
+  try {
+    const db = getDb();
+    // Soft delete / deactivate service so historical quotes don't break
+    const result = db.prepare(`
+      UPDATE servicios_adicionales
+      SET activo = 0
+      WHERE id = ?
+    `).run(req.params.id);
+    
+    if (result.changes === 0) return err(res, 'Servicio no encontrado', 404);
+    return ok(res, { message: 'Servicio desactivado con éxito' });
+  } catch (e) {
+    console.error('CRM Service delete error:', e);
+    return err(res, 'Error al desactivar servicio', 500);
+  }
+});
+
 
 // ── GET /api/v1/crm/leads ──
 router.get('/leads', requireAuth, (req, res) => {
