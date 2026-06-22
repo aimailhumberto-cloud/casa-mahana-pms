@@ -87,6 +87,14 @@ function getDb() {
       }
     }
 
+    const servicesExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='servicios_adicionales'").get();
+    if (servicesExists) {
+      const cols = db.prepare('PRAGMA table_info(servicios_adicionales)').all().map(c => c.name);
+      if (!cols.includes('tipo_precio')) {
+        db.exec("ALTER TABLE servicios_adicionales ADD COLUMN tipo_precio TEXT DEFAULT 'global'");
+      }
+    }
+
     db.exec(schema);
 
     // ── Seed habitaciones ──
@@ -618,16 +626,19 @@ Te recordamos que tu estadía inicia *{{etiqueta_dias}}*:
     if (servicesTableExists) {
       const activeServices = db.prepare('SELECT COUNT(*) as c FROM servicios_adicionales').get().c;
       if (activeServices === 0) {
-        const insertService = db.prepare('INSERT INTO servicios_adicionales (nombre, descripcion, precio_base, activo) VALUES (?, ?, ?, 1)');
+        const insertService = db.prepare('INSERT INTO servicios_adicionales (nombre, descripcion, precio_base, tipo_precio, activo) VALUES (?, ?, ?, ?, 1)');
         const seedServices = db.transaction(() => {
-          insertService.run('Desayuno para Grupo 👥', 'Servicio de buffet de desayuno para grupos', 10.00);
-          insertService.run('Tour Guiado 🌴', 'Tour guiado por las áreas de playa y senderos', 25.00);
-          insertService.run('Servicio de Animador 🎉', 'Animación y juegos grupales', 150.00);
-          insertService.run('Servicio de DJ 🎵', 'DJ con equipamiento de sonido completo', 300.00);
-          insertService.run('Transporte Especial 🚐', 'Servicio de van de ida y vuelta para grupos', 80.00);
+          insertService.run('Desayuno para Grupo 👥', 'Servicio de buffet de desayuno para grupos', 10.00, 'por_persona');
+          insertService.run('Tour Guiado 🌴', 'Tour guiado por las áreas de playa y senderos', 25.00, 'por_persona');
+          insertService.run('Servicio de Animador 🎉', 'Animación y juegos grupales', 150.00, 'global');
+          insertService.run('Servicio de DJ 🎵', 'DJ con equipamiento de sonido completo', 300.00, 'global');
+          insertService.run('Transporte Especial 🚐', 'Servicio de van de ida y vuelta para grupos', 80.00, 'global');
         });
         seedServices();
         console.log('✅ Seeded servicios_adicionales successfully');
+      } else {
+        // Migration update for existing records
+        db.prepare("UPDATE servicios_adicionales SET tipo_precio = 'por_persona' WHERE nombre IN ('Desayuno para Grupo 👥', 'Tour Guiado 🌴') AND (tipo_precio IS NULL OR tipo_precio = 'global')").run();
       }
     }
 

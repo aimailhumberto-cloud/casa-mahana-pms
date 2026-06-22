@@ -371,6 +371,7 @@ CREATE TABLE IF NOT EXISTS servicios_adicionales (
   nombre TEXT NOT NULL UNIQUE,
   descripcion TEXT,
   precio_base REAL NOT NULL,
+  tipo_precio TEXT DEFAULT 'global', -- 'global' o 'por_persona'
   activo INTEGER DEFAULT 1
 );
 

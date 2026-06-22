@@ -32,13 +32,13 @@ router.get('/servicios', requireAuth, (req, res) => {
 // ── POST /api/v1/crm/servicios ──
 router.post('/servicios', requireAuth, (req, res) => {
   try {
-    const { nombre, descripcion, precio_base, activo } = req.body;
+    const { nombre, descripcion, precio_base, tipo_precio, activo } = req.body;
     if (!nombre || precio_base === undefined) return err(res, 'Nombre y precio base requeridos');
     const db = getDb();
     const result = db.prepare(`
-      INSERT INTO servicios_adicionales (nombre, descripcion, precio_base, activo)
-      VALUES (?, ?, ?, ?)
-    `).run(nombre, descripcion || '', precio_base, activo !== undefined ? (activo ? 1 : 0) : 1);
+      INSERT INTO servicios_adicionales (nombre, descripcion, precio_base, tipo_precio, activo)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(nombre, descripcion || '', precio_base, tipo_precio || 'global', activo !== undefined ? (activo ? 1 : 0) : 1);
     
     const newService = db.prepare('SELECT * FROM servicios_adicionales WHERE id = ?').get(result.lastInsertRowid);
     return ok(res, newService, 201);
@@ -54,14 +54,14 @@ router.post('/servicios', requireAuth, (req, res) => {
 // ── PUT /api/v1/crm/servicios/:id ──
 router.put('/servicios/:id', requireAuth, (req, res) => {
   try {
-    const { nombre, descripcion, precio_base, activo } = req.body;
+    const { nombre, descripcion, precio_base, tipo_precio, activo } = req.body;
     if (!nombre || precio_base === undefined) return err(res, 'Nombre y precio base requeridos');
     const db = getDb();
     const result = db.prepare(`
       UPDATE servicios_adicionales
-      SET nombre = ?, descripcion = ?, precio_base = ?, activo = ?
+      SET nombre = ?, descripcion = ?, precio_base = ?, tipo_precio = ?, activo = ?
       WHERE id = ?
-    `).run(nombre, descripcion || '', precio_base, activo ? 1 : 0, req.params.id);
+    `).run(nombre, descripcion || '', precio_base, tipo_precio || 'global', activo ? 1 : 0, req.params.id);
     
     if (result.changes === 0) return err(res, 'Servicio no encontrado', 404);
     const updated = db.prepare('SELECT * FROM servicios_adicionales WHERE id = ?').get(req.params.id);

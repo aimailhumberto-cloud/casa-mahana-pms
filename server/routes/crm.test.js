@@ -132,8 +132,8 @@ describe('CRM & Custom Quotations Router Endpoints', () => {
         plan_codigo: 'todo_incluido',
         habitaciones_seleccionadas: [1, 2, 3],
         items_adicionales: [
-          { nombre: 'Servicio de DJ 🎵', precio: 300.00 },
-          { nombre: 'Desayuno para Grupo 👥', precio: 10.00 }
+          { nombre: 'Servicio de DJ 🎵', precio: 300.00, tipo_precio: 'global', precio_unitario: 300.00, cantidad: 1 },
+          { nombre: 'Desayuno para Grupo 👥', precio: 200.00, tipo_precio: 'por_persona', precio_unitario: 10.00, cantidad: 20 }
         ],
         subtotal: 1200.00,
         descuento: 10,
@@ -160,6 +160,10 @@ describe('CRM & Custom Quotations Router Endpoints', () => {
     expect(resData.data.lead_id).toBe(1);
     expect(resData.data.monto_total).toBe(1188.00);
     expect(resData.data.items_adicionales.length).toBe(2);
+    expect(resData.data.items_adicionales[0].tipo_precio).toBe('global');
+    expect(resData.data.items_adicionales[1].tipo_precio).toBe('por_persona');
+    expect(resData.data.items_adicionales[1].precio_unitario).toBe(10.00);
+    expect(resData.data.items_adicionales[1].cantidad).toBe(20);
   });
 
   it('should fetch lead details and parse quotes successfully', () => {
@@ -211,7 +215,8 @@ describe('CRM & Custom Quotations Router Endpoints', () => {
       body: {
         nombre: 'Servicio de Yoga 🧘',
         descripcion: 'Sesión de yoga grupal al amanecer',
-        precio_base: 15.00
+        precio_base: 15.00,
+        tipo_precio: 'por_persona'
       }
     };
     let resStatus = 200;
@@ -228,6 +233,7 @@ describe('CRM & Custom Quotations Router Endpoints', () => {
     expect(resData.data.id).toBeDefined();
     expect(resData.data.nombre).toBe('Servicio de Yoga 🧘');
     expect(resData.data.precio_base).toBe(15.00);
+    expect(resData.data.tipo_precio).toBe('por_persona');
   });
 
   it('should successfully update a preloaded service', () => {

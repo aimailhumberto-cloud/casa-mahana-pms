@@ -24,6 +24,9 @@ type Lead = {
 type QuoteItem = {
   nombre: string;
   precio: number;
+  tipo_precio: 'global' | 'por_persona';
+  precio_unitario: number;
+  cantidad: number;
 };
 
 type PreloadedService = {
@@ -31,6 +34,8 @@ type PreloadedService = {
   nombre: string;
   descripcion: string;
   precio_base: number;
+  tipo_precio: 'global' | 'por_persona';
+  activo?: number | boolean;
 };
 
 type Plan = {
@@ -75,6 +80,7 @@ export default function CotizadorCRM() {
     nombre: '',
     descripcion: '',
     precio_base: 0,
+    tipo_precio: 'global' as 'global' | 'por_persona',
     activo: true
   });
 
@@ -98,7 +104,7 @@ export default function CotizadorCRM() {
   // Custom items added to this quote
   const [selectedServices, setSelectedServices] = useState<QuoteItem[]>([]);
   const [selectedPreloadedId, setSelectedPreloadedId] = useState('');
-  const [manualItem, setManualItem] = useState({ nombre: '', precio: '' });
+  const [manualItem, setManualItem] = useState({ nombre: '', precio: '', tipo_precio: 'global' as 'global' | 'por_persona' });
   
   // Selected Quote for preview / printing
   const [activePreviewQuote, setActivePreviewQuote] = useState<any | null>(null);
@@ -159,7 +165,7 @@ export default function CotizadorCRM() {
         setSuccess('Servicio creado con éxito.');
       }
       setShowServiceModal(false);
-      setServiceForm({ nombre: '', descripcion: '', precio_base: 0, activo: true });
+      setServiceForm({ nombre: '', descripcion: '', precio_base: 0, tipo_precio: 'global', activo: true });
       setEditingServiceId(null);
       fetchServicesCatalog();
       setTimeout(() => setSuccess(''), 3000);
@@ -275,7 +281,20 @@ export default function CotizadorCRM() {
   // Calculations
   const calculatedTotals = useMemo(() => {
     const base = Number(quoteForm.base_price) || 0;
-    const additional = selectedServices.reduce((sum, item) => sum + item.precio, 0);
+    const totalGuests = (quoteForm.adultos || 0) + (quoteForm.menores || 0);
+
+    const resolvedServices = selectedServices.map(item => {
+      const isPerPerson = item.tipo_precio === 'por_persona';
+      const cantidad = isPerPerson ? totalGuests : 1;
+      const precio = item.precio_unitario * cantidad;
+      return {
+        ...item,
+        cantidad,
+        precio
+      };
+    });
+
+    const additional = resolvedServices.reduce((sum, item) => sum + item.precio, 0);
     const subtotal = base + additional;
     
     let discountAmount = 0;
@@ -291,6 +310,7 @@ export default function CotizadorCRM() {
     const deposit = total * 0.50; // 50% suggested deposit
 
     return {
+      resolvedServices,
       subtotal,
       discountAmount,
       taxable,
@@ -298,14 +318,26 @@ export default function CotizadorCRM() {
       total,
       deposit
     };
-  }, [quoteForm.base_price, selectedServices, quoteForm.descuento, quoteForm.descuento_tipo]);
+  }, [quoteForm.base_price, selectedServices, quoteForm.descuento, quoteForm.descuento_tipo, quoteForm.adultos, quoteForm.menores]);
 
   // Preloaded services picker handler
   const handleAddPreloadedService = () => {
     if (!selectedPreloadedId) return;
     const service = preloadedServices.find(s => s.id === Number(selectedPreloadedId));
     if (service) {
-      setSelectedServices(prev => [...prev, { nombre: service.nombre, precio: service.precio_base }]);
+      const isPerPerson = service.tipo_precio === 'por_persona';
+      const totalGuests = (quoteForm.adultos || 0) + (quoteForm.menores || 0);
+      const quantity = isPerPerson ? totalGuests : 1;
+      setSelectedServices(prev => [
+        ...prev, 
+        { 
+          nombre: service.nombre, 
+          precio_unitario: service.precio_base,
+          tipo_precio: service.tipo_precio || 'global',
+          cantidad: quantity,
+          precio: service.precio_base * quantity
+        }
+      ]);
       setSelectedPreloadedId('');
     }
   };
@@ -313,8 +345,21 @@ export default function CotizadorCRM() {
   // Manual items handler
   const handleAddManualItem = () => {
     if (!manualItem.nombre || !manualItem.precio) return;
-    setSelectedServices(prev => [...prev, { nombre: manualItem.nombre, precio: parseFloat(manualItem.precio) || 0 }]);
-    setManualItem({ nombre: '', precio: '' });
+    const priceVal = parseFloat(manualItem.precio) || 0;
+    const isPerPerson = manualItem.tipo_precio === 'por_persona';
+    const totalGuests = (quoteForm.adultos || 0) + (quoteForm.menores || 0);
+    const quantity = isPerPerson ? totalGuests : 1;
+    setSelectedServices(prev => [
+      ...prev, 
+      { 
+        nombre: manualItem.nombre, 
+        precio_unitario: priceVal,
+        tipo_precio: manualItem.tipo_precio,
+        cantidad: quantity,
+        precio: priceVal * quantity
+      }
+    ]);
+    setManualItem({ nombre: '', precio: '', tipo_precio: 'global' });
   };
 
   const handleRemoveService = (index: number) => {
@@ -335,7 +380,7 @@ export default function CotizadorCRM() {
       mascotas: quoteForm.mascotas,
       plan_codigo: quoteForm.plan_codigo,
       habitaciones_seleccionadas: quoteForm.habitaciones_seleccionadas,
-      items_adicionales: selectedServices,
+      items_adicionales: calculatedTotals.resolvedServices,
       subtotal: calculatedTotals.subtotal,
       descuento: quoteForm.descuento,
       descuento_tipo: quoteForm.descuento_tipo,
@@ -386,6 +431,9 @@ export default function CotizadorCRM() {
       
     if (parsedItems.length > 0) {
       itemsStr = '\n➕ *Servicios Adicionales Incluidos:*\n' + parsedItems.map((item: any) => {
+        if (item.tipo_precio === 'por_persona' && item.precio_unitario && item.cantidad) {
+          return `- ${item.nombre}: $${Number(item.precio_unitario).toFixed(2)} x ${item.cantidad} pers. = $${item.precio.toFixed(2)}`;
+        }
         return `- ${item.nombre}: $${item.precio.toFixed(2)}`;
       }).join('\n') + '\n';
     }
@@ -776,7 +824,14 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                           
                           {(Array.isArray(activePreviewQuote.items_adicionales) ? activePreviewQuote.items_adicionales : JSON.parse(activePreviewQuote.items_adicionales || '[]')).map((item: any, idx: number) => (
                             <tr key={idx} className="border-b border-gray-100">
-                              <td className="py-2.5 text-gray-800">{item.nombre}</td>
+                              <td className="py-2.5 text-gray-800">
+                                {item.nombre}
+                                {item.tipo_precio === 'por_persona' && item.precio_unitario && item.cantidad && (
+                                  <div className="text-[10px] text-gray-400">
+                                    ${Number(item.precio_unitario).toFixed(2)} x {item.cantidad} persona{item.cantidad > 1 ? 's' : ''}
+                                  </div>
+                                )}
+                              </td>
                               <td className="py-2.5 text-right text-gray-800 font-semibold">${item.precio.toFixed(2)}</td>
                             </tr>
                           ))}
@@ -886,7 +941,7 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                   onChange={e => setServiceForm({...serviceForm, descripcion: e.target.value})}
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-gray-500">Precio Sugerido Base ($)</label>
                   <input 
@@ -896,7 +951,18 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                     onChange={e => setServiceForm({...serviceForm, precio_base: parseFloat(e.target.value) || 0})}
                   />
                 </div>
-                <div className="space-y-1 flex flex-col justify-end pb-2">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-gray-500">Tipo de Precio</label>
+                  <select
+                    className="p-2 text-sm border rounded-lg w-full bg-white font-semibold"
+                    value={serviceForm.tipo_precio}
+                    onChange={e => setServiceForm({...serviceForm, tipo_precio: e.target.value as any})}
+                  >
+                    <option value="global">Fijo / Global</option>
+                    <option value="por_persona">Por Persona</option>
+                  </select>
+                </div>
+                <div className="space-y-1 flex flex-col justify-end pb-3">
                   <label className="flex items-center gap-2 text-xs font-bold text-gray-600 cursor-pointer">
                     <input 
                       type="checkbox"
@@ -932,6 +998,7 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                 <tr className="border-b border-gray-200 text-gray-400 font-bold uppercase tracking-wider text-xs">
                   <th className="py-3 px-4">Servicio</th>
                   <th className="py-3 px-4">Descripción</th>
+                  <th className="py-3 px-4">Tipo</th>
                   <th className="py-3 px-4">Precio Sugerido</th>
                   <th className="py-3 px-4">Estado</th>
                   <th className="py-3 px-4 text-right">Acciones</th>
@@ -940,14 +1007,20 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
               <tbody>
                 {preloadedServices.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="py-8 text-center text-gray-400 text-sm">No hay servicios en el catálogo.</td>
+                    <td colSpan={6} className="py-8 text-center text-gray-400 text-sm">No hay servicios en el catálogo.</td>
                   </tr>
                 ) : (
                   preloadedServices.map(service => (
                     <tr key={service.id} className="border-b border-gray-100 hover:bg-gray-50/50 transition">
                       <td className="py-3 px-4 font-bold text-gray-800">{service.nombre}</td>
                       <td className="py-3 px-4 text-xs text-gray-500 max-w-xs truncate" title={service.descripcion}>{service.descripcion || 'Sin descripción'}</td>
-                      <td className="py-3 px-4 font-semibold text-gray-700">${service.precio_base.toFixed(2)}</td>
+                      <td className="py-3 px-4 text-xs font-semibold text-gray-600">
+                        {service.tipo_precio === 'por_persona' ? 'Por Persona' : 'Global / Fijo'}
+                      </td>
+                      <td className="py-3 px-4 font-semibold text-gray-700">
+                        ${service.precio_base.toFixed(2)}
+                        {service.tipo_precio === 'por_persona' && <span className="text-[10px] text-gray-400 font-normal"> / pers.</span>}
+                      </td>
                       <td className="py-3 px-4">
                         <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${service.activo ? 'bg-green-50 text-green-700 border-green-200' : 'bg-gray-100 text-gray-700 border-gray-200'}`}>
                           {service.activo ? 'Activo' : 'Inactivo'}
@@ -961,6 +1034,7 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                               nombre: service.nombre,
                               descripcion: service.descripcion || '',
                               precio_base: service.precio_base,
+                              tipo_precio: (service.tipo_precio as any) || 'global',
                               activo: !!service.activo
                             });
                             setShowServiceModal(true);
@@ -1120,25 +1194,35 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
 
               <div className="p-3 bg-gray-50 rounded-xl space-y-2 border">
                 <span className="text-[11px] font-bold text-gray-400 block">Agregar Ítem Personalizado Manual</span>
-                <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-row gap-2">
                   <input 
                     type="text" placeholder="Descripción (Ej. Animador, DJ, Bebidas)"
                     className="p-2 border rounded-lg flex-1 bg-white text-xs"
                     value={manualItem.nombre}
                     onChange={e => setManualItem({...manualItem, nombre: e.target.value})}
                   />
-                  <input 
-                    type="number" placeholder="Precio ($)"
-                    className="p-2 border rounded-lg w-24 bg-white text-xs"
-                    value={manualItem.precio}
-                    onChange={e => setManualItem({...manualItem, precio: e.target.value})}
-                  />
-                  <button
-                    type="button" onClick={handleAddManualItem}
-                    className="p-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900 transition text-xs font-bold"
-                  >
-                    Añadir
-                  </button>
+                  <div className="flex gap-2">
+                    <input 
+                      type="number" placeholder="Precio ($)"
+                      className="p-2 border rounded-lg w-20 bg-white text-xs font-semibold"
+                      value={manualItem.precio}
+                      onChange={e => setManualItem({...manualItem, precio: e.target.value})}
+                    />
+                    <select
+                      className="p-2 border rounded-lg w-28 bg-white text-xs font-semibold"
+                      value={manualItem.tipo_precio}
+                      onChange={e => setManualItem({...manualItem, tipo_precio: e.target.value as any})}
+                    >
+                      <option value="global">Global</option>
+                      <option value="por_persona">Por Persona</option>
+                    </select>
+                    <button
+                      type="button" onClick={handleAddManualItem}
+                      className="p-2 px-3 bg-gray-800 text-white rounded-lg hover:bg-gray-900 transition text-xs font-bold whitespace-nowrap"
+                    >
+                      Añadir
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1154,7 +1238,7 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                     <span className="font-semibold text-gray-800">${quoteForm.base_price.toFixed(2)}</span>
                   </div>
 
-                  {selectedServices.map((item, idx) => (
+                  {calculatedTotals.resolvedServices.map((item, idx) => (
                     <div key={idx} className="flex justify-between items-center text-xs font-medium border-b pb-2">
                       <span className="text-gray-600 flex items-center gap-1">
                         <button 
@@ -1164,6 +1248,11 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                           <Trash2 size={12} />
                         </button>
                         {item.nombre}
+                        {item.tipo_precio === 'por_persona' && (
+                          <span className="text-[10px] text-gray-400 font-normal">
+                            (${item.precio_unitario.toFixed(2)} x {item.cantidad} pers.)
+                          </span>
+                        )}
                       </span>
                       <span className="font-semibold text-gray-800">${item.precio.toFixed(2)}</span>
                     </div>
