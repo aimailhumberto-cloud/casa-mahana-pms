@@ -15,6 +15,9 @@ type Lead = {
   notas: string;
   estado: string; // 'Borrador' | 'Enviada' | 'En Negociación' | 'Aceptada' | 'Rechazada'
   atendido: number;
+  fecha_seguimiento: string;
+  oferta_mejora: number;
+  fecha_evento?: string;
   created_at: string;
   updated_at: string;
   total_cotizaciones: number;
@@ -79,8 +82,29 @@ export default function CotizadorCRM() {
     telefono: '',
     notas: '',
     estado: 'Borrador',
-    atendido: false
+    atendido: false,
+    fecha_seguimiento: '',
+    oferta_mejora: false
   });
+
+  // KPI calculations
+  const kpis = useMemo(() => {
+    const totalLeads = leads.length;
+    const totalValue = leads.reduce((sum, l) => sum + Number(l.valor_total || 0), 0);
+    const converted = leads.filter(l => l.estado === 'Aceptada').length;
+    const pending = leads.filter(l => l.estado === 'En Negociación').length;
+    const conversionRate = totalLeads ? ((converted / totalLeads) * 100).toFixed(1) : '0';
+    const activeFollowups = leads.filter(l => l.fecha_seguimiento && new Date(l.fecha_seguimiento) >= new Date()).length;
+    
+    return [
+      { label: 'Total Prospectos', value: totalLeads, icon: Users, color: 'text-blue-600' },
+      { label: 'Valor Total', value: `$${totalValue.toLocaleString()}`, icon: DollarSign, color: 'text-green-600' },
+      { label: 'Tasa Conversión', value: `${conversionRate}%`, icon: Award, color: 'text-purple-600' },
+      { label: 'En Negociación', value: pending, icon: MessageSquare, color: 'text-orange-600' },
+      { label: 'Seguimientos Activos', value: activeFollowups, icon: Calendar, color: 'text-cyan-600' },
+      { label: 'Cotizaciones Aceptadas', value: converted, icon: Check, color: 'text-emerald-600' }
+    ];
+  }, [leads]);
 
   // Services Catalog form state
   const [showServiceModal, setShowServiceModal] = useState(false);
@@ -231,7 +255,8 @@ export default function CotizadorCRM() {
     try {
       const payload = {
         ...leadForm,
-        atendido: leadForm.atendido ? 1 : 0
+        atendido: leadForm.atendido ? 1 : 0,
+        oferta_mejora: leadForm.oferta_mejora ? 1 : 0
       };
       
       if (editingLeadId) {
@@ -242,7 +267,17 @@ export default function CotizadorCRM() {
         setSuccess('Prospecto creado con éxito.');
       }
       setShowLeadModal(false);
-      setLeadForm({ nombre: '', apellido: '', email: '', telefono: '', notas: '', estado: 'Borrador', atendido: false });
+      setLeadForm({
+        nombre: '',
+        apellido: '',
+        email: '',
+        telefono: '',
+        notas: '',
+        estado: 'Borrador',
+        atendido: false,
+        fecha_seguimiento: '',
+        oferta_mejora: false
+      });
       setEditingLeadId(null);
       fetchLeads();
       setTimeout(() => setSuccess(''), 3000);
@@ -260,7 +295,9 @@ export default function CotizadorCRM() {
       telefono: '',
       notas: '',
       estado: 'Borrador',
-      atendido: false
+      atendido: false,
+      fecha_seguimiento: '',
+      oferta_mejora: false
     });
     setShowLeadModal(true);
   };
@@ -274,7 +311,9 @@ export default function CotizadorCRM() {
       telefono: lead.telefono || '',
       notas: lead.notas || '',
       estado: lead.estado || 'Borrador',
-      atendido: lead.atendido === 1
+      atendido: lead.atendido === 1,
+      fecha_seguimiento: lead.fecha_seguimiento || '',
+      oferta_mejora: lead.oferta_mejora === 1
     });
     setShowLeadModal(true);
   };
@@ -304,7 +343,9 @@ export default function CotizadorCRM() {
         telefono: lead.telefono || '',
         notas: lead.notas || '',
         estado: lead.estado || 'Borrador',
-        atendido: newAtendido
+        atendido: newAtendido,
+        fecha_seguimiento: lead.fecha_seguimiento || '',
+        oferta_mejora: lead.oferta_mejora || 0
       });
       setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, atendido: newAtendido } : l));
       if (selectedLead && selectedLead.id === lead.id) {
@@ -314,6 +355,31 @@ export default function CotizadorCRM() {
       setTimeout(() => setSuccess(''), 3000);
     } catch (e) {
       setError('Error al actualizar el estado de atención.');
+    }
+  };
+
+  const handleToggleOfertaMejora = async (lead: Lead) => {
+    try {
+      const newOferta = lead.oferta_mejora === 1 ? 0 : 1;
+      await api.put(`/crm/leads/${lead.id}`, {
+        nombre: lead.nombre,
+        apellido: lead.apellido || '',
+        email: lead.email || '',
+        telefono: lead.telefono || '',
+        notas: lead.notas || '',
+        estado: lead.estado || 'Borrador',
+        atendido: lead.atendido || 0,
+        fecha_seguimiento: lead.fecha_seguimiento || '',
+        oferta_mejora: newOferta
+      });
+      setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, oferta_mejora: newOferta } : l));
+      if (selectedLead && selectedLead.id === lead.id) {
+        setSelectedLead(prev => prev ? { ...prev, oferta_mejora: newOferta } : null);
+      }
+      setSuccess('Estado de oferta de mejora actualizado.');
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (e) {
+      setError('Error al actualizar oferta de mejora.');
     }
   };
 
@@ -597,11 +663,26 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
     const wonVal = wonLeads.reduce((sum, l) => sum + (l.valor_total || 0), 0);
     const conversionRate = leads.length > 0 ? (wonLeads.length / leads.length) * 100 : 0;
     
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const thirtyDaysLater = new Date(now);
+    thirtyDaysLater.setDate(thirtyDaysLater.getDate() + 30);
+
+    const closeEventsCount = activeLeads.filter(l => {
+      if (!l.fecha_evento) return false;
+      const evDate = new Date(l.fecha_evento + 'T12:00:00');
+      return evDate >= now && evDate <= thirtyDaysLater;
+    }).length;
+
+    const upgradeOffersCount = activeLeads.filter(l => l.oferta_mejora === 1).length;
+    
     return {
       activeCount: activeLeads.length,
       pipelineValue: activeVal,
       wonValue: wonVal,
-      conversionRate
+      conversionRate,
+      closeEventsCount,
+      upgradeOffersCount
     };
   }, [leads]);
 
@@ -695,7 +776,7 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
       {activeTab === 'leads' && subTab === 'dashboard' && (
         <div className="space-y-6">
           {/* Metrics upper dashboard */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
             <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex items-center gap-4">
               <div className="p-3 bg-amber-50 rounded-xl text-amber-600">
                 <Users size={24} />
@@ -733,6 +814,26 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
               <div>
                 <span className="text-xs font-bold text-gray-400 uppercase block">Ingresos Ganados</span>
                 <span className="text-2xl font-black text-gray-800">${metrics.wonValue.toFixed(2)}</span>
+              </div>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex items-center gap-4">
+              <div className="p-3 bg-red-50 rounded-xl text-red-650">
+                <Calendar size={24} />
+              </div>
+              <div>
+                <span className="text-xs font-bold text-gray-400 uppercase block">Cierres Próx.</span>
+                <span className="text-2xl font-black text-gray-800">{metrics.closeEventsCount}</span>
+              </div>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex items-center gap-4">
+              <div className="p-3 bg-purple-50 rounded-xl text-purple-650">
+                <ClipboardList size={24} />
+              </div>
+              <div>
+                <span className="text-xs font-bold text-gray-400 uppercase block">Ofertas Mejora</span>
+                <span className="text-2xl font-black text-gray-800">{metrics.upgradeOffersCount}</span>
               </div>
             </div>
           </div>
@@ -804,8 +905,11 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                 <thead>
                   <tr className="border-b border-gray-200 bg-gray-50/50 text-gray-400 font-bold uppercase tracking-wider text-xs">
                     <th className="py-3.5 px-6">Cliente</th>
+                    <th className="py-3.5 px-4">Fecha Evento</th>
+                    <th className="py-3.5 px-4">Próximo Seguimiento</th>
                     <th className="py-3.5 px-4">Última Actividad</th>
                     <th className="py-3.5 px-4">Atendido</th>
+                    <th className="py-3.5 px-4">Oferta Mejora</th>
                     <th className="py-3.5 px-4">Estado</th>
                     <th className="py-3.5 px-4">Total Cotizado</th>
                     <th className="py-3.5 px-6 text-right">Acciones</th>
@@ -814,7 +918,7 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                 <tbody>
                   {filteredLeads.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="py-12 text-center text-gray-400 text-sm">No se encontraron prospectos con los filtros actuales.</td>
+                      <td colSpan={9} className="py-12 text-center text-gray-400 text-sm">No se encontraron prospectos con los filtros actuales.</td>
                     </tr>
                   ) : (
                     filteredLeads.map(lead => {
@@ -840,6 +944,26 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                             </button>
                             <span className="text-xs text-gray-400 block mt-0.5">{lead.telefono || lead.email || 'Sin datos de contacto'}</span>
                           </td>
+                          <td className="py-3.5 px-4 text-xs font-semibold text-gray-700">
+                            {lead.fecha_evento ? (
+                              <span className="flex items-center gap-1 text-mahana-800">
+                                <Calendar size={12} className="inline text-mahana-600" />
+                                {new Date(lead.fecha_evento + 'T12:00:00').toLocaleDateString()}
+                              </span>
+                            ) : (
+                              <span className="text-gray-400 font-normal">Sin fecha</span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4 text-xs font-semibold text-gray-700">
+                            {lead.fecha_seguimiento ? (
+                              <span className="flex items-center gap-1 text-purple-800">
+                                <Calendar size={12} className="inline text-purple-500" />
+                                {new Date(lead.fecha_seguimiento + 'T12:00:00').toLocaleDateString()}
+                              </span>
+                            ) : (
+                              <span className="text-gray-400 font-normal">No programado</span>
+                            )}
+                          </td>
                           <td className="py-3.5 px-4 text-xs text-gray-500">
                             {new Date(lead.updated_at).toLocaleDateString()}
                           </td>
@@ -853,6 +977,19 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                               />
                               <span className="text-xs ml-1.5 text-gray-500 font-medium">
                                 {lead.atendido === 1 ? 'Sí' : 'No'}
+                              </span>
+                            </label>
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <label className="inline-flex items-center cursor-pointer">
+                              <input 
+                                type="checkbox"
+                                checked={lead.oferta_mejora === 1}
+                                onChange={() => handleToggleOfertaMejora(lead)}
+                                className="rounded text-purple-650 focus:ring-purple-500 w-4 h-4 cursor-pointer"
+                              />
+                              <span className="text-xs ml-1.5 text-gray-500 font-medium">
+                                {lead.oferta_mejora === 1 ? 'Sí' : 'No'}
                               </span>
                             </label>
                           </td>
@@ -970,15 +1107,37 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                     value={leadForm.notas}
                     onChange={e => setLeadForm({...leadForm, notas: e.target.value})}
                   />
-                  <div className="flex items-center gap-2">
+                  <div className="space-y-1">
+                    <label htmlFor="lead-fecha-seguimiento" className="text-[11px] font-bold text-gray-400 uppercase block">Próximo Seguimiento</label>
                     <input 
-                      type="checkbox"
-                      id="lead-atendido"
-                      checked={leadForm.atendido}
-                      onChange={e => setLeadForm({...leadForm, atendido: e.target.checked})}
-                      className="rounded text-mahana-600 focus:ring-mahana-500 w-4 h-4 cursor-pointer"
+                      type="date"
+                      id="lead-fecha-seguimiento"
+                      className="p-1.5 text-xs border rounded-lg w-full bg-white text-gray-800 outline-none focus:ring-1 focus:ring-mahana-400"
+                      value={leadForm.fecha_seguimiento}
+                      onChange={e => setLeadForm({...leadForm, fecha_seguimiento: e.target.value})}
                     />
-                    <label htmlFor="lead-atendido" className="text-xs font-bold text-gray-650 cursor-pointer">Marcar como Atendido</label>
+                  </div>
+                  <div className="flex flex-col gap-2 pt-1">
+                    <div className="flex items-center gap-2">
+                      <input 
+                        type="checkbox"
+                        id="lead-atendido"
+                        checked={leadForm.atendido}
+                        onChange={e => setLeadForm({...leadForm, atendido: e.target.checked})}
+                        className="rounded text-mahana-600 focus:ring-mahana-500 w-4 h-4 cursor-pointer"
+                      />
+                      <label htmlFor="lead-atendido" className="text-xs font-bold text-gray-650 cursor-pointer">Marcar como Atendido</label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input 
+                        type="checkbox"
+                        id="lead-oferta-mejora"
+                        checked={leadForm.oferta_mejora}
+                        onChange={e => setLeadForm({...leadForm, oferta_mejora: e.target.checked})}
+                        className="rounded text-purple-650 focus:ring-purple-500 w-4 h-4 cursor-pointer"
+                      />
+                      <label htmlFor="lead-oferta-mejora" className="text-xs font-bold text-purple-750 cursor-pointer">Oferta de Mejora Activa</label>
+                    </div>
                   </div>
                   <div className="flex justify-end gap-2 pt-1">
                     <button 
@@ -1093,7 +1252,46 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                   </div>
                 </div>
 
-                {selectedLead.notas && (
+                  {/* Lead tracking metadata highlights */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="p-3 bg-mahana-50/30 rounded-xl border border-mahana-100/50 text-xs">
+                      <span className="text-gray-400 font-bold block mb-1 uppercase tracking-wider text-[10px]">Fecha del Evento</span>
+                      {selectedLead.fecha_evento ? (
+                        <span className="font-bold text-mahana-900 flex items-center gap-1.5">
+                          <Calendar size={13} className="text-mahana-600" />
+                          {new Date(selectedLead.fecha_evento + 'T12:00:00').toLocaleDateString()}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">Sin cotización/evento</span>
+                      )}
+                    </div>
+                    
+                    <div className="p-3 bg-purple-50/30 rounded-xl border border-purple-100/50 text-xs">
+                      <span className="text-gray-400 font-bold block mb-1 uppercase tracking-wider text-[10px]">Próximo Seguimiento</span>
+                      {selectedLead.fecha_seguimiento ? (
+                        <span className="font-bold text-purple-900 flex items-center gap-1.5">
+                          <Calendar size={13} className="text-purple-600" />
+                          {new Date(selectedLead.fecha_seguimiento + 'T12:00:00').toLocaleDateString()}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400 font-normal text-xs">Sin fecha programada</span>
+                      )}
+                    </div>
+
+                    <div className="p-3 bg-amber-50/30 rounded-xl border border-amber-100/50 text-xs">
+                      <span className="text-gray-400 font-bold block mb-1 uppercase tracking-wider text-[10px]">Oferta de Mejora</span>
+                      {selectedLead.oferta_mejora === 1 ? (
+                        <span className="font-bold text-amber-900 flex items-center gap-1.5">
+                          <Award size={13} className="text-amber-600 animate-pulse" />
+                          Oferta de Mejora Activa
+                        </span>
+                      ) : (
+                        <span className="text-gray-400 font-normal text-xs">Sin oferta activa</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {selectedLead.notas && (
                     <div className="p-3 bg-gray-50 rounded-xl text-sm text-gray-600 border border-gray-150">
                       <strong>Requerimientos iniciales:</strong> {selectedLead.notas}
                     </div>

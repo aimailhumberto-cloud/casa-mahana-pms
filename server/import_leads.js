@@ -22,8 +22,8 @@ function runImport() {
   const db = getDb();
 
   const insertLead = db.prepare(`
-    INSERT INTO leads_clientes (nombre, apellido, email, telefono, notas, estado, atendido, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO leads_clientes (nombre, apellido, email, telefono, notas, estado, atendido, fecha_seguimiento, oferta_mejora, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const insertQuote = db.prepare(`
@@ -34,6 +34,10 @@ function runImport() {
       monto_total, deposito_sugerido, notas, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
+
+  // Clear existing CRM data first to avoid duplicates
+  db.exec('DELETE FROM cotizaciones_custom');
+  db.exec('DELETE FROM leads_clientes');
 
   // Run everything inside an SQLite transaction
   const importTx = db.transaction((rows) => {
@@ -97,6 +101,16 @@ function runImport() {
         }
       }
 
+      // Parse próximo seguimiento date
+      const dateSeguimientoRaw = (row['Próximo seguimiento'] || '').trim();
+      let fechaSeguimiento = '';
+      if (dateSeguimientoRaw) {
+        const parts = dateSeguimientoRaw.split('/');
+        if (parts.length === 3) {
+          fechaSeguimiento = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+        }
+      }
+
       // Insert Lead
       const leadRes = insertLead.run(
         nombre,
@@ -106,6 +120,8 @@ function runImport() {
         notas,
         estado,
         1, // Marked as attended since they are historical records
+        fechaSeguimiento,
+        0, // oferta_mejora
         createdDate,
         createdDate
       );

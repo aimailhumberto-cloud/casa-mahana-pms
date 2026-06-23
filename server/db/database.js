@@ -101,6 +101,12 @@ function getDb() {
       if (!cols.includes('atendido')) {
         db.exec('ALTER TABLE leads_clientes ADD COLUMN atendido INTEGER DEFAULT 0');
       }
+      if (!cols.includes('fecha_seguimiento')) {
+        db.exec('ALTER TABLE leads_clientes ADD COLUMN fecha_seguimiento TEXT');
+      }
+      if (!cols.includes('oferta_mejora')) {
+        db.exec('ALTER TABLE leads_clientes ADD COLUMN oferta_mejora INTEGER DEFAULT 0');
+      }
     }
 
     db.exec(schema);

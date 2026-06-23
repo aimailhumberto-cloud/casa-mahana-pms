@@ -100,6 +100,7 @@ router.get('/leads', requireAuth, (req, res) => {
       SELECT l.*, 
              COUNT(c.id) as total_cotizaciones,
              MAX(c.created_at) as ultima_cotizacion_fecha,
+             COALESCE((SELECT check_in FROM cotizaciones_custom WHERE lead_id = l.id ORDER BY id DESC LIMIT 1), '') as fecha_evento,
              COALESCE((SELECT monto_total FROM cotizaciones_custom WHERE lead_id = l.id ORDER BY id DESC LIMIT 1), 0) as valor_total
       FROM leads_clientes l
       LEFT JOIN cotizaciones_custom c ON c.lead_id = l.id
@@ -144,14 +145,14 @@ router.get('/leads/:id', requireAuth, (req, res) => {
 // ── POST /api/v1/crm/leads ──
 router.post('/leads', requireAuth, (req, res) => {
   try {
-    const { nombre, apellido, email, telefono, notas, estado } = req.body;
+    const { nombre, apellido, email, telefono, notas, estado, fecha_seguimiento, oferta_mejora } = req.body;
     if (!nombre) return err(res, 'El nombre es obligatorio');
     
     const db = getDb();
     const now = new Date().toISOString();
     const result = db.prepare(`
-      INSERT INTO leads_clientes (nombre, apellido, email, telefono, notas, estado, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO leads_clientes (nombre, apellido, email, telefono, notas, estado, fecha_seguimiento, oferta_mejora, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       nombre,
       apellido || '',
@@ -159,6 +160,8 @@ router.post('/leads', requireAuth, (req, res) => {
       telefono || '',
       notas || '',
       estado || 'Borrador',
+      fecha_seguimiento || '',
+      oferta_mejora ? 1 : 0,
       now,
       now
     );
@@ -174,14 +177,14 @@ router.post('/leads', requireAuth, (req, res) => {
 // ── PUT /api/v1/crm/leads/:id ──
 router.put('/leads/:id', requireAuth, (req, res) => {
   try {
-    const { nombre, apellido, email, telefono, notas, estado, atendido } = req.body;
+    const { nombre, apellido, email, telefono, notas, estado, atendido, fecha_seguimiento, oferta_mejora } = req.body;
     if (!nombre) return err(res, 'El nombre es obligatorio');
     
     const db = getDb();
     const now = new Date().toISOString();
     const result = db.prepare(`
       UPDATE leads_clientes
-      SET nombre = ?, apellido = ?, email = ?, telefono = ?, notas = ?, estado = ?, atendido = ?, updated_at = ?
+      SET nombre = ?, apellido = ?, email = ?, telefono = ?, notas = ?, estado = ?, atendido = ?, fecha_seguimiento = ?, oferta_mejora = ?, updated_at = ?
       WHERE id = ?
     `).run(
       nombre,
@@ -191,6 +194,8 @@ router.put('/leads/:id', requireAuth, (req, res) => {
       notas || '',
       estado || 'Borrador',
       atendido !== undefined ? (atendido ? 1 : 0) : 0,
+      fecha_seguimiento || '',
+      oferta_mejora ? 1 : 0,
       now,
       req.params.id
     );
