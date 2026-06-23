@@ -100,7 +100,7 @@ router.get('/leads', requireAuth, (req, res) => {
       SELECT l.*, 
              COUNT(c.id) as total_cotizaciones,
              MAX(c.created_at) as ultima_cotizacion_fecha,
-             COALESCE((SELECT sum(monto_total) FROM cotizaciones_custom WHERE lead_id = l.id), 0) as valor_total
+             COALESCE((SELECT monto_total FROM cotizaciones_custom WHERE lead_id = l.id ORDER BY id DESC LIMIT 1), 0) as valor_total
       FROM leads_clientes l
       LEFT JOIN cotizaciones_custom c ON c.lead_id = l.id
       GROUP BY l.id

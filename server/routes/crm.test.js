@@ -189,6 +189,54 @@ describe('CRM & Custom Quotations Router Endpoints', () => {
     expect(Array.isArray(resData.data.cotizaciones[0].items_adicionales)).toBe(true);
   });
 
+  it('should reflect only the latest quotation amount in valor_total when listing leads', () => {
+    const reqCreateQuote = {
+      user: { id: 1, rol: 'admin' },
+      params: { id: 1 },
+      body: {
+        check_in: '2026-08-01',
+        check_out: '2026-08-02',
+        noches: 1,
+        adultos: 2,
+        menores: 0,
+        mascotas: 0,
+        plan_codigo: 'oferta_simple',
+        habitaciones_seleccionadas: [1],
+        items_adicionales: [],
+        subtotal: 500.00,
+        descuento: 0,
+        descuento_tipo: 'fijo',
+        impuesto_pct: 10,
+        impuesto_monto: 50.00,
+        monto_total: 550.00,
+        deposito_sugerido: 275.00,
+        notas: 'Segunda cotizacion'
+      }
+    };
+    let resStatusQuote = 200;
+    let resDataQuote = null;
+    const resQuote = {
+      status: (code) => { resStatusQuote = code; return resQuote; },
+      json: (data) => { resDataQuote = data; return resQuote; }
+    };
+    createQuoteHandler(reqCreateQuote, resQuote);
+    expect(resStatusQuote).toBe(201);
+
+    const reqList = { user: { id: 1, rol: 'admin' } };
+    let resStatusList = 200;
+    let resDataList = null;
+    const resList = {
+      status: (code) => { resStatusList = code; return resList; },
+      json: (data) => { resDataList = data; return resList; }
+    };
+    listLeadsHandler(reqList, resList);
+
+    expect(resStatusList).toBe(200);
+    expect(resDataList.success).toBe(true);
+    expect(resDataList.data[0].total_cotizaciones).toBe(2);
+    expect(resDataList.data[0].valor_total).toBe(550.00);
+  });
+
   it('should successfully update lead status', () => {
     const req = {
       user: { id: 1, rol: 'admin' },

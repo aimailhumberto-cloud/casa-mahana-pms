@@ -71,6 +71,7 @@ export default function CotizadorCRM() {
   
   // Lead form modal / drawer
   const [showLeadModal, setShowLeadModal] = useState(false);
+  const [editingLeadId, setEditingLeadId] = useState<number | null>(null);
   const [leadForm, setLeadForm] = useState({
     nombre: '',
     apellido: '',
@@ -116,6 +117,12 @@ export default function CotizadorCRM() {
   
   // Selected Quote for preview / printing
   const [activePreviewQuote, setActivePreviewQuote] = useState<any | null>(null);
+
+  const getPlanNombre = (codigo?: string) => {
+    if (!codigo) return 'Tarifa Estándar';
+    const plan = plans.find(p => p.codigo === codigo);
+    return plan ? plan.nombre : codigo;
+  };
 
   // Fetch initial CRM data
   useEffect(() => {
@@ -564,7 +571,7 @@ export default function CotizadorCRM() {
 🏷️ *Plan:* ${planNombre}
 
 💰 *Resumen Económico:*
-• ${isPasadia ? 'Pasadía Base' : `Estadía Base (${nochesStr})`}: $${(quote.subtotal - parsedItems.reduce((sum: number, i: any) => sum + i.precio, 0)).toFixed(2)}
+• ${isPasadia ? `Pasadía Base (${planNombre})` : `Estadía Base (Plan: ${planNombre}, ${nochesStr})`}: $${(quote.subtotal - parsedItems.reduce((sum: number, i: any) => sum + i.precio, 0)).toFixed(2)}
 ${itemsStr}• Subtotal: $${quote.subtotal.toFixed(2)}
 ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.toFixed(2)}
 • *Monto Total:* $${quote.monto_total.toFixed(2)}
@@ -1249,13 +1256,13 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                             <td className="py-2.5 text-gray-800">
                               {activePreviewQuote.plan_codigo?.includes('pasadia') || activePreviewQuote.noches === 0 ? (
                                 <>
-                                  Pasadía Base (Sin pernoctación)
-                                  <div className="text-[10px] text-gray-400">Tarifa de pasadía cotizada para {activePreviewQuote.adultos} adultos en plan seleccionado</div>
+                                  Pasadía Base ({getPlanNombre(activePreviewQuote.plan_codigo)})
+                                  <div className="text-[10px] text-gray-400">Tarifa de pasadía cotizada para {activePreviewQuote.adultos} adultos en {getPlanNombre(activePreviewQuote.plan_codigo)}</div>
                                 </>
                               ) : (
                                 <>
-                                  Estadía Base ({activePreviewQuote.noches} Noche{activePreviewQuote.noches > 1 ? 's' : ''})
-                                  <div className="text-[10px] text-gray-400">Tarifa cotizada para {activePreviewQuote.adultos} adultos en plan seleccionado</div>
+                                  Estadía Base ({activePreviewQuote.noches} Noche{activePreviewQuote.noches > 1 ? 's' : ''}) — {getPlanNombre(activePreviewQuote.plan_codigo)}
+                                  <div className="text-[10px] text-gray-400">Tarifa cotizada para {activePreviewQuote.adultos} adultos en {getPlanNombre(activePreviewQuote.plan_codigo)}</div>
                                 </>
                               )}
                             </td>
@@ -1677,7 +1684,9 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                 <div className="space-y-2 max-h-[30vh] overflow-y-auto">
                   <div className="flex justify-between text-xs font-medium border-b pb-2">
                     <span className="text-gray-550">
-                      {(quoteForm.plan_codigo?.includes('pasadia') || quoteForm.noches === 0) ? 'Pasadía Base' : 'Estadía Base'}
+                      {(quoteForm.plan_codigo?.includes('pasadia') || quoteForm.noches === 0) 
+                        ? `Pasadía Base (${getPlanNombre(quoteForm.plan_codigo)})` 
+                        : `Estadía Base — ${getPlanNombre(quoteForm.plan_codigo)} (${quoteForm.noches} Noche${quoteForm.noches > 1 ? 's' : ''})`}
                     </span>
                     <span className="font-semibold text-gray-800">${quoteForm.base_price.toFixed(2)}</span>
                   </div>
