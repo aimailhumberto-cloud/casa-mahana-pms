@@ -1470,8 +1470,8 @@ export default function BookingWidget() {
                       <p className="font-medium">Sistema de pago no disponible temporalmente</p>
                       <p className="text-sm mt-2">Contacta directamente al hotel para confirmar tu reserva</p>
                       <div className="flex gap-3 justify-center mt-4">
-                        <a href="https://wa.me/50760000000" className="px-5 py-2.5 bg-emerald-500 text-white rounded-xl font-medium hover:bg-emerald-600 transition flex items-center gap-2"><Phone className="w-4 h-4" /> WhatsApp</a>
-                        <a href="mailto:info@casamahana.com" className="px-5 py-2.5 bg-gray-100 text-gray-700 rounded-xl font-medium hover:bg-gray-200 transition flex items-center gap-2"><Mail className="w-4 h-4" /> Email</a>
+                        <a href="https://wa.me/50762906800" className="px-5 py-2.5 bg-emerald-500 text-white rounded-xl font-medium hover:bg-emerald-600 transition flex items-center gap-2"><Phone className="w-4 h-4" /> WhatsApp</a>
+                        <a href="mailto:recepcion@casamahana.com" className="px-5 py-2.5 bg-gray-100 text-gray-700 rounded-xl font-medium hover:bg-gray-200 transition flex items-center gap-2"><Mail className="w-4 h-4" /> Email</a>
                       </div>
                     </div>
                   )}

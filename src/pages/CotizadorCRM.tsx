@@ -781,8 +781,9 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                           </div>
                         </div>
                         <div className="text-right text-xs text-gray-500">
-                          <p>📱 +507 6000-0000</p>
-                          <p>✉️ info@casamahana.com</p>
+                          <p>📱 +507 6290-6800 (celular)</p>
+                          <p>📞 +507 345-3222 (fijo)</p>
+                          <p>✉️ recepcion@casamahana.com</p>
                           <p>🌐 www.casamahana.com</p>
                         </div>
                       </div>
