@@ -793,7 +793,7 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
               </div>
               <div>
                 <span className="text-xs font-bold text-gray-400 uppercase block">Valor Pipeline</span>
-                <span className="text-2xl font-black text-gray-800">${metrics.pipelineValue.toFixed(2)}</span>
+                <span className="text-2xl font-black text-gray-800">${Math.round(metrics.pipelineValue).toLocaleString('en-US')}</span>
               </div>
             </div>
 
@@ -813,7 +813,7 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
               </div>
               <div>
                 <span className="text-xs font-bold text-gray-400 uppercase block">Ingresos Ganados</span>
-                <span className="text-2xl font-black text-gray-800">${metrics.wonValue.toFixed(2)}</span>
+                <span className="text-2xl font-black text-gray-800">${Math.round(metrics.wonValue).toLocaleString('en-US')}</span>
               </div>
             </div>
 
@@ -1007,7 +1007,7 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                             </select>
                           </td>
                           <td className="py-3.5 px-4 font-bold text-gray-700">
-                            ${(lead.valor_total || 0).toFixed(2)}
+                            ${(lead.valor_total || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </td>
                           <td className="py-3.5 px-6 text-right space-x-2">
                             <button
@@ -1192,7 +1192,7 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                         </div>
                         {lead.valor_total > 0 && (
                           <div className="text-xs font-semibold text-mahana-700 mt-0.5">
-                            Valor total cotizado: ${lead.valor_total.toFixed(2)}
+                            Valor total cotizado: ${lead.valor_total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </div>
                         )}
                       </div>
