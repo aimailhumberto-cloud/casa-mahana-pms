@@ -3,13 +3,13 @@ const path = require('path');
 const Papa = require('papaparse');
 const { getDb } = require('./db/database');
 
-const CSV_PATH = 'C:\\Users\\Usuario\\Downloads\\Casa Mahana — Seguimiento de Leads - Leads.csv';
+const CSV_PATH = path.join(__dirname, 'db', 'leads.csv');
 
 function runImport() {
   console.log(`Reading CSV file from: ${CSV_PATH}...`);
   if (!fs.existsSync(CSV_PATH)) {
     console.error(`Error: File not found at ${CSV_PATH}`);
-    process.exit(1);
+    return;
   }
 
   const csvData = fs.readFileSync(CSV_PATH, 'utf8');
@@ -220,4 +220,8 @@ function runImport() {
   }
 }
 
-runImport();
+if (require.main === module) {
+  runImport();
+}
+
+module.exports = { runImport };

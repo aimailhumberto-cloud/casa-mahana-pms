@@ -245,6 +245,18 @@ if (fs.existsSync(distPath)) {
 const server = app.listen(PORT, () => {
   const db = getDb(); // Initialize on startup
 
+  // ── Auto-seed CRM leads if empty ──
+  try {
+    const leadsCount = db.prepare("SELECT COUNT(*) as c FROM leads_clientes").get().c;
+    if (leadsCount === 0) {
+      logger.info('🌱 CRM leads table is empty. Running auto-seeder from server/db/leads.csv...');
+      const { runImport } = require('./import_leads');
+      runImport();
+    }
+  } catch (err) {
+    logger.error('Failed to auto-seed CRM leads:', err);
+  }
+
   // ── Auto-patch Familiar Room Type Photo (R2 / UX Fix) ──
   try {
     const key = 'foto_tipo_Familiar';
