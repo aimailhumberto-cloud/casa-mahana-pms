@@ -338,6 +338,7 @@ CREATE TABLE IF NOT EXISTS leads_clientes (
   telefono TEXT,
   notas TEXT,
   estado TEXT DEFAULT 'Borrador', -- Borrador, Enviada, En Negociación, Aceptada, Rechazada
+  atendido INTEGER DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );

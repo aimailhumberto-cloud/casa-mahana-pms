@@ -95,6 +95,14 @@ function getDb() {
       }
     }
 
+    const leadsExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='leads_clientes'").get();
+    if (leadsExists) {
+      const cols = db.prepare('PRAGMA table_info(leads_clientes)').all().map(c => c.name);
+      if (!cols.includes('atendido')) {
+        db.exec('ALTER TABLE leads_clientes ADD COLUMN atendido INTEGER DEFAULT 0');
+      }
+    }
+
     db.exec(schema);
 
     // ── Seed habitaciones ──

@@ -14,6 +14,7 @@ type Lead = {
   telefono: string;
   notas: string;
   estado: string; // 'Borrador' | 'Enviada' | 'En Negociación' | 'Aceptada' | 'Rechazada'
+  atendido: number;
   created_at: string;
   updated_at: string;
   total_cotizaciones: number;
@@ -48,10 +49,16 @@ type Plan = {
 export default function CotizadorCRM() {
   // Navigation & UI state
   const [activeTab, setActiveTab] = useState<'leads' | 'builder'>('leads');
-  const [subTab, setSubTab] = useState<'leads' | 'catalog'>('leads');
+  const [subTab, setSubTab] = useState<'dashboard' | 'leads' | 'catalog'>('dashboard');
   const [leads, setLeads] = useState<Lead[]>([]);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [leadQuotes, setLeadQuotes] = useState<any[]>([]);
+  
+  // Dashboard Filters & Sorting state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [atendidoFilter, setAtendidoFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('recent');
   
   // Preloaded data
   const [preloadedServices, setPreloadedServices] = useState<PreloadedService[]>([]);
@@ -70,7 +77,8 @@ export default function CotizadorCRM() {
     email: '',
     telefono: '',
     notas: '',
-    estado: 'Borrador'
+    estado: 'Borrador',
+    atendido: false
   });
 
   // Services Catalog form state
@@ -214,15 +222,119 @@ export default function CotizadorCRM() {
     }
     setError('');
     try {
-      await api.post('/crm/leads', leadForm);
-      setSuccess('Prospecto creado con éxito.');
+      const payload = {
+        ...leadForm,
+        atendido: leadForm.atendido ? 1 : 0
+      };
+      
+      if (editingLeadId) {
+        await api.put(`/crm/leads/${editingLeadId}`, payload);
+        setSuccess('Prospecto actualizado con éxito.');
+      } else {
+        await api.post('/crm/leads', payload);
+        setSuccess('Prospecto creado con éxito.');
+      }
       setShowLeadModal(false);
-      setLeadForm({ nombre: '', apellido: '', email: '', telefono: '', notas: '', estado: 'Borrador' });
+      setLeadForm({ nombre: '', apellido: '', email: '', telefono: '', notas: '', estado: 'Borrador', atendido: false });
+      setEditingLeadId(null);
       fetchLeads();
       setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
-      setError('Error al crear el prospecto.');
+      setError('Error al guardar el prospecto.');
     }
+  };
+
+  const handleCreateLeadClick = () => {
+    setEditingLeadId(null);
+    setLeadForm({
+      nombre: '',
+      apellido: '',
+      email: '',
+      telefono: '',
+      notas: '',
+      estado: 'Borrador',
+      atendido: false
+    });
+    setShowLeadModal(true);
+  };
+
+  const handleEditLead = (lead: Lead) => {
+    setEditingLeadId(lead.id);
+    setLeadForm({
+      nombre: lead.nombre,
+      apellido: lead.apellido || '',
+      email: lead.email || '',
+      telefono: lead.telefono || '',
+      notas: lead.notas || '',
+      estado: lead.estado || 'Borrador',
+      atendido: lead.atendido === 1
+    });
+    setShowLeadModal(true);
+  };
+
+  const handleDeleteLead = async (leadId: number) => {
+    if (!window.confirm('¿Estás seguro de eliminar este prospecto? Se eliminarán todas sus cotizaciones asociadas de forma permanente.')) return;
+    try {
+      await api.delete(`/crm/leads/${leadId}`);
+      setSuccess('Prospecto eliminado.');
+      setSelectedLead(null);
+      setLeadQuotes([]);
+      setActivePreviewQuote(null);
+      fetchLeads();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (e) {
+      setError('Error al eliminar el prospecto.');
+    }
+  };
+
+  const handleToggleAtendido = async (lead: Lead) => {
+    try {
+      const newAtendido = lead.atendido === 1 ? 0 : 1;
+      await api.put(`/crm/leads/${lead.id}`, {
+        nombre: lead.nombre,
+        apellido: lead.apellido || '',
+        email: lead.email || '',
+        telefono: lead.telefono || '',
+        notas: lead.notas || '',
+        estado: lead.estado || 'Borrador',
+        atendido: newAtendido
+      });
+      setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, atendido: newAtendido } : l));
+      if (selectedLead && selectedLead.id === lead.id) {
+        setSelectedLead(prev => prev ? { ...prev, atendido: newAtendido } : null);
+      }
+      setSuccess('Estado de atención actualizado.');
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (e) {
+      setError('Error al actualizar el estado de atención.');
+    }
+  };
+
+  const handleLoadQuoteForEdit = (quote: any) => {
+    const parsedItems = Array.isArray(quote.items_adicionales) 
+      ? quote.items_adicionales 
+      : JSON.parse(quote.items_adicionales || '[]');
+
+    const parsedHabs = Array.isArray(quote.habitaciones_seleccionadas)
+      ? quote.habitaciones_seleccionadas
+      : JSON.parse(quote.habitaciones_seleccionadas || '[]');
+
+    setQuoteForm({
+      check_in: quote.check_in || '',
+      check_out: quote.check_out || '',
+      noches: quote.noches || 1,
+      adultos: quote.adultos || 1,
+      menores: quote.menores || 0,
+      mascotas: quote.mascotas || 0,
+      plan_codigo: quote.plan_codigo || '',
+      base_price: quote.subtotal - parsedItems.reduce((sum: number, i: any) => sum + i.precio, 0),
+      descuento: quote.descuento || 0,
+      descuento_tipo: quote.descuento_tipo || 'fijo',
+      notas: quote.notas || '',
+      habitaciones_seleccionadas: parsedHabs
+    });
+    setSelectedServices(parsedItems);
+    setActiveTab('builder');
   };
 
   const handleStatusChange = async (leadId: number, newStatus: string) => {
@@ -419,6 +531,7 @@ export default function CotizadorCRM() {
     
     const selectedPlan = plans.find(p => p.codigo === quote.plan_codigo);
     const planNombre = selectedPlan?.nombre || 'Tarifa Estándar';
+    const isPasadia = quote.plan_codigo?.includes('pasadia') || quote.noches === 0;
     
     let huespedesStr = `${quote.adultos} Adulto${quote.adultos > 1 ? 's' : ''}`;
     if (quote.menores > 0) huespedesStr += `, ${quote.menores} Menor${quote.menores > 1 ? 'es' : ''}`;
@@ -451,7 +564,7 @@ export default function CotizadorCRM() {
 🏷️ *Plan:* ${planNombre}
 
 💰 *Resumen Económico:*
-• Estadía Base: $${(quote.subtotal - parsedItems.reduce((sum: number, i: any) => sum + i.precio, 0)).toFixed(2)}
+• ${isPasadia ? 'Pasadía Base' : `Estadía Base (${nochesStr})`}: $${(quote.subtotal - parsedItems.reduce((sum: number, i: any) => sum + i.precio, 0)).toFixed(2)}
 ${itemsStr}• Subtotal: $${quote.subtotal.toFixed(2)}
 ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.toFixed(2)}
 • *Monto Total:* $${quote.monto_total.toFixed(2)}
@@ -470,6 +583,55 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
     window.print();
   };
 
+  const metrics = useMemo(() => {
+    const activeLeads = leads.filter(l => ['Borrador', 'Enviada', 'En Negociación'].includes(l.estado));
+    const activeVal = activeLeads.reduce((sum, l) => sum + (l.valor_total || 0), 0);
+    const wonLeads = leads.filter(l => l.estado === 'Aceptada');
+    const wonVal = wonLeads.reduce((sum, l) => sum + (l.valor_total || 0), 0);
+    const conversionRate = leads.length > 0 ? (wonLeads.length / leads.length) * 100 : 0;
+    
+    return {
+      activeCount: activeLeads.length,
+      pipelineValue: activeVal,
+      wonValue: wonVal,
+      conversionRate
+    };
+  }, [leads]);
+
+  const filteredLeads = useMemo(() => {
+    return leads
+      .filter(lead => {
+        const fullName = `${lead.nombre} ${lead.apellido}`.toLowerCase();
+        const email = (lead.email || '').toLowerCase();
+        const phone = (lead.telefono || '').toLowerCase();
+        const query = searchQuery.toLowerCase();
+        
+        const matchesQuery = fullName.includes(query) || email.includes(query) || phone.includes(query);
+        const matchesStatus = statusFilter === '' ? true : lead.estado === statusFilter;
+        
+        let matchesAtendido = true;
+        if (atendidoFilter === 'atendido') matchesAtendido = lead.atendido === 1;
+        else if (atendidoFilter === 'pendiente') matchesAtendido = lead.atendido === 0;
+        
+        return matchesQuery && matchesStatus && matchesAtendido;
+      })
+      .sort((a, b) => {
+        if (sortBy === 'recent') {
+          return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+        }
+        if (sortBy === 'oldest') {
+          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        }
+        if (sortBy === 'value_desc') {
+          return (b.valor_total || 0) - (a.valor_total || 0);
+        }
+        if (sortBy === 'value_asc') {
+          return (a.valor_total || 0) - (b.valor_total || 0);
+        }
+        return 0;
+      });
+  }, [leads, searchQuery, statusFilter, atendidoFilter, sortBy]);
+
   return (
     <div className="space-y-6">
       {/* Dynamic Status / Alerts */}
@@ -487,9 +649,19 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
         </div>
       )}
 
-      {/* Sub-tabs to toggle between leads and catalog management */}
+      {/* Sub-tabs to toggle between dashboard, leads and catalog management */}
       {activeTab === 'leads' && (
         <div className="flex border-b border-gray-200 mb-4">
+          <button
+            onClick={() => {
+              setSubTab('dashboard');
+              fetchLeads();
+              fetchPreloadedData();
+            }}
+            className={`py-3 px-6 font-bold text-sm border-b-2 transition ${subTab === 'dashboard' ? 'border-mahana-600 text-mahana-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+          >
+            📊 CRM Dashboard
+          </button>
           <button
             onClick={() => {
               setSubTab('leads');
@@ -498,7 +670,7 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
             }}
             className={`py-3 px-6 font-bold text-sm border-b-2 transition ${subTab === 'leads' ? 'border-mahana-600 text-mahana-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
           >
-            📋 Prospectos y Cotizaciones
+            📋 Ficha de Prospectos
           </button>
           <button
             onClick={() => {
@@ -507,8 +679,230 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
             }}
             className={`py-3 px-6 font-bold text-sm border-b-2 transition ${subTab === 'catalog' ? 'border-mahana-600 text-mahana-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
           >
-            ⚙️ Catálogo de Servicios Precargados
+            ⚙️ Catálogo de Servicios
           </button>
+        </div>
+      )}
+
+      {/* Main Tab Switch */}
+      {activeTab === 'leads' && subTab === 'dashboard' && (
+        <div className="space-y-6">
+          {/* Metrics upper dashboard */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex items-center gap-4">
+              <div className="p-3 bg-amber-50 rounded-xl text-amber-600">
+                <Users size={24} />
+              </div>
+              <div>
+                <span className="text-xs font-bold text-gray-400 uppercase block">Leads Activos</span>
+                <span className="text-2xl font-black text-gray-800">{metrics.activeCount}</span>
+              </div>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex items-center gap-4">
+              <div className="p-3 bg-blue-50 rounded-xl text-blue-600">
+                <DollarSign size={24} />
+              </div>
+              <div>
+                <span className="text-xs font-bold text-gray-400 uppercase block">Valor Pipeline</span>
+                <span className="text-2xl font-black text-gray-800">${metrics.pipelineValue.toFixed(2)}</span>
+              </div>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex items-center gap-4">
+              <div className="p-3 bg-emerald-50 rounded-xl text-emerald-600">
+                <Award size={24} />
+              </div>
+              <div>
+                <span className="text-xs font-bold text-gray-400 uppercase block">Tasa de Conversión</span>
+                <span className="text-2xl font-black text-gray-800">{metrics.conversionRate.toFixed(1)}%</span>
+              </div>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex items-center gap-4">
+              <div className="p-3 bg-green-50 rounded-xl text-green-600">
+                <Check size={24} />
+              </div>
+              <div>
+                <span className="text-xs font-bold text-gray-400 uppercase block">Ingresos Ganados</span>
+                <span className="text-2xl font-black text-gray-800">${metrics.wonValue.toFixed(2)}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Filters & Search */}
+          <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm space-y-4 mb-6">
+            <div className="flex flex-col lg:flex-row gap-3 justify-between items-center">
+              <div className="flex flex-wrap gap-2 w-full lg:w-auto">
+                <input 
+                  type="text" 
+                  placeholder="Buscar prospecto..." 
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  className="p-2 px-3 text-sm border rounded-xl w-full sm:w-64 bg-gray-55 focus:bg-white transition outline-none focus:ring-1 focus:ring-mahana-400 text-gray-800"
+                />
+                
+                <select
+                  value={statusFilter}
+                  onChange={e => setStatusFilter(e.target.value)}
+                  className="p-2 text-xs border rounded-xl bg-white font-semibold text-gray-700 outline-none"
+                >
+                  <option value="">Todos los Estados</option>
+                  <option value="Borrador">Borrador</option>
+                  <option value="Enviada">Enviada</option>
+                  <option value="En Negociación">En Negociación</option>
+                  <option value="Aceptada">Aceptada</option>
+                  <option value="Rechazada">Rechazada</option>
+                </select>
+
+                <select
+                  value={atendidoFilter}
+                  onChange={e => setAtendidoFilter(e.target.value)}
+                  className="p-2 text-xs border rounded-xl bg-white font-semibold text-gray-700 outline-none"
+                >
+                  <option value="all">Todas las Atenciones</option>
+                  <option value="atendido">Atendidos</option>
+                  <option value="pendiente">Pendientes</option>
+                </select>
+
+                <select
+                  value={sortBy}
+                  onChange={e => setSortBy(e.target.value)}
+                  className="p-2 text-xs border rounded-xl bg-white font-semibold text-gray-700 outline-none"
+                >
+                  <option value="recent">Última Actividad</option>
+                  <option value="oldest">Más Antiguos</option>
+                  <option value="value_desc">Mayor Valor Cotizado</option>
+                  <option value="value_asc">Menor Valor Cotizado</option>
+                </select>
+              </div>
+              
+              <button
+                onClick={() => {
+                  setSubTab('leads');
+                  handleCreateLeadClick();
+                }}
+                className="px-4 py-2 bg-mahana-600 text-white rounded-xl hover:bg-mahana-700 transition flex items-center gap-1.5 text-sm font-bold w-full lg:w-auto justify-center"
+              >
+                <Plus size={16} />
+                Nuevo Prospecto
+              </button>
+            </div>
+          </div>
+
+          {/* Interactive Leads Table */}
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm border-collapse">
+                <thead>
+                  <tr className="border-b border-gray-200 bg-gray-50/50 text-gray-400 font-bold uppercase tracking-wider text-xs">
+                    <th className="py-3.5 px-6">Cliente</th>
+                    <th className="py-3.5 px-4">Última Actividad</th>
+                    <th className="py-3.5 px-4">Atendido</th>
+                    <th className="py-3.5 px-4">Estado</th>
+                    <th className="py-3.5 px-4">Total Cotizado</th>
+                    <th className="py-3.5 px-6 text-right">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredLeads.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-12 text-center text-gray-400 text-sm">No se encontraron prospectos con los filtros actuales.</td>
+                    </tr>
+                  ) : (
+                    filteredLeads.map(lead => {
+                      const statusColors: Record<string, string> = {
+                        'Borrador': 'bg-gray-100 text-gray-700 border-gray-200',
+                        'Enviada': 'bg-blue-50 text-blue-700 border-blue-200',
+                        'En Negociación': 'bg-amber-50 text-amber-700 border-amber-200',
+                        'Aceptada': 'bg-green-50 text-green-700 border-green-200',
+                        'Rechazada': 'bg-red-50 text-red-700 border-red-200'
+                      };
+                      
+                      return (
+                        <tr key={lead.id} className="border-b border-gray-100 hover:bg-gray-50/50 transition">
+                          <td className="py-3.5 px-6">
+                            <button
+                              onClick={() => {
+                                selectLeadDetails(lead);
+                                setSubTab('leads');
+                              }}
+                              className="font-bold text-gray-800 hover:text-mahana-700 text-left transition outline-none block"
+                            >
+                              {lead.nombre} {lead.apellido}
+                            </button>
+                            <span className="text-xs text-gray-400 block mt-0.5">{lead.telefono || lead.email || 'Sin datos de contacto'}</span>
+                          </td>
+                          <td className="py-3.5 px-4 text-xs text-gray-500">
+                            {new Date(lead.updated_at).toLocaleDateString()}
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <label className="inline-flex items-center cursor-pointer">
+                              <input 
+                                type="checkbox"
+                                checked={lead.atendido === 1}
+                                onChange={() => handleToggleAtendido(lead)}
+                                className="rounded text-mahana-600 focus:ring-mahana-500 w-4 h-4 cursor-pointer"
+                              />
+                              <span className="text-xs ml-1.5 text-gray-500 font-medium">
+                                {lead.atendido === 1 ? 'Sí' : 'No'}
+                              </span>
+                            </label>
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <select
+                              value={lead.estado}
+                              onChange={e => handleStatusChange(lead.id, e.target.value)}
+                              className={`p-1 px-1.5 text-xs border rounded-lg font-bold text-gray-700 bg-white ${statusColors[lead.estado]}`}
+                            >
+                              <option value="Borrador">Borrador</option>
+                              <option value="Enviada">Enviada</option>
+                              <option value="En Negociación">En Negociación</option>
+                              <option value="Aceptada">Aceptada</option>
+                              <option value="Rechazada">Rechazada</option>
+                            </select>
+                          </td>
+                          <td className="py-3.5 px-4 font-bold text-gray-700">
+                            ${(lead.valor_total || 0).toFixed(2)}
+                          </td>
+                          <td className="py-3.5 px-6 text-right space-x-2">
+                            <button
+                              onClick={() => {
+                                selectLeadDetails(lead);
+                                setSubTab('leads');
+                              }}
+                              className="px-2.5 py-1 text-xs bg-mahana-50 text-mahana-800 hover:bg-mahana-100 rounded-lg font-bold transition inline-flex items-center gap-1 border border-mahana-150"
+                              title="Ver Ficha / Cotizaciones"
+                            >
+                              <FileText size={12} />
+                              Ficha
+                            </button>
+                            <button
+                              onClick={() => {
+                                setSubTab('leads');
+                                handleEditLead(lead);
+                              }}
+                              className="p-1 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded transition"
+                              title="Editar Cliente"
+                            >
+                              <Edit2 size={14} className="inline" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteLead(lead.id)}
+                              className="p-1 text-red-650 hover:text-red-800 hover:bg-red-50 rounded transition"
+                              title="Eliminar Cliente"
+                            >
+                              <Trash2 size={14} className="inline" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
 
@@ -536,7 +930,7 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
               {/* Lead Creation Form/Modal */}
               {showLeadModal && (
                 <form onSubmit={handleLeadSubmit} className="p-4 bg-gray-50 rounded-xl border border-gray-200 space-y-3">
-                  <h3 className="font-bold text-sm text-gray-700">Nuevo Lead</h3>
+                  <h3 className="font-bold text-sm text-gray-700">{editingLeadId ? 'Editar Prospecto' : 'Nuevo Prospecto'}</h3>
                   <div className="grid grid-cols-2 gap-2">
                     <input 
                       type="text" placeholder="Nombre" required
@@ -569,6 +963,16 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                     value={leadForm.notas}
                     onChange={e => setLeadForm({...leadForm, notas: e.target.value})}
                   />
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="checkbox"
+                      id="lead-atendido"
+                      checked={leadForm.atendido}
+                      onChange={e => setLeadForm({...leadForm, atendido: e.target.checked})}
+                      className="rounded text-mahana-600 focus:ring-mahana-500 w-4 h-4 cursor-pointer"
+                    />
+                    <label htmlFor="lead-atendido" className="text-xs font-bold text-gray-650 cursor-pointer">Marcar como Atendido</label>
+                  </div>
                   <div className="flex justify-end gap-2 pt-1">
                     <button 
                       type="button" onClick={() => setShowLeadModal(false)}
@@ -647,14 +1051,31 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                       <p className="text-sm text-gray-400 mt-1">Registrado el {new Date(selectedLead.created_at).toLocaleDateString()}</p>
                     </div>
 
-                    {/* Status switcher drop-down */}
-                    <div className="flex items-center gap-2">
-                      <label className="text-xs font-bold text-gray-400 uppercase">Estado:</label>
-                      <select 
-                        value={selectedLead.estado}
-                        onChange={e => handleStatusChange(selectedLead.id, e.target.value)}
-                        className="p-1.5 text-xs border rounded-lg font-bold text-gray-700 bg-white"
+                    {/* Status switcher drop-down & Action buttons */}
+                    <div className="flex flex-wrap items-center gap-3">
+                      <button 
+                        onClick={() => handleEditLead(selectedLead)}
+                        className="px-2.5 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 rounded-xl font-bold text-xs flex items-center gap-1.5 transition outline-none"
+                        title="Editar datos de contacto"
                       >
+                        <Edit2 size={12} />
+                        Editar Cliente
+                      </button>
+                      <button 
+                        onClick={() => handleDeleteLead(selectedLead.id)}
+                        className="px-2.5 py-1.5 bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 rounded-xl font-bold text-xs flex items-center gap-1.5 transition outline-none"
+                        title="Eliminar cliente permanentemente"
+                      >
+                        <Trash2 size={12} />
+                        Eliminar
+                      </button>
+                      <div className="flex items-center gap-1.5 border-l pl-3">
+                        <label className="text-xs font-bold text-gray-400 uppercase">Estado:</label>
+                        <select 
+                          value={selectedLead.estado}
+                          onChange={e => handleStatusChange(selectedLead.id, e.target.value)}
+                          className="p-1.5 text-xs border rounded-lg font-bold text-gray-700 bg-white"
+                        >
                         <option value="Borrador">Borrador</option>
                         <option value="Enviada">Enviada</option>
                         <option value="En Negociación">En Negociación</option>
@@ -663,8 +1084,9 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                       </select>
                     </div>
                   </div>
+                </div>
 
-                  {selectedLead.notas && (
+                {selectedLead.notas && (
                     <div className="p-3 bg-gray-50 rounded-xl text-sm text-gray-600 border border-gray-150">
                       <strong>Requerimientos iniciales:</strong> {selectedLead.notas}
                     </div>
@@ -744,6 +1166,16 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                                 <MessageSquare size={10} />
                                 Copiar WhatsApp
                               </button>
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleLoadQuoteForEdit(quote);
+                                }}
+                                className="p-1 px-2 text-[10px] bg-blue-100 text-blue-800 hover:bg-blue-200 rounded font-bold transition flex items-center gap-1"
+                              >
+                                <Edit2 size={10} />
+                                Editar (Nueva Versión)
+                              </button>
                             </div>
                           </div>
                         );
@@ -815,8 +1247,17 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                         <tbody>
                           <tr className="border-b border-gray-100">
                             <td className="py-2.5 text-gray-800">
-                              Estadía Base ({activePreviewQuote.noches} Noche{activePreviewQuote.noches > 1 ? 's' : ''})
-                              <div className="text-[10px] text-gray-400">Tarifa cotizada para {activePreviewQuote.adultos} adultos en plan seleccionado</div>
+                              {activePreviewQuote.plan_codigo?.includes('pasadia') || activePreviewQuote.noches === 0 ? (
+                                <>
+                                  Pasadía Base (Sin pernoctación)
+                                  <div className="text-[10px] text-gray-400">Tarifa de pasadía cotizada para {activePreviewQuote.adultos} adultos en plan seleccionado</div>
+                                </>
+                              ) : (
+                                <>
+                                  Estadía Base ({activePreviewQuote.noches} Noche{activePreviewQuote.noches > 1 ? 's' : ''})
+                                  <div className="text-[10px] text-gray-400">Tarifa cotizada para {activePreviewQuote.adultos} adultos en plan seleccionado</div>
+                                </>
+                              )}
                             </td>
                             <td className="py-2.5 text-right text-gray-800 font-semibold">
                               ${(activePreviewQuote.subtotal - (Array.isArray(activePreviewQuote.items_adicionales) ? activePreviewQuote.items_adicionales : JSON.parse(activePreviewQuote.items_adicionales || '[]')).reduce((sum: number, i: any) => sum + i.precio, 0)).toFixed(2)}
@@ -1235,7 +1676,9 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
               <div className="border border-gray-200 rounded-2xl p-5 bg-gray-50 space-y-4">
                 <div className="space-y-2 max-h-[30vh] overflow-y-auto">
                   <div className="flex justify-between text-xs font-medium border-b pb-2">
-                    <span className="text-gray-500">Estadía Base</span>
+                    <span className="text-gray-550">
+                      {(quoteForm.plan_codigo?.includes('pasadia') || quoteForm.noches === 0) ? 'Pasadía Base' : 'Estadía Base'}
+                    </span>
                     <span className="font-semibold text-gray-800">${quoteForm.base_price.toFixed(2)}</span>
                   </div>
 

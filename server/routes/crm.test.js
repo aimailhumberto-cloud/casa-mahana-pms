@@ -25,6 +25,8 @@ describe('CRM & Custom Quotations Router Endpoints', () => {
   let createLeadHandler;
   let updateStatusHandler;
   let createQuoteHandler;
+  let updateLeadHandler;
+  let deleteLeadHandler;
 
   beforeAll(() => {
 
@@ -51,6 +53,8 @@ describe('CRM & Custom Quotations Router Endpoints', () => {
     createLeadHandler = findRouteHandler(crmRouter, '/leads', 'post');
     updateStatusHandler = findRouteHandler(crmRouter, '/leads/:id/status', 'patch');
     createQuoteHandler = findRouteHandler(crmRouter, '/leads/:id/cotizaciones', 'post');
+    updateLeadHandler = findRouteHandler(crmRouter, '/leads/:id', 'put');
+    deleteLeadHandler = findRouteHandler(crmRouter, '/leads/:id', 'delete');
   });
 
   it('should list all preloaded services successfully', () => {
@@ -282,5 +286,62 @@ describe('CRM & Custom Quotations Router Endpoints', () => {
     // Verify it is deactivated in DB
     const serviceRow = db.prepare('SELECT activo FROM servicios_adicionales WHERE id = 1').get();
     expect(serviceRow.activo).toBe(0);
+  });
+
+  it('should successfully update a lead client details', () => {
+    const req = {
+      user: { id: 1, rol: 'admin' },
+      params: { id: 1 },
+      body: {
+        nombre: 'Carlos Modificado',
+        apellido: 'Perez',
+        email: 'carlos.mod@example.com',
+        telefono: '+507 9999-8888',
+        notas: 'Notas editadas',
+        estado: 'En Negociación',
+        atendido: 1
+      }
+    };
+    let resStatus = 200;
+    let resData = null;
+    const res = {
+      status: (code) => { resStatus = code; return res; },
+      json: (data) => { resData = data; return res; }
+    };
+
+    updateLeadHandler(req, res);
+
+    expect(resStatus).toBe(200);
+    expect(resData.success).toBe(true);
+    expect(resData.data.nombre).toBe('Carlos Modificado');
+    expect(resData.data.email).toBe('carlos.mod@example.com');
+    expect(resData.data.atendido).toBe(1);
+
+    // Confirm DB updates
+    const row = db.prepare('SELECT nombre, email, atendido FROM leads_clientes WHERE id = 1').get();
+    expect(row.nombre).toBe('Carlos Modificado');
+    expect(row.atendido).toBe(1);
+  });
+
+  it('should successfully delete a lead client', () => {
+    const req = {
+      user: { id: 1, rol: 'admin' },
+      params: { id: 1 }
+    };
+    let resStatus = 200;
+    let resData = null;
+    const res = {
+      status: (code) => { resStatus = code; return res; },
+      json: (data) => { resData = data; return res; }
+    };
+
+    deleteLeadHandler(req, res);
+
+    expect(resStatus).toBe(200);
+    expect(resData.success).toBe(true);
+
+    // Confirm DB reflects deletion
+    const row = db.prepare('SELECT 1 FROM leads_clientes WHERE id = 1').get();
+    expect(row).toBeUndefined();
   });
 });

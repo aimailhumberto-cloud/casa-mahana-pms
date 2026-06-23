@@ -171,6 +171,52 @@ router.post('/leads', requireAuth, (req, res) => {
   }
 });
 
+// ── PUT /api/v1/crm/leads/:id ──
+router.put('/leads/:id', requireAuth, (req, res) => {
+  try {
+    const { nombre, apellido, email, telefono, notas, estado, atendido } = req.body;
+    if (!nombre) return err(res, 'El nombre es obligatorio');
+    
+    const db = getDb();
+    const now = new Date().toISOString();
+    const result = db.prepare(`
+      UPDATE leads_clientes
+      SET nombre = ?, apellido = ?, email = ?, telefono = ?, notas = ?, estado = ?, atendido = ?, updated_at = ?
+      WHERE id = ?
+    `).run(
+      nombre,
+      apellido || '',
+      email || '',
+      telefono || '',
+      notas || '',
+      estado || 'Borrador',
+      atendido !== undefined ? (atendido ? 1 : 0) : 0,
+      now,
+      req.params.id
+    );
+
+    if (result.changes === 0) return err(res, 'Prospecto no encontrado', 404);
+    const updatedLead = db.prepare('SELECT * FROM leads_clientes WHERE id = ?').get(req.params.id);
+    return ok(res, updatedLead);
+  } catch (e) {
+    console.error('CRM Lead update error:', e);
+    return err(res, 'Error al actualizar prospecto', 500);
+  }
+});
+
+// ── DELETE /api/v1/crm/leads/:id ──
+router.delete('/leads/:id', requireAuth, (req, res) => {
+  try {
+    const db = getDb();
+    const result = db.prepare('DELETE FROM leads_clientes WHERE id = ?').run(req.params.id);
+    if (result.changes === 0) return err(res, 'Prospecto no encontrado', 404);
+    return ok(res, { message: 'Prospecto eliminado con éxito' });
+  } catch (e) {
+    console.error('CRM Lead delete error:', e);
+    return err(res, 'Error al eliminar prospecto', 500);
+  }
+});
+
 // ── PATCH /api/v1/crm/leads/:id/status ──
 router.patch('/leads/:id/status', requireAuth, (req, res) => {
   try {
