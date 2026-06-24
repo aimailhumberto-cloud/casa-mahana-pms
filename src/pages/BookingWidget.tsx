@@ -118,7 +118,11 @@ export default function BookingWidget() {
   const [error, setError] = useState('')
   const [checkIn, setCheckIn] = useState('')
   const [checkOut, setCheckOut] = useState('')
-  const [categoria, setCategoria] = useState<'Estadía' | 'Pasadía'>('Estadía')
+  const [categoria, setCategoria] = useState<'Estadía' | 'Pasadía'>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const cat = params.get('categoria');
+    return (cat === 'Pasadía' || cat === 'Pasadia' || cat === 'pasadia') ? 'Pasadía' : 'Estadía';
+  })
   const [adultos, setAdultos] = useState(1)
   const [menores, setMenores] = useState(0)
   const [mascotas, setMascotas] = useState(0)
@@ -230,24 +234,41 @@ export default function BookingWidget() {
       if (!data.success) { setError(data.error?.message || 'Error'); return }
       if (data.data.tipos_disponibles.length === 0) { setError('No hay disponibilidad para esas fechas. Prueba con otras fechas.'); return }
       
-      setRoomTypes(data.data.tipos_disponibles)
-      
       // Save searched values
       setAdultosBuscados(adultos)
       setMenoresBuscados(menores)
       setMascotasBuscadas(mascotas)
 
+      const urlParams = new URLSearchParams(window.location.search);
+      const targetPlanCode = urlParams.get('plan');
+
       // Fetch plans for all available room types in parallel
       const plansMap: Record<string, Plan[]> = {}
       const defaultPlansMap: Record<string, Plan> = {}
+      const validRoomTypes: RoomType[] = []
+
       await Promise.all(data.data.tipos_disponibles.map(async (rt: RoomType) => {
         const pResp = await fetch(`${API}/planes?tipo=${rt.tipo}`)
         const pData = await pResp.json()
         if (pData.success && pData.data.length > 0) {
-          plansMap[rt.tipo] = pData.data
-          defaultPlansMap[rt.tipo] = pData.data[0]
+          let plansList = pData.data;
+          if (targetPlanCode) {
+            plansList = plansList.filter((p: Plan) => p.codigo === targetPlanCode);
+          }
+          if (plansList.length > 0) {
+            plansMap[rt.tipo] = plansList;
+            defaultPlansMap[rt.tipo] = plansList[0];
+            validRoomTypes.push(rt);
+          }
         }
       }))
+
+      if (validRoomTypes.length === 0) {
+        setError('No hay habitaciones disponibles para la oferta seleccionada en estas fechas.');
+        return;
+      }
+
+      setRoomTypes(validRoomTypes)
       setAllRoomPlans(plansMap)
       setSelectedPlans(defaultPlansMap)
       setStep(2)
