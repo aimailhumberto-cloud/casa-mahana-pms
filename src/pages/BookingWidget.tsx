@@ -240,7 +240,8 @@ export default function BookingWidget() {
       setMascotasBuscadas(mascotas)
 
       const urlParams = new URLSearchParams(window.location.search);
-      const targetPlanCode = urlParams.get('plan');
+      const rawPlanCode = urlParams.get('plan');
+      const targetPlanCode = rawPlanCode?.trim().toLowerCase();
 
       // Fetch plans for all available room types in parallel
       const plansMap: Record<string, Plan[]> = {}
@@ -253,7 +254,7 @@ export default function BookingWidget() {
         if (pData.success && pData.data.length > 0) {
           let plansList = pData.data;
           if (targetPlanCode) {
-            plansList = plansList.filter((p: Plan) => p.codigo === targetPlanCode);
+            plansList = plansList.filter((p: Plan) => p.codigo.trim().toLowerCase() === targetPlanCode);
           }
           if (plansList.length > 0) {
             plansMap[rt.tipo] = plansList;
@@ -264,7 +265,11 @@ export default function BookingWidget() {
       }))
 
       if (validRoomTypes.length === 0) {
-        setError('No hay habitaciones disponibles para la oferta seleccionada en estas fechas.');
+        if (rawPlanCode) {
+          setError(`No hay habitaciones disponibles para la oferta "${rawPlanCode}" en estas fechas. Asegúrate de que la oferta esté Activa, tenga la opción "Visible en Web" activada en el PMS, y esté configurada para este tipo de habitación.`);
+        } else {
+          setError('No hay habitaciones disponibles para estas fechas.');
+        }
         return;
       }
 
