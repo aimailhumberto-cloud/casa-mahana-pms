@@ -61,7 +61,25 @@ export default function CotizadorCRM() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [atendidoFilter, setAtendidoFilter] = useState('all');
-  const [sortBy, setSortBy] = useState('recent');
+  const [sortField, setSortField] = useState<string>('updated_at');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDirection(field === 'nombre' || field === 'fecha_evento' || field === 'fecha_seguimiento' || field === 'estado' ? 'asc' : 'desc');
+    }
+  };
+
+  const dropdownValue = useMemo(() => {
+    if (sortField === 'updated_at' && sortDirection === 'desc') return 'recent';
+    if (sortField === 'created_at' && sortDirection === 'asc') return 'oldest';
+    if (sortField === 'valor_total' && sortDirection === 'desc') return 'value_desc';
+    if (sortField === 'valor_total' && sortDirection === 'asc') return 'value_asc';
+    return 'custom';
+  }, [sortField, sortDirection]);
   
   // Preloaded data
   const [preloadedServices, setPreloadedServices] = useState<PreloadedService[]>([]);
@@ -704,21 +722,49 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
         return matchesQuery && matchesStatus && matchesAtendido;
       })
       .sort((a, b) => {
-        if (sortBy === 'recent') {
-          return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+        let valA = a[sortField as keyof Lead];
+        let valB = b[sortField as keyof Lead];
+
+        if (sortField === 'nombre') {
+          const nameA = `${a.nombre} ${a.apellido}`.toLowerCase();
+          const nameB = `${b.nombre} ${b.apellido}`.toLowerCase();
+          return sortDirection === 'asc' ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
         }
-        if (sortBy === 'oldest') {
-          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+
+        if (sortField === 'fecha_evento' || sortField === 'fecha_seguimiento') {
+          const dateA = valA ? new Date(valA as string).getTime() : 0;
+          const dateB = valB ? new Date(valB as string).getTime() : 0;
+          if (dateA === 0 && dateB !== 0) return 1;
+          if (dateB === 0 && dateA !== 0) return -1;
+          if (dateA === 0 && dateB === 0) return 0;
+          return sortDirection === 'asc' ? dateA - dateB : dateB - dateA;
         }
-        if (sortBy === 'value_desc') {
-          return (b.valor_total || 0) - (a.valor_total || 0);
+
+        if (sortField === 'updated_at' || sortField === 'created_at') {
+          const dateA = new Date(valA as string).getTime();
+          const dateB = new Date(valB as string).getTime();
+          return sortDirection === 'asc' ? dateA - dateB : dateB - dateA;
         }
-        if (sortBy === 'value_asc') {
-          return (a.valor_total || 0) - (b.valor_total || 0);
+
+        if (sortField === 'valor_total') {
+          const numA = Number(valA || 0);
+          const numB = Number(valB || 0);
+          return sortDirection === 'asc' ? numA - numB : numB - numA;
         }
-        return 0;
+
+        // Default sorting
+        if (valA === undefined || valA === null) valA = '';
+        if (valB === undefined || valB === null) valB = '';
+
+        if (typeof valA === 'string' && typeof valB === 'string') {
+          return sortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+        }
+
+        return sortDirection === 'asc'
+          ? (valA > valB ? 1 : valA < valB ? -1 : 0)
+          : (valB > valA ? 1 : valB < valA ? -1 : 0);
       });
-  }, [leads, searchQuery, statusFilter, atendidoFilter, sortBy]);
+  }, [leads, searchQuery, statusFilter, atendidoFilter, sortField, sortDirection]);
 
   return (
     <div className="space-y-6">
@@ -874,14 +920,21 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                 </select>
 
                 <select
-                  value={sortBy}
-                  onChange={e => setSortBy(e.target.value)}
+                  value={dropdownValue}
+                  onChange={e => {
+                    const val = e.target.value;
+                    if (val === 'recent') { setSortField('updated_at'); setSortDirection('desc'); }
+                    else if (val === 'oldest') { setSortField('created_at'); setSortDirection('asc'); }
+                    else if (val === 'value_desc') { setSortField('valor_total'); setSortDirection('desc'); }
+                    else if (val === 'value_asc') { setSortField('valor_total'); setSortDirection('asc'); }
+                  }}
                   className="p-2 text-xs border rounded-xl bg-white font-semibold text-gray-700 outline-none"
                 >
                   <option value="recent">Última Actividad</option>
                   <option value="oldest">Más Antiguos</option>
                   <option value="value_desc">Mayor Valor Cotizado</option>
                   <option value="value_asc">Menor Valor Cotizado</option>
+                  {dropdownValue === 'custom' && <option value="custom">Orden Personalizado</option>}
                 </select>
               </div>
               
@@ -903,15 +956,55 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm border-collapse">
                 <thead>
-                  <tr className="border-b border-gray-200 bg-gray-50/50 text-gray-400 font-bold uppercase tracking-wider text-xs">
-                    <th className="py-3.5 px-6">Cliente</th>
-                    <th className="py-3.5 px-4">Fecha Evento</th>
-                    <th className="py-3.5 px-4">Próximo Seguimiento</th>
-                    <th className="py-3.5 px-4">Última Actividad</th>
-                    <th className="py-3.5 px-4">Atendido</th>
-                    <th className="py-3.5 px-4">Oferta Mejora</th>
-                    <th className="py-3.5 px-4">Estado</th>
-                    <th className="py-3.5 px-4">Total Cotizado</th>
+                  <tr className="border-b border-gray-200 bg-gray-50/50 text-gray-400 font-bold uppercase tracking-wider text-xs select-none">
+                    <th className="py-3.5 px-6 cursor-pointer hover:bg-gray-100/50 hover:text-gray-700 transition" onClick={() => handleSort('nombre')}>
+                      <div className="flex items-center gap-1">
+                        Cliente
+                        {sortField === 'nombre' && (sortDirection === 'asc' ? ' ▲' : ' ▼')}
+                      </div>
+                    </th>
+                    <th className="py-3.5 px-4 cursor-pointer hover:bg-gray-100/50 hover:text-gray-700 transition" onClick={() => handleSort('fecha_evento')}>
+                      <div className="flex items-center gap-1">
+                        Fecha Evento
+                        {sortField === 'fecha_evento' && (sortDirection === 'asc' ? ' ▲' : ' ▼')}
+                      </div>
+                    </th>
+                    <th className="py-3.5 px-4 cursor-pointer hover:bg-gray-100/50 hover:text-gray-700 transition" onClick={() => handleSort('fecha_seguimiento')}>
+                      <div className="flex items-center gap-1">
+                        Próximo Seguimiento
+                        {sortField === 'fecha_seguimiento' && (sortDirection === 'asc' ? ' ▲' : ' ▼')}
+                      </div>
+                    </th>
+                    <th className="py-3.5 px-4 cursor-pointer hover:bg-gray-100/50 hover:text-gray-700 transition" onClick={() => handleSort('updated_at')}>
+                      <div className="flex items-center gap-1">
+                        Última Actividad
+                        {sortField === 'updated_at' && (sortDirection === 'asc' ? ' ▲' : ' ▼')}
+                      </div>
+                    </th>
+                    <th className="py-3.5 px-4 cursor-pointer hover:bg-gray-100/50 hover:text-gray-700 transition" onClick={() => handleSort('atendido')}>
+                      <div className="flex items-center gap-1">
+                        Atendido
+                        {sortField === 'atendido' && (sortDirection === 'asc' ? ' ▲' : ' ▼')}
+                      </div>
+                    </th>
+                    <th className="py-3.5 px-4 cursor-pointer hover:bg-gray-100/50 hover:text-gray-700 transition" onClick={() => handleSort('oferta_mejora')}>
+                      <div className="flex items-center gap-1">
+                        Oferta Mejora
+                        {sortField === 'oferta_mejora' && (sortDirection === 'asc' ? ' ▲' : ' ▼')}
+                      </div>
+                    </th>
+                    <th className="py-3.5 px-4 cursor-pointer hover:bg-gray-100/50 hover:text-gray-700 transition" onClick={() => handleSort('estado')}>
+                      <div className="flex items-center gap-1">
+                        Estado
+                        {sortField === 'estado' && (sortDirection === 'asc' ? ' ▲' : ' ▼')}
+                      </div>
+                    </th>
+                    <th className="py-3.5 px-4 cursor-pointer hover:bg-gray-100/50 hover:text-gray-700 transition" onClick={() => handleSort('valor_total')}>
+                      <div className="flex items-center gap-1">
+                        Total Cotizado
+                        {sortField === 'valor_total' && (sortDirection === 'asc' ? ' ▲' : ' ▼')}
+                      </div>
+                    </th>
                     <th className="py-3.5 px-6 text-right">Acciones</th>
                   </tr>
                 </thead>
