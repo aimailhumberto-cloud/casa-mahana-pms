@@ -381,8 +381,15 @@ CREATE TABLE IF NOT EXISTS servicios_adicionales (
 CREATE INDEX IF NOT EXISTS idx_leads_estado ON leads_clientes(estado);
 CREATE INDEX IF NOT EXISTS idx_cotizaciones_lead ON cotizaciones_custom(lead_id);
 
-
-
-
-
-
+-- ═══ AUDITORÍA DE ELIMINACIÓN DE RESERVAS ═══
+CREATE TABLE IF NOT EXISTS reservas_eliminadas_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  reserva_id INTEGER,
+  cliente TEXT NOT NULL,
+  check_in TEXT,
+  check_out TEXT,
+  monto_total REAL,
+  motivo TEXT,
+  eliminado_por TEXT,
+  fecha TEXT DEFAULT (datetime('now'))
+);

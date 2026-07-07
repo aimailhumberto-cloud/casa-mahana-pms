@@ -101,6 +101,11 @@ export default function ReservaDetalle() {
   const [uploading, setUploading] = useState(false);
   const [reversalLoading, setReversalLoading] = useState<number | null>(null);
 
+  // States for deleting reservation (Admin only)
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteMotivo, setDeleteMotivo] = useState('');
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
   // States for notifications
   const [notificaciones, setNotificaciones] = useState<any[]>([]);
   const [loadingNotifs, setLoadingNotifs] = useState(false);
@@ -341,6 +346,28 @@ export default function ReservaDetalle() {
       alert('Movimiento eliminado exitosamente.');
     } catch (err: any) {
       alert(err?.response?.data?.error?.message || 'Error al eliminar el movimiento');
+    }
+  };
+
+  const handleDeleteReserva = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!deleteMotivo.trim()) {
+      alert('Debe especificar un motivo de eliminación');
+      return;
+    }
+    if (!confirm('¿Está seguro de que desea eliminar permanentemente esta reserva? Esta acción no se puede deshacer y borrará todos los registros asociados (pagos, cargos, documentos).')) {
+      return;
+    }
+    setDeleteLoading(true);
+    try {
+      await api.delete(`/hotel/reservas/${id}`, { data: { motivo: deleteMotivo } });
+      setShowDeleteModal(false);
+      alert('Reserva eliminada exitosamente.');
+      navigate('/reservas');
+    } catch (err: any) {
+      alert(err?.response?.data?.error?.message || 'Error al eliminar la reserva');
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -821,6 +848,15 @@ export default function ReservaDetalle() {
                       <>
                         <button onClick={() => setConfirmCancel('Cancelada')} className="w-full px-4 py-2.5 text-left text-sm text-red-600 hover:bg-red-50 transition">Cancelar Reserva</button>
                         <button onClick={() => setConfirmCancel('No-Show')} className="w-full px-4 py-2.5 text-left text-sm text-orange-600 hover:bg-orange-50 transition">Marcar No-Show</button>
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => { setConfirmCancel(null); setShowDeleteModal(true); }}
+                            className="w-full px-4 py-2.5 text-left text-sm text-red-700 font-bold hover:bg-red-100 transition border-t border-gray-100"
+                          >
+                            🗑️ Eliminar de Registros
+                          </button>
+                        )}
                       </>
                     ) : (
                       <div className="p-3">
@@ -1783,6 +1819,48 @@ export default function ReservaDetalle() {
                  Cerrar
                </button>
              </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Confirmar Eliminación de Reserva (Admin Only) */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-55 p-4 animate-fadeIn">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 relative">
+            <h3 className="text-lg font-bold text-red-700 mb-2">Eliminar Reserva Permanentemente</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              Esta acción eliminará la reserva de todos los listados, reportes y del calendario. Los saldos ya no sumarán. Se guardará un registro de auditoría de esta eliminación.
+            </p>
+            
+            <form onSubmit={handleDeleteReserva} className="space-y-4 font-sans">
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Motivo de Eliminación *</label>
+                <textarea
+                  value={deleteMotivo}
+                  onChange={e => setDeleteMotivo(e.target.value)}
+                  className="input min-h-[80px] w-full"
+                  placeholder="Escriba la razón de la eliminación (ej. duplicado, error de recepción, cancelación solicitada)..."
+                  required
+                />
+              </div>
+              
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => { setShowDeleteModal(false); setDeleteMotivo(''); }}
+                  className="px-4 py-2 text-gray-500 text-sm font-medium hover:bg-gray-100 rounded-lg transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={deleteLoading}
+                  className="px-4 py-2 bg-red-600 text-white text-sm font-semibold rounded-lg hover:bg-red-700 transition disabled:opacity-50 flex items-center gap-1"
+                >
+                  {deleteLoading ? 'Eliminando...' : 'Eliminar permanentemente'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

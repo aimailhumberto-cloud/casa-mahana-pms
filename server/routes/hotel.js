@@ -965,6 +965,51 @@ router.patch('/hotel/reservas/:id/status', requireAuth, requireRole('admin', 're
   } catch (e) { err(res, 'SERVER_ERROR', 'Error cambiando estado', 500); }
 });
 
+// Delete a reservation completely with audit log (Admin only)
+router.delete('/hotel/reservas/:id', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const db = getDb();
+    const reserva = findById('reservas_hotel', req.params.id);
+    if (!reserva) return err(res, 'NOT_FOUND', 'Reserva no encontrada', 404);
+
+    const { motivo } = req.body;
+    if (!motivo) return err(res, 'VALIDATION_ERROR', 'Se requiere especificar un motivo de eliminación');
+
+    const txn = db.transaction(() => {
+      // 1. Log deletion in audit table
+      db.prepare(`
+        INSERT INTO reservas_eliminadas_log (reserva_id, cliente, check_in, check_out, monto_total, motivo, eliminado_por)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        reserva.id,
+        `${reserva.cliente} ${reserva.apellido || ''}`.trim(),
+        reserva.check_in,
+        reserva.check_out,
+        reserva.monto_total,
+        sanitize(motivo),
+        req.user.nombre || req.user.email || 'admin'
+      );
+
+      // 2. Clean up associated tables
+      db.prepare('DELETE FROM folio_hotel WHERE reserva_id = ?').run(req.params.id);
+      db.prepare('DELETE FROM documentos_reserva WHERE reserva_id = ?').run(req.params.id);
+      db.prepare('DELETE FROM solicitudes_modificacion WHERE reserva_id = ?').run(req.params.id);
+      db.prepare('DELETE FROM notificaciones_log WHERE reserva_id = ?').run(req.params.id);
+      db.prepare('DELETE FROM reversiones_log WHERE reserva_id = ?').run(req.params.id);
+      db.prepare('UPDATE reservas_hotel SET parent_reserva_id = NULL WHERE parent_reserva_id = ?').run(req.params.id);
+
+      // 3. Delete the reservation
+      db.prepare('DELETE FROM reservas_hotel WHERE id = ?').run(req.params.id);
+    });
+
+    txn();
+    ok(res, { success: true, message: 'Reserva eliminada permanentemente del sistema.' });
+  } catch (e) {
+    console.error(e);
+    err(res, 'SERVER_ERROR', 'Error al eliminar la reserva', 500);
+  }
+});
+
 // ══════════════════════════════════════
 // FOLIO / PAGOS
 // ══════════════════════════════════════

@@ -655,6 +655,60 @@ describe('Casa Mahana PMS — Opaque-box E2E Test Suite', () => {
       expect(folioCount).toBe(0);
     });
 
+    it('TC-4.6: Admin can delete a reservation completely with audit log, others are blocked', async () => {
+      const db = getDb();
+      
+      // 1. Setup reservation & linked folio
+      const resId = db.prepare(`
+        INSERT INTO reservas_hotel (cliente, email, check_in, check_out, noches, adultos, estado, tipo_habitacion, habitacion_id, plan_codigo, monto_total, monto_pagado, saldo_pendiente)
+        VALUES ('Delete Me', 'delme@example.com', '2026-06-25', '2026-06-27', 2, 2, 'Confirmada', 'Doble', 7, 'todo_incluido', 300, 100, 200)
+      `).run().lastInsertRowid;
+
+      const folioId = db.prepare(`
+        INSERT INTO folio_hotel (reserva_id, tipo, concepto, monto, metodo_pago, registrado_por)
+        VALUES (?, 'credito', 'Abono inicial', 100.00, 'efectivo', 'admin')
+      `).run(resId).lastInsertRowid;
+
+      // 2. Receptionist attempts deletion -> 403 Forbidden
+      const { status: recStatus } = await apiRequest(`/hotel/reservas/${resId}`, {
+        method: 'DELETE',
+        token: receptionistToken,
+        body: { motivo: 'Error de prueba' }
+      });
+      expect(recStatus).toBe(403);
+
+      // 3. Admin attempts deletion without motivo -> 400 Bad Request
+      const { status: badStatus } = await apiRequest(`/hotel/reservas/${resId}`, {
+        method: 'DELETE',
+        token: adminToken,
+        body: {}
+      });
+      expect(badStatus).toBe(400);
+
+      // 4. Admin deletes successfully -> 200 OK
+      const { status: okStatus, data: okData } = await apiRequest(`/hotel/reservas/${resId}`, {
+        method: 'DELETE',
+        token: adminToken,
+        body: { motivo: 'Reserva duplicada en Kommo' }
+      });
+      expect(okStatus).toBe(200);
+      expect(okData.success).toBe(true);
+
+      // 5. Verify database records are cleared
+      const resCount = db.prepare('SELECT count(*) as count FROM reservas_hotel WHERE id = ?').get(resId).count;
+      expect(resCount).toBe(0);
+
+      const fCount = db.prepare('SELECT count(*) as count FROM folio_hotel WHERE id = ?').get(folioId).count;
+      expect(fCount).toBe(0);
+
+      // 6. Verify audit log entry
+      const auditLog = db.prepare('SELECT * FROM reservas_eliminadas_log WHERE reserva_id = ?').get(resId);
+      expect(auditLog).toBeDefined();
+      expect(auditLog.cliente).toBe('Delete Me');
+      expect(auditLog.motivo).toBe('Reserva duplicada en Kommo');
+      expect(auditLog.eliminado_por).toBeDefined();
+    });
+
   });
 
 });
