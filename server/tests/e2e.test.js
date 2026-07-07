@@ -582,6 +582,79 @@ describe('Casa Mahana PMS — Opaque-box E2E Test Suite', () => {
       db.prepare("UPDATE habitaciones SET activa = 1 WHERE tipo = 'Familiar'").run();
     });
 
+    it('TC-4.4: Admin can edit a folio transaction directly and totals recalculate', async () => {
+      const db = getDb();
+      const resId = db.prepare(`
+        INSERT INTO reservas_hotel (cliente, email, check_in, check_out, noches, adultos, estado, tipo_habitacion, habitacion_id, plan_codigo, monto_total, monto_pagado, saldo_pendiente, precio_adulto_noche, subtotal, impuesto_pct, impuesto_monto)
+        VALUES ('Luis Direct', 'luis.dir@example.com', '2026-06-25', '2026-06-27', 2, 2, 'Confirmada', 'Doble', 7, 'todo_incluido', 300, 100, 200, 75, 300, 0, 0)
+      `).run().lastInsertRowid;
+
+      const folioId = db.prepare(`
+        INSERT INTO folio_hotel (reserva_id, tipo, concepto, monto, metodo_pago, registrado_por)
+        VALUES (?, 'credito', 'Abono inicial', 100.00, 'efectivo', 'admin')
+      `).run(resId).lastInsertRowid;
+
+      // 1. Receptionist tries to edit directly -> should fail with 403
+      const { status: recStatus } = await apiRequest(`/hotel/reservas/${resId}/folio/${folioId}`, {
+        method: 'PUT',
+        token: receptionistToken,
+        body: { monto: 80.00, concepto: 'Abono inicial corregido' }
+      });
+      expect(recStatus).toBe(403);
+
+      // 2. Admin edits directly -> should succeed with 200
+      const { status: adminStatus, data: adminData } = await apiRequest(`/hotel/reservas/${resId}/folio/${folioId}`, {
+        method: 'PUT',
+        token: adminToken,
+        body: { monto: 80.00, concepto: 'Abono inicial corregido' }
+      });
+      expect(adminStatus).toBe(200);
+      expect(adminData.success).toBe(true);
+
+      const resRow = db.prepare('SELECT monto_pagado, saldo_pendiente FROM reservas_hotel WHERE id = ?').get(resId);
+      expect(resRow.monto_pagado).toBe(80.00);
+      expect(resRow.saldo_pendiente).toBe(220.00);
+
+      const folioRow = db.prepare('SELECT monto, concepto FROM folio_hotel WHERE id = ?').get(folioId);
+      expect(folioRow.monto).toBe(80.00);
+      expect(folioRow.concepto).toBe('Abono inicial corregido');
+    });
+
+    it('TC-4.5: Admin can delete a folio transaction directly and totals recalculate', async () => {
+      const db = getDb();
+      const resId = db.prepare(`
+        INSERT INTO reservas_hotel (cliente, email, check_in, check_out, noches, adultos, estado, tipo_habitacion, habitacion_id, plan_codigo, monto_total, monto_pagado, saldo_pendiente, precio_adulto_noche, subtotal, impuesto_pct, impuesto_monto)
+        VALUES ('Luis Delete', 'luis.del@example.com', '2026-06-25', '2026-06-27', 2, 2, 'Confirmada', 'Doble', 7, 'todo_incluido', 300, 100, 200, 75, 300, 0, 0)
+      `).run().lastInsertRowid;
+
+      const folioId = db.prepare(`
+        INSERT INTO folio_hotel (reserva_id, tipo, concepto, monto, metodo_pago, registrado_por)
+        VALUES (?, 'credito', 'Abono equivocado', 100.00, 'efectivo', 'admin')
+      `).run(resId).lastInsertRowid;
+
+      // 1. Receptionist tries to delete directly -> should fail with 403
+      const { status: recStatus } = await apiRequest(`/hotel/reservas/${resId}/folio/${folioId}`, {
+        method: 'DELETE',
+        token: receptionistToken
+      });
+      expect(recStatus).toBe(403);
+
+      // 2. Admin deletes directly -> should succeed with 200
+      const { status: adminStatus, data: adminData } = await apiRequest(`/hotel/reservas/${resId}/folio/${folioId}`, {
+        method: 'DELETE',
+        token: adminToken
+      });
+      expect(adminStatus).toBe(200);
+      expect(adminData.success).toBe(true);
+
+      const resRow = db.prepare('SELECT monto_pagado, saldo_pendiente FROM reservas_hotel WHERE id = ?').get(resId);
+      expect(resRow.monto_pagado).toBe(0);
+      expect(resRow.saldo_pendiente).toBe(300.00);
+
+      const folioCount = db.prepare('SELECT count(*) as count FROM folio_hotel WHERE id = ?').get(folioId).count;
+      expect(folioCount).toBe(0);
+    });
+
   });
 
 });

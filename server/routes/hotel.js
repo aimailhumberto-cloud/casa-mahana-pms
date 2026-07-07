@@ -1046,6 +1046,131 @@ router.post('/hotel/reservas/:id/folio', requireAuth, (req, res) => {
   } catch (e) { console.error(e); err(res, 'SERVER_ERROR', 'Error registrando movimiento', 500); }
 });
 
+// Edit a movement in the folio directly (Admin only)
+router.put('/hotel/reservas/:id/folio/:folioId', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const db = getDb();
+    const reserva = findById('reservas_hotel', req.params.id);
+    if (!reserva) return err(res, 'NOT_FOUND', 'Reserva no encontrada', 404);
+
+    const original = db.prepare('SELECT * FROM folio_hotel WHERE id = ? AND reserva_id = ?').get(req.params.folioId, req.params.id);
+    if (!original) return err(res, 'NOT_FOUND', 'Movimiento de folio no encontrado', 404);
+
+    const { monto, concepto, metodo_pago, referencia, tipo, fecha } = req.body;
+
+    const txn = db.transaction(() => {
+      // 1. Update folio entry fields
+      const allowedFields = { monto, concepto, metodo_pago, referencia, tipo, fecha };
+      const updates = [];
+      const params = [];
+      for (const [key, value] of Object.entries(allowedFields)) {
+        if (value !== undefined) {
+          updates.push(`${key} = ?`);
+          if (key === 'monto') {
+            params.push(parseFloat(value));
+          } else {
+            params.push(key === 'concepto' || key === 'metodo_pago' || key === 'referencia' || key === 'tipo' || key === 'fecha' ? sanitize(String(value)) : value);
+          }
+        }
+      }
+      if (updates.length > 0) {
+        db.prepare(`UPDATE folio_hotel SET ${updates.join(', ')} WHERE id = ?`).run(...params, req.params.folioId);
+      }
+
+      // 2. Recalculate reservation totals
+      const totalPaid = db.prepare("SELECT SUM(monto) as total FROM folio_hotel WHERE reserva_id = ? AND tipo = 'credito'").get(req.params.id).total || 0;
+      const newMontoPagado = Math.round(totalPaid * 100) / 100;
+
+      const debits = db.prepare("SELECT * FROM folio_hotel WHERE reserva_id = ? AND tipo = 'debito'").all(req.params.id);
+      let newProductosAdicionales = 0;
+      for (const d of debits) {
+        if (!d.concepto.startsWith('Habitación:') && !d.concepto.startsWith('Impuesto Turismo')) {
+          newProductosAdicionales += d.monto;
+        }
+      }
+      newProductosAdicionales = Math.round(newProductosAdicionales * 100) / 100;
+
+      const merged = { ...reserva, monto_pagado: newMontoPagado, productos_adicionales: newProductosAdicionales };
+      const totals = calcReservation(merged);
+      Object.assign(merged, totals);
+
+      db.prepare(`
+        UPDATE reservas_hotel SET 
+          productos_adicionales = ?, subtotal = ?, impuesto_pct = ?, impuesto_monto = ?,
+          monto_total = ?, deposito_sugerido = ?, monto_pagado = ?, saldo_pendiente = ?,
+          updated_at = datetime('now')
+        WHERE id = ?
+      `).run(
+        merged.productos_adicionales, merged.subtotal, merged.impuesto_pct, merged.impuesto_monto,
+        merged.monto_total, merged.deposito_sugerido, merged.monto_pagado, merged.saldo_pendiente,
+        req.params.id
+      );
+    });
+
+    txn();
+
+    const updatedReserva = findById('reservas_hotel', req.params.id);
+    ok(res, updatedReserva, null, 200);
+  } catch (e) {
+    console.error(e);
+    err(res, 'SERVER_ERROR', 'Error al editar el movimiento de folio', 500);
+  }
+});
+
+// Delete a movement in the folio directly (Admin only)
+router.delete('/hotel/reservas/:id/folio/:folioId', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const db = getDb();
+    const reserva = findById('reservas_hotel', req.params.id);
+    if (!reserva) return err(res, 'NOT_FOUND', 'Reserva no encontrada', 404);
+
+    const original = db.prepare('SELECT * FROM folio_hotel WHERE id = ? AND reserva_id = ?').get(req.params.folioId, req.params.id);
+    if (!original) return err(res, 'NOT_FOUND', 'Movimiento de folio no encontrado', 404);
+
+    const txn = db.transaction(() => {
+      // 1. Delete folio entry
+      db.prepare('DELETE FROM folio_hotel WHERE id = ?').run(req.params.folioId);
+
+      // 2. Recalculate reservation totals
+      const totalPaid = db.prepare("SELECT SUM(monto) as total FROM folio_hotel WHERE reserva_id = ? AND tipo = 'credito'").get(req.params.id).total || 0;
+      const newMontoPagado = Math.round(totalPaid * 100) / 100;
+
+      const debits = db.prepare("SELECT * FROM folio_hotel WHERE reserva_id = ? AND tipo = 'debito'").all(req.params.id);
+      let newProductosAdicionales = 0;
+      for (const d of debits) {
+        if (!d.concepto.startsWith('Habitación:') && !d.concepto.startsWith('Impuesto Turismo')) {
+          newProductosAdicionales += d.monto;
+        }
+      }
+      newProductosAdicionales = Math.round(newProductosAdicionales * 100) / 100;
+
+      const merged = { ...reserva, monto_pagado: newMontoPagado, productos_adicionales: newProductosAdicionales };
+      const totals = calcReservation(merged);
+      Object.assign(merged, totals);
+
+      db.prepare(`
+        UPDATE reservas_hotel SET 
+          productos_adicionales = ?, subtotal = ?, impuesto_pct = ?, impuesto_monto = ?,
+          monto_total = ?, deposito_sugerido = ?, monto_pagado = ?, saldo_pendiente = ?,
+          updated_at = datetime('now')
+        WHERE id = ?
+      `).run(
+        merged.productos_adicionales, merged.subtotal, merged.impuesto_pct, merged.impuesto_monto,
+        merged.monto_total, merged.deposito_sugerido, merged.monto_pagado, merged.saldo_pendiente,
+        req.params.id
+      );
+    });
+
+    txn();
+
+    const updatedReserva = findById('reservas_hotel', req.params.id);
+    ok(res, updatedReserva, null, 200);
+  } catch (e) {
+    console.error(e);
+    err(res, 'SERVER_ERROR', 'Error al eliminar el movimiento de folio', 500);
+  }
+});
+
 // Reversar un movimiento de folio (crédito o débito)
 router.post('/hotel/reservas/:id/folio/:folioId/reversar', requireAuth, requireRole('admin'), (req, res) => {
   try {
