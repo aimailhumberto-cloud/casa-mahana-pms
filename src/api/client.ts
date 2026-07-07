@@ -63,6 +63,6 @@ export const api = {
   post: (path: string, body: any, options?: any) => request('POST', path, body, options),
   put: (path: string, body: any, options?: any) => request('PUT', path, body, options),
   patch: (path: string, body: any, options?: any) => request('PATCH', path, body, options),
-  delete: (path: string) => request('DELETE', path),
+  delete: (path: string, body?: any, options?: any) => request('DELETE', path, body, options),
   baseURL: BASE,
 };

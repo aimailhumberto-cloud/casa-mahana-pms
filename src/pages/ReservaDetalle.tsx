@@ -360,7 +360,7 @@ export default function ReservaDetalle() {
     }
     setDeleteLoading(true);
     try {
-      await api.delete(`/hotel/reservas/${id}`, { data: { motivo: deleteMotivo } });
+      await api.delete(`/hotel/reservas/${id}`, { motivo: deleteMotivo });
       setShowDeleteModal(false);
       alert('Reserva eliminada exitosamente.');
       navigate('/reservas');
