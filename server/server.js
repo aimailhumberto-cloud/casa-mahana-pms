@@ -171,18 +171,21 @@ app.get('/api/v1/schema', (req, res) => {
       reservas: {
         description: 'Hotel reservations',
         endpoints: [
-          { method: 'GET', path: '/hotel/reservas', description: 'List reservations (filterable)', auth: 'read', query: 'estado, cliente, check_in_desde, check_in_hasta, page, limit' },
+          { method: 'GET', path: '/hotel/reservas', description: 'List reservations (filterable)', auth: 'read', query: 'estado, tipo_habitacion, cliente, check_in_desde, check_in_hasta, grupo_codigo, page, limit' },
           { method: 'GET', path: '/hotel/reservas/:id', description: 'Get reservation detail with folio', auth: 'read' },
           { method: 'POST', path: '/hotel/reservas', description: 'Create reservation', auth: 'write', required: 'cliente, check_in, check_out, habitacion_id, plan_codigo' },
           { method: 'PUT', path: '/hotel/reservas/:id', description: 'Update reservation', auth: 'write' },
-          { method: 'PATCH', path: '/hotel/reservas/:id/status', description: 'Change status', auth: 'write', body: { estado: 'Pendiente|Confirmada|Hospedado|Check-Out|Cancelada|No-Show' } }
+          { method: 'PATCH', path: '/hotel/reservas/:id/status', description: 'Change status', auth: 'write', body: { estado: 'Pendiente|Confirmada|Hospedado|Check-Out|Cancelada|No-Show' } },
+          { method: 'DELETE', path: '/hotel/reservas/:id', description: 'Delete reservation completely (Admin only)', auth: 'admin', body: { motivo: 'string' } }
         ],
         fields: { id: 'int', cliente: 'string', apellido: 'string', check_in: 'date', check_out: 'date', habitacion_id: 'int', plan_codigo: 'string', adultos: 'int', menores: 'int', estado: 'string', monto_total: 'float', saldo_pendiente: 'float' }
       },
       folio: {
         description: 'Payment/charge records per reservation',
         endpoints: [
-          { method: 'POST', path: '/hotel/reservas/:id/folio', description: 'Add payment or charge', auth: 'write', body: { monto: 'float', concepto: 'string', tipo: 'credito|debito', metodo_pago: 'efectivo|transferencia|yappy|tarjeta|paypal' } }
+          { method: 'POST', path: '/hotel/reservas/:id/folio', description: 'Add payment or charge', auth: 'write', body: { monto: 'float', concepto: 'string', tipo: 'credito|debito', metodo_pago: 'efectivo|transferencia|yappy|tarjeta|paypal' } },
+          { method: 'PUT', path: '/hotel/reservas/:id/folio/:folioId', description: 'Edit payment directly (Admin only)', auth: 'admin', body: { monto: 'float', concepto: 'string', metodo_pago: 'string', referencia: 'string' } },
+          { method: 'DELETE', path: '/hotel/reservas/:id/folio/:folioId', description: 'Delete payment directly (Admin only)', auth: 'admin' }
         ]
       },
       cotizar: {
@@ -220,6 +223,20 @@ app.get('/api/v1/schema', (req, res) => {
           { method: 'POST', path: '/webhooks/:id/test', description: 'Test webhook', auth: 'admin' }
         ],
         available_events: WEBHOOK_EVENTS
+      },
+      crm: {
+        description: 'CRM Leads and custom quotations services',
+        endpoints: [
+          { method: 'GET', path: '/crm/leads', description: 'List all CRM prospects (leads)', auth: 'read' },
+          { method: 'POST', path: '/crm/leads', description: 'Create a new CRM lead', auth: 'write', required: 'nombre' },
+          { method: 'GET', path: '/crm/leads/:id', description: 'Get CRM lead detail with its quotes', auth: 'read' },
+          { method: 'PUT', path: '/crm/leads/:id', description: 'Update CRM lead details (status, notes, etc)', auth: 'write' },
+          { method: 'DELETE', path: '/crm/leads/:id', description: 'Delete CRM lead (Admin only)', auth: 'admin' },
+          { method: 'GET', path: '/crm/servicios', description: 'List standard preloaded services', auth: 'read' },
+          { method: 'POST', path: '/crm/servicios', description: 'Create a preloaded service', auth: 'write' },
+          { method: 'PUT', path: '/crm/servicios/:id', description: 'Update a preloaded service', auth: 'write' },
+          { method: 'DELETE', path: '/crm/servicios/:id', description: 'Deactivate a preloaded service', auth: 'write' }
+        ]
       }
     },
     rate_limiting: { default: '100 req/min per API key', headers: ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'] },
