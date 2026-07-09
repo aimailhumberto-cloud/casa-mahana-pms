@@ -81,7 +81,7 @@ function requireAuth(req, res, next) {
         }
         
         // Update last_used
-        db.prepare('UPDATE api_keys SET last_used = datetime("now"), request_count = request_count + 1 WHERE id = ?').run(keyRow.id);
+        db.prepare("UPDATE api_keys SET last_used = datetime('now'), request_count = request_count + 1 WHERE id = ?").run(keyRow.id);
         
         req.user = {
           id: 0,
