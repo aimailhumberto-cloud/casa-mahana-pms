@@ -1519,20 +1519,37 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                       </div>
 
                       {/* Client info and Dates */}
-                      <div className="grid grid-cols-2 gap-4 text-xs">
-                        <div>
-                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Cotizado A</span>
-                          <p className="font-bold text-gray-800 text-sm">{selectedLead.nombre} {selectedLead.apellido}</p>
-                          {selectedLead.telefono && <p className="text-gray-500">Cel: {selectedLead.telefono}</p>}
-                          {selectedLead.email && <p className="text-gray-500">Email: {selectedLead.email}</p>}
-                        </div>
-                        <div className="text-right">
-                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Detalles de Estadía</span>
-                          <p className="text-gray-800"><strong>Check-In:</strong> {activePreviewQuote.check_in || 'N/A'}</p>
-                          <p className="text-gray-800"><strong>Check-Out:</strong> {activePreviewQuote.check_out || 'N/A'}</p>
-                          <p className="text-gray-500">Noches: {activePreviewQuote.noches} | Huéspedes: {activePreviewQuote.adultos}A, {activePreviewQuote.menores}M</p>
-                        </div>
-                      </div>
+                      {(() => {
+                        const isPasadia = activePreviewQuote.plan_codigo?.includes('pasadia') || activePreviewQuote.noches === 0;
+                        return (
+                          <div className="grid grid-cols-2 gap-4 text-xs">
+                            <div>
+                              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Cotizado A</span>
+                              <p className="font-bold text-gray-800 text-sm">{selectedLead.nombre} {selectedLead.apellido}</p>
+                              {selectedLead.telefono && <p className="text-gray-500">Cel: {selectedLead.telefono}</p>}
+                              {selectedLead.email && <p className="text-gray-500">Email: {selectedLead.email}</p>}
+                            </div>
+                            <div className="text-right">
+                              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">
+                                {isPasadia ? 'Detalles de Pasadía' : 'Detalles de Estadía'}
+                              </span>
+                              {isPasadia ? (
+                                <>
+                                  <p className="text-gray-800"><strong>Fecha Pasadía:</strong> {activePreviewQuote.check_in || 'N/A'}</p>
+                                  <p className="text-gray-800"><strong>Tipo:</strong> Pasadía / Día de Uso</p>
+                                  <p className="text-gray-500">Huéspedes: {activePreviewQuote.adultos} Personas</p>
+                                </>
+                              ) : (
+                                <>
+                                  <p className="text-gray-800"><strong>Check-In:</strong> {activePreviewQuote.check_in || 'N/A'}</p>
+                                  <p className="text-gray-800"><strong>Check-Out:</strong> {activePreviewQuote.check_out || 'N/A'}</p>
+                                  <p className="text-gray-500">Noches: {activePreviewQuote.noches} | Huéspedes: {activePreviewQuote.adultos}A, {activePreviewQuote.menores}M</p>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })()}
 
                       {/* Items table breakdown */}
                       {(() => {
@@ -1545,11 +1562,11 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                         const isPasadia = activePreviewQuote.plan_codigo?.includes('pasadia') || activePreviewQuote.noches === 0;
                         const qty = isPasadia 
                           ? `${activePreviewQuote.adultos} Pax`
-                          : `${activePreviewQuote.noches} Noche${activePreviewQuote.noches > 1 ? 's' : ''}`;
+                          : `${activePreviewQuote.noches} Noche${activePreviewQuote.noches > 1 ? 's' : ''} x ${activePreviewQuote.adultos} Pax`;
                         
                         const unitPriceVal = isPasadia
                           ? (activePreviewQuote.adultos > 0 ? baseStaySubtotal / activePreviewQuote.adultos : baseStaySubtotal)
-                          : (activePreviewQuote.noches > 0 ? baseStaySubtotal / activePreviewQuote.noches : baseStaySubtotal);
+                          : (activePreviewQuote.noches > 0 && activePreviewQuote.adultos > 0 ? baseStaySubtotal / (activePreviewQuote.noches * activePreviewQuote.adultos) : baseStaySubtotal);
                         
                         return (
                           <table className="w-full text-left text-xs border-collapse">
@@ -1606,7 +1623,7 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                       })()}
 
                       {/* Financial breakdown */}
-                      <div className="flex justify-end pt-2">
+                      <div className="flex justify-end pt-2 print-no-break">
                         <div className="w-1/2 space-y-1.5 text-xs">
                           <div className="flex justify-between text-gray-500">
                             <span>Subtotal</span>
@@ -1638,9 +1655,11 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                       </div>
 
                       {activePreviewQuote.notas && (
-                        <div className="text-[10px] text-gray-500 border-t pt-3 space-y-1">
-                          <p className="font-bold text-gray-700">Comentarios Adicionales:</p>
-                          <p>{activePreviewQuote.notas}</p>
+                        <div className="text-[10px] text-gray-500 border-t pt-3 space-y-1 print-no-break">
+                          <p className="font-bold text-gray-700">📝 Observaciones y Detalles de la Estadía:</p>
+                          <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg whitespace-pre-wrap leading-relaxed text-gray-600">
+                            {activePreviewQuote.notas}
+                          </div>
                         </div>
                       )}
 
@@ -2085,9 +2104,9 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-500">Notas Adicionales de la Cotización</label>
+                  <label className="text-xs font-bold text-gray-500">Observaciones y Detalles de la Estadía (Sin Costo)</label>
                   <textarea 
-                    rows={2} placeholder="Comentarios especiales, condiciones de pago..."
+                    rows={3} placeholder="Ej. Distribución de habitaciones, detalles del menú de almuerzo, check-in temprano, etc. (No afecta los cálculos contables)"
                     className="p-2 border rounded-lg w-full bg-white text-xs"
                     value={quoteForm.notas}
                     onChange={e => setQuoteForm({...quoteForm, notas: e.target.value})}
@@ -2133,6 +2152,20 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
             border: none;
             padding: 0;
             box-shadow: none;
+            background: white;
+            color: black;
+          }
+          @page {
+            size: letter;
+            margin: 15mm 10mm 15mm 10mm;
+          }
+          tr {
+            break-inside: avoid;
+            page-break-inside: avoid;
+          }
+          .print-no-break {
+            break-inside: avoid;
+            page-break-inside: avoid;
           }
         }
       `}</style>
