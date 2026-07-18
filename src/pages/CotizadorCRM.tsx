@@ -1535,48 +1535,75 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
                       </div>
 
                       {/* Items table breakdown */}
-                      <table className="w-full text-left text-xs border-collapse">
-                        <thead>
-                          <tr className="border-b border-gray-200 text-gray-400 font-bold uppercase tracking-wider text-[10px]">
-                            <th className="py-2">Descripción</th>
-                            <th className="py-2 text-right">Monto</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr className="border-b border-gray-100">
-                            <td className="py-2.5 text-gray-800">
-                              {activePreviewQuote.plan_codigo?.includes('pasadia') || activePreviewQuote.noches === 0 ? (
-                                <>
-                                  Pasadía Base ({getPlanNombre(activePreviewQuote.plan_codigo)})
-                                  <div className="text-[10px] text-gray-400">Tarifa de pasadía cotizada para {activePreviewQuote.adultos} adultos en {getPlanNombre(activePreviewQuote.plan_codigo)}</div>
-                                </>
-                              ) : (
-                                <>
-                                  Estadía Base ({activePreviewQuote.noches} Noche{activePreviewQuote.noches > 1 ? 's' : ''}) — {getPlanNombre(activePreviewQuote.plan_codigo)}
-                                  <div className="text-[10px] text-gray-400">Tarifa cotizada para {activePreviewQuote.adultos} adultos en {getPlanNombre(activePreviewQuote.plan_codigo)}</div>
-                                </>
-                              )}
-                            </td>
-                            <td className="py-2.5 text-right text-gray-800 font-semibold">
-                              ${(activePreviewQuote.subtotal - (Array.isArray(activePreviewQuote.items_adicionales) ? activePreviewQuote.items_adicionales : JSON.parse(activePreviewQuote.items_adicionales || '[]')).reduce((sum: number, i: any) => sum + i.precio, 0)).toFixed(2)}
-                            </td>
-                          </tr>
-                          
-                          {(Array.isArray(activePreviewQuote.items_adicionales) ? activePreviewQuote.items_adicionales : JSON.parse(activePreviewQuote.items_adicionales || '[]')).map((item: any, idx: number) => (
-                            <tr key={idx} className="border-b border-gray-100">
-                              <td className="py-2.5 text-gray-800">
-                                {item.nombre}
-                                {item.tipo_precio === 'por_persona' && item.precio_unitario && item.cantidad && (
-                                  <div className="text-[10px] text-gray-400">
-                                    ${Number(item.precio_unitario).toFixed(2)} x {item.cantidad} persona{item.cantidad > 1 ? 's' : ''}
-                                  </div>
-                                )}
-                              </td>
-                              <td className="py-2.5 text-right text-gray-800 font-semibold">${item.precio.toFixed(2)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                      {(() => {
+                        const additionalItems = Array.isArray(activePreviewQuote.items_adicionales)
+                          ? activePreviewQuote.items_adicionales
+                          : JSON.parse(activePreviewQuote.items_adicionales || '[]');
+                        const additionalItemsSum = additionalItems.reduce((sum: number, i: any) => sum + i.precio, 0);
+                        const baseStaySubtotal = activePreviewQuote.subtotal - additionalItemsSum;
+                        
+                        const isPasadia = activePreviewQuote.plan_codigo?.includes('pasadia') || activePreviewQuote.noches === 0;
+                        const qty = isPasadia 
+                          ? `${activePreviewQuote.adultos} Pax`
+                          : `${activePreviewQuote.noches} Noche${activePreviewQuote.noches > 1 ? 's' : ''}`;
+                        
+                        const unitPriceVal = isPasadia
+                          ? (activePreviewQuote.adultos > 0 ? baseStaySubtotal / activePreviewQuote.adultos : baseStaySubtotal)
+                          : (activePreviewQuote.noches > 0 ? baseStaySubtotal / activePreviewQuote.noches : baseStaySubtotal);
+                        
+                        return (
+                          <table className="w-full text-left text-xs border-collapse">
+                            <thead>
+                              <tr className="border-b border-gray-200 text-gray-400 font-bold uppercase tracking-wider text-[10px]">
+                                <th className="py-2 w-2/5">Descripción</th>
+                                <th className="py-2 w-1/5 text-center">Cantidad</th>
+                                <th className="py-2 w-1/5 text-right">Tarifa/Precio Unit.</th>
+                                <th className="py-2 w-1/5 text-right">Monto</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr className="border-b border-gray-100">
+                                <td className="py-2.5 text-gray-800">
+                                  {isPasadia ? (
+                                    <>
+                                      Pasadía Base ({getPlanNombre(activePreviewQuote.plan_codigo)})
+                                    </>
+                                  ) : (
+                                    <>
+                                      Estadía Base — {getPlanNombre(activePreviewQuote.plan_codigo)}
+                                    </>
+                                  )}
+                                  <div className="text-[10px] text-gray-400">Tarifa cotizada para {activePreviewQuote.adultos} adultos</div>
+                                </td>
+                                <td className="py-2.5 text-center text-gray-800">{qty}</td>
+                                <td className="py-2.5 text-right text-gray-800">${unitPriceVal.toFixed(2)}</td>
+                                <td className="py-2.5 text-right text-gray-800 font-semibold">${baseStaySubtotal.toFixed(2)}</td>
+                              </tr>
+                              
+                              {additionalItems.map((item: any, idx: number) => {
+                                const itemQty = item.cantidad || 1;
+                                const itemUnitPrice = item.precio_unitario || item.precio;
+                                return (
+                                  <tr key={idx} className="border-b border-gray-100">
+                                    <td className="py-2.5 text-gray-800">
+                                      {item.nombre}
+                                    </td>
+                                    <td className="py-2.5 text-center text-gray-800">
+                                      {item.tipo_precio === 'por_persona' ? `${itemQty} Pax` : `${itemQty} Serv.`}
+                                    </td>
+                                    <td className="py-2.5 text-right text-gray-800">
+                                      ${Number(itemUnitPrice).toFixed(2)}
+                                    </td>
+                                    <td className="py-2.5 text-right text-gray-800 font-semibold">
+                                      ${item.precio.toFixed(2)}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        );
+                      })()}
 
                       {/* Financial breakdown */}
                       <div className="flex justify-end pt-2">
