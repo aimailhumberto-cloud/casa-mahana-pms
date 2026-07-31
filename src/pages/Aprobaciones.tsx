@@ -32,13 +32,16 @@ export default function Aprobaciones() {
 
   const loadPending = () => {
     setLoading(true);
-    api.get('/hotel/reservas?limit=100')
-      .then(r => {
-        if (Array.isArray(r.data)) {
-          // Pendientes
-          setReservas(r.data.filter((res: any) => res.estado === 'Pendiente'));
-          // Historial de decisiones web (Aprobadas / Rechazadas)
-          setHistory(r.data.filter((res: any) => res.fuente && res.fuente.toLowerCase().includes('web') && (res.estado === 'Confirmada' || res.estado === 'Cancelada')));
+    Promise.all([
+      api.get('/hotel/reservas?estado=Pendiente'),
+      api.get('/hotel/reservas?limit=100')
+    ])
+      .then(([resPendientes, resHistory]) => {
+        if (Array.isArray(resPendientes.data)) {
+          setReservas(resPendientes.data);
+        }
+        if (Array.isArray(resHistory.data)) {
+          setHistory(resHistory.data.filter((res: any) => res.fuente && res.fuente.toLowerCase().includes('web') && (res.estado === 'Confirmada' || res.estado === 'Cancelada')));
         }
       })
       .catch(e => console.error('Error fetching reservations:', e))
