@@ -1060,19 +1060,15 @@ ${altRatesStr}
                 ))}
               </select>
             </Field>
-            <Field label={isGroup ? 'Adultos Líd.' : (isPasadia ? 'Personas' : 'Adultos')}>
+            <Field label={isGroup ? 'Adultos Líd.' : 'Adultos'}>
               <input type="number" min={1} max={50} value={form.adultos} onChange={e => set('adultos', +e.target.value)} className="input" />
             </Field>
-            {!isPasadia && (
-              <Field label={isGroup ? 'Menores Líd.' : "Menores"}>
-                <input type="number" min={0} max={10} value={form.menores} onChange={e => set('menores', +e.target.value)} className="input" />
-              </Field>
-            )}
-            {!isPasadia && (
-              <Field label={isGroup ? 'Mascotas Líd.' : "Mascotas"}>
-                <input type="number" min={0} max={5} value={form.mascotas} onChange={e => set('mascotas', +e.target.value)} className="input" />
-              </Field>
-            )}
+            <Field label={isGroup ? 'Menores Líd.' : "Menores"}>
+              <input type="number" min={0} max={10} value={form.menores} onChange={e => set('menores', +e.target.value)} className="input" />
+            </Field>
+            <Field label={isGroup ? 'Mascotas Líd.' : "Mascotas"}>
+              <input type="number" min={0} max={5} value={form.mascotas} onChange={e => set('mascotas', +e.target.value)} className="input" />
+            </Field>
           </div>
         </Section>
 
