@@ -1535,7 +1535,7 @@ export default function BookingWidget() {
                         <div><span className="text-gray-400 text-[10px] block uppercase font-medium">Banco</span><strong>Banco General</strong></div>
                         <div><span className="text-gray-400 text-[10px] block uppercase font-medium">Tipo de Cuenta</span><strong>Cuenta Corriente</strong></div>
                         <div><span className="text-gray-400 text-[10px] block uppercase font-medium">Nombre</span><strong>Casa Mahana S.A.</strong></div>
-                        <div><span className="text-gray-400 text-[10px] block uppercase font-medium">Número de Cuenta</span><strong>03-72-01-123456-7</strong></div>
+                        <div><span className="text-gray-400 text-[10px] block uppercase font-medium">Número de Cuenta</span><strong>03-33-01-126804-2</strong></div>
                       </div>
                       <p className="text-[10px] text-amber-700/80 italic pt-2 border-t border-amber-200/30">Por favor, transfiera el monto indicado arriba y adjunte el comprobante.</p>
                     </div>
