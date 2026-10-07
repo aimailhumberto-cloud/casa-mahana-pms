@@ -2414,6 +2414,7 @@ export default function Configuracion({ user }: { user: User }) {
                   Cerrar
                 </button>
               </div>
+            </div>
           </div>
         </div>
       )}
