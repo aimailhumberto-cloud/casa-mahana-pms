@@ -164,15 +164,18 @@ export default function Configuracion({ user }: { user: User }) {
   const loadApiKeys = () => {
     setLoadingApiKeys(true);
     api.get('/api-keys')
-      .then(r => setApiKeys(r.data.data))
-      .catch(err => console.error('Error fetching API keys', err))
+      .then(r => setApiKeys(r.data || []))
+      .catch(err => {
+        console.error('Error fetching API keys', err);
+        setApiKeys([]);
+      })
       .finally(() => setLoadingApiKeys(false));
   };
 
   const handleGenerateApiKey = () => {
     api.post('/api-keys', { nombre: 'Agente IA (Vía Panel)', permisos: 'admin', rate_limit: 1000 })
-      .then(res => {
-        setNewApiKeyValue(res.data.data.api_key);
+      .then(r => {
+        setNewApiKeyValue(r.data.api_key);
         loadApiKeys();
       })
       .catch(err => alert(err.response?.data?.error?.message || 'Error al crear API Key'));
@@ -2468,7 +2471,7 @@ export default function Configuracion({ user }: { user: User }) {
                   </tr>
                 </thead>
                 <tbody className="text-sm divide-y divide-gray-100">
-                  {apiKeys.length === 0 ? (
+                  {(!apiKeys || apiKeys.length === 0) ? (
                     <tr>
                       <td colSpan={5} className="px-4 py-8 text-center text-gray-400 bg-white">No hay API Keys generadas.</td>
                     </tr>
