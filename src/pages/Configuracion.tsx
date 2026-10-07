@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings, Bell, RefreshCw, Mail, Phone, Calendar, Shield, ShieldAlert, CheckCircle2, XCircle, ArrowRightLeft, Eye, HelpCircle, AlertCircle, ExternalLink, Edit3, Undo, Save, ChevronLeft, Sparkles, MessageSquare, List } from 'lucide-react';
+import { Settings, Bell, RefreshCw, Mail, Phone, Calendar, Shield, ShieldAlert, CheckCircle2, XCircle, ArrowRightLeft, Eye, HelpCircle, AlertCircle, ExternalLink, Edit3, Undo, Save, ChevronLeft, Sparkles, MessageSquare, List, ShieldCheck } from 'lucide-react';
 import { api } from '../api/client';
 
 interface LogNotificacion {
