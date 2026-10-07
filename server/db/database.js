@@ -110,6 +110,11 @@ function getDb() {
     }
 
     db.exec(schema);
+    // Additive, idempotent migration. No changes to existing keys/roles.
+    const apiKeyCols = db.prepare('PRAGMA table_info(api_keys)').all().map(c => c.name);
+    if (!apiKeyCols.includes('scope')) {
+      db.exec('ALTER TABLE api_keys ADD COLUMN scope TEXT DEFAULT NULL');
+    }
 
     // ── Seed habitaciones ──
     const roomCount = db.prepare('SELECT COUNT(*) as c FROM habitaciones').get();
@@ -742,3 +747,4 @@ function resetDb() {
 }
 
 module.exports = { getDb, findAll, findById, create, update, remove, resetDb };
+

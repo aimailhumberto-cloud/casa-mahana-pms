@@ -189,6 +189,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
   key_preview TEXT NOT NULL,           -- últimos 8 chars para identificar: "...abc12345"
   nombre TEXT NOT NULL,                -- "BEE Smart Agent", "WhatsApp Bot"
   permisos TEXT DEFAULT 'read',        -- "read", "write", "admin"
+  scope TEXT DEFAULT NULL,           -- null legacy; pilot_quote allows exactly three GET routes
   rate_limit INTEGER DEFAULT 100,      -- requests por minuto
   activo INTEGER DEFAULT 1,
   last_used TEXT,
@@ -393,3 +394,4 @@ CREATE TABLE IF NOT EXISTS reservas_eliminadas_log (
   eliminado_por TEXT,
   fecha TEXT DEFAULT (datetime('now'))
 );
+
