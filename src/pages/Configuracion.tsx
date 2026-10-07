@@ -107,7 +107,7 @@ const formatWhatsAppText = (text: string) => {
 
 export default function Configuracion({ user }: { user: User }) {
   const isAdmin = user?.rol === 'admin';
-  const [activeTab, setActiveTab] = useState<'notificaciones' | 'logs' | 'reversiones' | 'plantillas' | 'propiedad'>('notificaciones');
+  const [activeTab, setActiveTab] = useState<'notificaciones' | 'logs' | 'reversiones' | 'plantillas' | 'propiedad' | 'apikeys'>('notificaciones');
   
   // Tab 1: Configuración de Notificaciones
   const [smtpHost, setSmtpHost] = useState('');
@@ -155,7 +155,28 @@ export default function Configuracion({ user }: { user: User }) {
   const [savingHotelConfig, setSavingHotelConfig] = useState(false);
   const [hotelConfigSuccessMsg, setHotelConfigSuccessMsg] = useState('');
   const [hotelConfigErrorMsg, setHotelConfigErrorMsg] = useState('');
+  
+  // API Keys state
+  const [apiKeys, setApiKeys] = useState<any[]>([]);
+  const [loadingApiKeys, setLoadingApiKeys] = useState(false);
+  const [newApiKeyValue, setNewApiKeyValue] = useState<string | null>(null);
 
+  const loadApiKeys = () => {
+    setLoadingApiKeys(true);
+    api.get('/api-keys')
+      .then(r => setApiKeys(r.data.data))
+      .catch(err => console.error('Error fetching API keys', err))
+      .finally(() => setLoadingApiKeys(false));
+  };
+
+  const handleGenerateApiKey = () => {
+    api.post('/api-keys', { nombre: 'Agente IA (Vía Panel)', permisos: 'admin', rate_limit: 1000 })
+      .then(res => {
+        setNewApiKeyValue(res.data.data.api_key);
+        loadApiKeys();
+      })
+      .catch(err => alert(err.response?.data?.error?.message || 'Error al crear API Key'));
+  };
   const loadHotelConfig = () => {
     setLoadingHotelConfig(true);
     setHotelConfigSuccessMsg('');
@@ -473,6 +494,8 @@ export default function Configuracion({ user }: { user: User }) {
       loadPlantillas();
     } else if (activeTab === 'propiedad') {
       loadHotelConfig();
+    } else if (activeTab === 'apikeys') {
+      loadApiKeys();
     }
   }, [activeTab, logsPage, reversionesPage, filterType, filterChannel]);
 
@@ -736,6 +759,14 @@ export default function Configuracion({ user }: { user: User }) {
             className={`px-5 py-3 text-sm font-semibold border-b-2 transition flex items-center gap-2 ${activeTab === 'propiedad' ? 'border-mahana-500 text-mahana-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}
           >
             <Settings size={16} /> Propiedad y Pasarela
+          </button>
+        )}
+        {isAdmin && (
+          <button
+            onClick={() => { setActiveTab('apikeys'); }}
+            className={`px-5 py-3 text-sm font-semibold border-b-2 transition flex items-center gap-2 ${activeTab === 'apikeys' ? 'border-mahana-500 text-mahana-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}
+          >
+            <ShieldCheck size={16} /> API Keys
           </button>
         )}
       </div>
@@ -2383,8 +2414,84 @@ export default function Configuracion({ user }: { user: User }) {
                   Cerrar
                 </button>
               </div>
-            </div>
           </div>
+        </div>
+      )}
+
+      {/* Tab 6 Content: API Keys */}
+      {activeTab === 'apikeys' && isAdmin && (
+        <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden p-6 space-y-6">
+          <div className="flex justify-between items-center pb-4 border-b border-gray-100">
+            <div>
+              <h2 className="font-bold text-gray-800 text-lg flex items-center gap-2">
+                <ShieldCheck size={20} className="text-mahana-600" /> API Keys para Integraciones
+              </h2>
+              <p className="text-xs text-gray-500 mt-1">
+                Genera llaves de acceso seguras para conectar agentes de Inteligencia Artificial u otras aplicaciones externas con el PMS.
+              </p>
+            </div>
+            <button
+              onClick={handleGenerateApiKey}
+              className="px-5 py-2.5 bg-mahana-600 hover:bg-mahana-700 text-white font-semibold rounded-xl text-sm transition flex items-center gap-2 shadow-sm"
+            >
+              <Sparkles size={16} /> Generar Nueva Llave IA
+            </button>
+          </div>
+
+          {newApiKeyValue && (
+            <div className="bg-green-50 border-2 border-green-200 rounded-xl p-5 shadow-sm mb-4 animate-fadeIn">
+              <h3 className="font-bold text-green-800 flex items-center gap-2 mb-2">
+                <CheckCircle2 size={20} /> ¡API Key Generada Exitosamente!
+              </h3>
+              <p className="text-sm text-green-700 mb-3">
+                Copia esta llave ahora mismo. Por motivos de seguridad, <strong>no podrás volver a verla completa</strong> después de cerrar esta alerta.
+              </p>
+              <div className="bg-white p-3 rounded-lg border border-green-200 font-mono text-green-900 font-bold select-all flex justify-between items-center">
+                {newApiKeyValue}
+              </div>
+            </div>
+          )}
+
+          {loadingApiKeys ? (
+            <div className="p-12 text-center text-gray-400 animate-pulse">Cargando llaves...</div>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-gray-200">
+              <table className="w-full text-left border-collapse whitespace-nowrap">
+                <thead>
+                  <tr className="bg-gray-50 text-gray-400 font-bold uppercase tracking-wider text-[10px]">
+                    <th className="px-4 py-3">Nombre</th>
+                    <th className="px-4 py-3">Llave Pública</th>
+                    <th className="px-4 py-3">Permisos</th>
+                    <th className="px-4 py-3">Estado</th>
+                    <th className="px-4 py-3">Último Uso</th>
+                  </tr>
+                </thead>
+                <tbody className="text-sm divide-y divide-gray-100">
+                  {apiKeys.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-8 text-center text-gray-400 bg-white">No hay API Keys generadas.</td>
+                    </tr>
+                  ) : (
+                    apiKeys.map(key => (
+                      <tr key={key.id} className="bg-white hover:bg-gray-50">
+                        <td className="px-4 py-3 font-semibold text-gray-800">{key.nombre}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-gray-500">{key.key_preview}</td>
+                        <td className="px-4 py-3 text-xs text-gray-500 uppercase">{key.permisos}</td>
+                        <td className="px-4 py-3">
+                          {key.activo ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-green-100 text-green-800 text-[10px] font-bold">Activa</span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-red-100 text-red-800 text-[10px] font-bold">Revocada</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-gray-500">{key.last_used ? new Date(key.last_used).toLocaleString() : 'Nunca'}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
