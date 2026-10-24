@@ -78,7 +78,7 @@ function App() {
   };
 
   // Public route: /reservar (no auth needed)
-  if (location.pathname === '/reservar') return <BookingWidget />;
+  if (location.pathname === '/reservar' || location.pathname === '/reservar/') return <BookingWidget />;
 
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-gray-50"><div className="animate-pulse text-xl text-gray-400">Cargando...</div></div>;
   if (!user) return <Login onLogin={handleLogin} />;

@@ -165,43 +165,48 @@ function getDb() {
     }
 
     // ── Seed planes de tarifa ──
-    const planCount = db.prepare('SELECT COUNT(*) as c FROM planes_tarifa').get();
-    if (planCount.c === 0) {
-      const insertPlan = db.prepare(`INSERT INTO planes_tarifa 
-        (codigo, nombre, descripcion, categoria, precio_adulto_noche, precio_menor_noche, precio_mascota_noche, incluye, horario, extras_disponibles, tipos_aplicables, visible_web) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const hasDefaultPlans = db.prepare("SELECT COUNT(*) as c FROM planes_tarifa WHERE codigo = 'todo_incluido'").get().c;
+    if (hasDefaultPlans === 0) {
+      const insertPlan = db.prepare(`INSERT OR IGNORE INTO planes_tarifa 
+        (codigo, nombre, descripcion, categoria, precio_adulto_noche, precio_menor_noche, precio_mascota_noche, incluye, horario, extras_disponibles, tipos_aplicables, visible_web, activo, lleva_impuesto, impuesto_pct) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
       // Estadía
+      insertPlan.run('escape_mahana', 'Escape Mahana', 'Escapada frente al mar con desayuno tropical y acceso a Surf Shack', 'Estadía', 16.50, 17.50, 0,
+        JSON.stringify(["Desayuno tropical", "Acceso a piscinas", "Acceso Surf Shack beach club", "WiFi en áreas comunes"]),
+        'Check-in 3:00 PM / Check-out 11:00 AM',
+        JSON.stringify(['Almuerzo $15', 'Cena $18', 'Spa $25']),
+        JSON.stringify(["DELUXE_OCEAN", "DELUXE_BALCON", "DELUXE_VISTA", "ESTANDAR"]), 1, 1, 0, 0);
       insertPlan.run('oferta_simple', 'Oferta Simple', 'Solo habitación, sin comidas', 'Estadía', 50, 25, 15,
         JSON.stringify(['Habitación', 'Estacionamiento', 'WiFi']),
         'Check-in 3:00 PM / Check-out 11:00 AM',
         JSON.stringify(['Desayuno $12', 'Almuerzo $15', 'Cena $18', 'Spa $25']),
-        JSON.stringify(['Familiar', 'Doble', 'Estándar', 'Camping']), 0);
-      insertPlan.run('mahana_exp', 'Mahana Experience', 'Habitación + Desayuno buffet', 'Estadía', 70, 35, 15,
+        JSON.stringify(['Familiar', 'Doble', 'Estándar', 'Camping']), 0, 1, 1, 10);
+      insertPlan.run('mahana_exp', 'Mahana Experience', 'Habitación + Desayuno buffet', 'Estadía', 49.50, 35, 15,
         JSON.stringify(['Habitación', 'Desayuno Buffet', 'Piscina', 'WiFi', 'Estacionamiento']),
         'Check-in 3:00 PM / Check-out 11:00 AM / Desayuno 7-10 AM',
         JSON.stringify(['Almuerzo $15', 'Cena $18', 'Spa $25', 'Tour $20']),
-        JSON.stringify(['Familiar', 'Doble', 'Estándar']), 1);
-      insertPlan.run('todo_incluido', 'Todo Incluido', 'Habitación + 3 comidas completas', 'Estadía', 90, 45, 15,
+        JSON.stringify(['Familiar', 'Doble', 'Estándar']), 1, 1, 1, 10);
+      insertPlan.run('todo_incluido', 'Todo Incluido', 'Habitación + 3 comidas completas', 'Estadía', 66.00, 45, 15,
         JSON.stringify(['Habitación', 'Desayuno Buffet', 'Almuerzo', 'Cena', 'Piscina', 'WiFi', 'Estacionamiento', 'Snacks']),
         'Check-in 3:00 PM / Check-out 11:00 AM / Desayuno 7-10 AM / Almuerzo 12-3 PM / Cena 6-9 PM',
         JSON.stringify(['Spa $25', 'Tour $20', 'Masaje $30']),
-        JSON.stringify(['Familiar', 'Doble', 'Estándar']), 1);
+        JSON.stringify(['Familiar', 'Doble', 'Estándar']), 1, 1, 1, 10);
       insertPlan.run('open_bar', 'Open Bar Premium', 'Habitación + comidas + open bar ilimitado', 'Estadía', 120, 60, 15,
         JSON.stringify(['Habitación', 'Desayuno Buffet', 'Almuerzo', 'Cena', 'Open Bar', 'Piscina', 'WiFi', 'Estacionamiento', 'Snacks', 'Room Service']),
         'Check-in 3:00 PM / Check-out 11:00 AM / Bar 10 AM - 12 AM',
         JSON.stringify(['Spa $25', 'Tour $20']),
-        JSON.stringify(['Familiar', 'Doble']), 0);
+        JSON.stringify(['Familiar', 'Doble']), 0, 1, 1, 10);
       // Pasadía
       insertPlan.run('pasadia_entrada', 'Pasadía Entrada', 'Solo acceso al área de piscina y playa', 'Pasadía', 5.50, 3, 0,
         JSON.stringify(['Acceso Piscina', 'Acceso Playa', 'Estacionamiento']),
         '9:00 AM - 5:00 PM',
         JSON.stringify(['Almuerzo $12', 'Cerveza $3', 'Cóctel $5', 'Bohío $15']),
-        JSON.stringify(['Bohío', 'Salón', 'Restaurante']), 0);
+        JSON.stringify(['Bohío', 'Salón', 'Restaurante']), 1, 1, 1, 10);
       insertPlan.run('pasadia_comidas', 'Pasadía Comidas + Semi Open Bar', 'Acceso + comida + bebidas incluidas', 'Pasadía', 35, 20, 0,
         JSON.stringify(['Acceso Piscina', 'Acceso Playa', 'Almuerzo', 'Semi Open Bar (cerveza, ron, vodka)', 'Estacionamiento']),
         '9:00 AM - 5:00 PM / Almuerzo 12-2 PM / Bar 10 AM - 4 PM',
         JSON.stringify(['Cóctel Premium $5', 'Bohío $10', 'Masaje $25']),
-        JSON.stringify(['Bohío', 'Salón', 'Restaurante']), 0);
+        JSON.stringify(['Bohío', 'Salón', 'Restaurante']), 1, 1, 1, 10);
       console.log('✅ Seeded planes (Estadía + Pasadía) con campos ricos');
     } else {
       // Migration: add new product columns if missing
@@ -237,6 +242,68 @@ function getDb() {
         const insertPlan = db.prepare('INSERT INTO planes_tarifa (codigo, nombre, descripcion, categoria, precio_adulto_noche, precio_menor_noche, precio_mascota_noche) VALUES (?, ?, ?, ?, ?, ?, ?)');
         insertPlan.run('pasadia_entrada', 'Pasadía Entrada', 'Solo entrada al día', 'Pasadía', 5.50, 3, 0);
         insertPlan.run('pasadia_comidas', 'Pasadía Comidas + Semi Open Bar', 'Entrada + comidas + semi open bar', 'Pasadía', 35, 20, 0);
+      }
+
+      // Seed escape_mahana if missing or update attributes
+      const existingEscape = db.prepare("SELECT id FROM planes_tarifa WHERE codigo = 'escape_mahana'").get();
+      if (!existingEscape) {
+        db.prepare(`INSERT INTO planes_tarifa 
+          (codigo, nombre, descripcion, categoria, precio_adulto_noche, precio_menor_noche, precio_mascota_noche, incluye, horario, extras_disponibles, tipos_aplicables, visible_web, activo, lleva_impuesto, impuesto_pct)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+            'escape_mahana',
+            'Escape Mahana',
+            'Escapada frente al mar con desayuno tropical y acceso a Surf Shack',
+            'Estadía',
+            16.50,
+            17.50,
+            0,
+            JSON.stringify(["Desayuno tropical", "Acceso a piscinas", "Acceso Surf Shack beach club", "WiFi en áreas comunes"]),
+            'Check-in 3:00 PM / Check-out 11:00 AM',
+            JSON.stringify(['Almuerzo $15', 'Cena $18', 'Spa $25']),
+            JSON.stringify(["DELUXE_OCEAN", "DELUXE_BALCON", "DELUXE_VISTA", "ESTANDAR"]),
+            1,
+            1,
+            0,
+            0
+          );
+        console.log('✅ Seeded escape_mahana');
+      } else {
+        db.prepare(`UPDATE planes_tarifa SET
+          nombre = 'Escape Mahana',
+          descripcion = 'Escapada frente al mar con desayuno tropical y acceso a Surf Shack',
+          categoria = 'Estadía',
+          precio_adulto_noche = 16.50,
+          precio_menor_noche = 17.50,
+          incluye = ?,
+          tipos_aplicables = ?,
+          visible_web = 1,
+          activo = 1,
+          lleva_impuesto = 0,
+          impuesto_pct = 0
+          WHERE codigo = 'escape_mahana'`).run(
+            JSON.stringify(["Desayuno tropical", "Acceso a piscinas", "Acceso Surf Shack beach club", "WiFi en áreas comunes"]),
+            JSON.stringify(["DELUXE_OCEAN", "DELUXE_BALCON", "DELUXE_VISTA", "ESTANDAR"])
+          );
+      }
+
+      // Ensure pasadia plans are visible on web and active
+      db.exec("UPDATE planes_tarifa SET visible_web = 1, activo = 1 WHERE codigo IN ('pasadia_comidas', 'pasadia_entrada')");
+
+      // Canonical rate alignment for active web plans (R2 / PROJECT.md)
+      db.exec("UPDATE planes_tarifa SET precio_adulto_noche = 66.00, visible_web = 1, activo = 1 WHERE codigo = 'todo_incluido'");
+      db.exec("UPDATE planes_tarifa SET precio_adulto_noche = 49.50, visible_web = 1, activo = 1 WHERE codigo = 'mahana_exp'");
+
+      const todoPlanRow = db.prepare("SELECT id FROM planes_tarifa WHERE codigo = 'todo_incluido'").get();
+      if (todoPlanRow) {
+        db.prepare("UPDATE reglas_tarifa SET precio_adulto = 66.00 WHERE plan_id = ? AND tipo_dia = 'entre_semana'").run(todoPlanRow.id);
+        db.prepare("UPDATE reglas_tarifa SET precio_adulto = 82.50 WHERE plan_id = ? AND tipo_dia = 'fin_de_semana'").run(todoPlanRow.id);
+        db.prepare("UPDATE reglas_tarifa SET precio_adulto = 99.00 WHERE plan_id = ? AND tipo_dia = 'festivo'").run(todoPlanRow.id);
+      }
+      const expPlanRow = db.prepare("SELECT id FROM planes_tarifa WHERE codigo = 'mahana_exp'").get();
+      if (expPlanRow) {
+        db.prepare("UPDATE reglas_tarifa SET precio_adulto = 49.50 WHERE plan_id = ? AND tipo_dia = 'entre_semana'").run(expPlanRow.id);
+        db.prepare("UPDATE reglas_tarifa SET precio_adulto = 61.88 WHERE plan_id = ? AND tipo_dia = 'fin_de_semana'").run(expPlanRow.id);
+        db.prepare("UPDATE reglas_tarifa SET precio_adulto = 74.25 WHERE plan_id = ? AND tipo_dia = 'festivo'").run(expPlanRow.id);
       }
 
       // Migration: add tax columns to planes_tarifa if missing
@@ -278,11 +345,11 @@ function getDb() {
         for (const p of allPlans) {
           // Entre semana = base price (already in plan)
           insertRegla.run(p.id, 'entre_semana', p.precio_adulto_noche, p.precio_menor_noche, p.precio_mascota_noche);
-          // Fin de semana = ~25-30% más
-          const wkendMult = p.codigo.startsWith('pasadia') ? 1.20 : 1.25;
+          // Fin de semana = ~25-30% más (or 50% for escape_mahana)
+          const wkendMult = p.codigo.startsWith('pasadia') ? 1.20 : (p.codigo === 'escape_mahana' ? 1.50 : 1.25);
           insertRegla.run(p.id, 'fin_de_semana',
             Math.round(p.precio_adulto_noche * wkendMult * 100) / 100,
-            Math.round(p.precio_menor_noche * wkendMult * 100) / 100,
+            Math.round(p.precio_menor_noche * (p.codigo === 'escape_mahana' ? 1.25 : wkendMult) * 100) / 100,
             p.precio_mascota_noche);
           // Festivo = ~40-50% más
           const festMult = p.codigo.startsWith('pasadia') ? 1.40 : 1.50;
@@ -294,6 +361,26 @@ function getDb() {
       });
       seedReglas();
       console.log('✅ Seeded reglas de tarifa (entre_semana/fin_de_semana/festivo)');
+    } else {
+      // Ensure existing plans without rules get seeded (e.g. escape_mahana)
+      const allPlans = db.prepare('SELECT id, codigo, precio_adulto_noche, precio_menor_noche, precio_mascota_noche FROM planes_tarifa').all();
+      const insertReglaMissing = db.prepare('INSERT INTO reglas_tarifa (plan_id, tipo_dia, precio_adulto, precio_menor, precio_mascota) VALUES (?, ?, ?, ?, ?)');
+      for (const p of allPlans) {
+        const hasReglas = db.prepare('SELECT COUNT(*) as c FROM reglas_tarifa WHERE plan_id = ?').get(p.id).c;
+        if (hasReglas === 0) {
+          insertReglaMissing.run(p.id, 'entre_semana', p.precio_adulto_noche, p.precio_menor_noche, p.precio_mascota_noche);
+          const wkendMult = p.codigo.startsWith('pasadia') ? 1.20 : (p.codigo === 'escape_mahana' ? 1.50 : 1.25);
+          insertReglaMissing.run(p.id, 'fin_de_semana',
+            Math.round(p.precio_adulto_noche * wkendMult * 100) / 100,
+            Math.round(p.precio_menor_noche * (p.codigo === 'escape_mahana' ? 1.25 : wkendMult) * 100) / 100,
+            p.precio_mascota_noche);
+          const festMult = p.codigo.startsWith('pasadia') ? 1.40 : 1.50;
+          insertReglaMissing.run(p.id, 'festivo',
+            Math.round(p.precio_adulto_noche * festMult * 100) / 100,
+            Math.round(p.precio_menor_noche * festMult * 100) / 100,
+            p.precio_mascota_noche);
+        }
+      }
     }
 
     // ── Seed días festivos (Panamá) ──

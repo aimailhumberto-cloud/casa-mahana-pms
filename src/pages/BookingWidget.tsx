@@ -112,19 +112,205 @@ type CartItem = {
   deposito_minimo: number;
 }
 
+declare global {
+  interface Window {
+    gtag?: (...args: any[]) => void;
+    dataLayer?: any[];
+  }
+}
+
+function parseBookingSearchParams() {
+  if (typeof window === 'undefined') {
+    return {
+      categoria: 'Estadía' as 'Estadía' | 'Pasadía',
+      requestedPlanCode: null as string | null,
+      checkIn: '',
+      checkOut: '',
+      adultos: 1,
+    }
+  }
+
+  const params = new URLSearchParams(window.location.search)
+
+  // 1. category: decodeURIComponent. If present and equals 'Pasadía' or 'Estadía', set categoria.
+  const rawCat = params.get('category')
+  let categoria: 'Estadía' | 'Pasadía' | null = null
+  if (rawCat) {
+    const decoded = decodeURIComponent(rawCat).trim()
+    if (decoded.localeCompare('Pasadía', undefined, { sensitivity: 'accent' }) === 0 || decoded.toLowerCase() === 'pasadia' || decoded.toLowerCase() === 'pasadía') {
+      categoria = 'Pasadía'
+    } else if (decoded.localeCompare('Estadía', undefined, { sensitivity: 'accent' }) === 0 || decoded.toLowerCase() === 'estadia' || decoded.toLowerCase() === 'estadía') {
+      categoria = 'Estadía'
+    }
+  }
+
+  // 2. plan: requested plan code
+  const rawPlan = params.get('plan')
+  const plan = rawPlan ? decodeURIComponent(rawPlan).trim() : null
+
+  // If category was not provided in the URL: infer category from plan
+  let finalCategoria: 'Estadía' | 'Pasadía' = 'Estadía'
+  if (categoria) {
+    finalCategoria = categoria
+  } else if (plan) {
+    if (plan.startsWith('pasadia_')) {
+      finalCategoria = 'Pasadía'
+    } else {
+      finalCategoria = 'Estadía'
+    }
+  }
+
+  // 3. date or check_in: if present, set checkIn
+  const rawDate = params.get('date') || params.get('check_in')
+  let checkIn = rawDate ? decodeURIComponent(rawDate).trim() : ''
+  let checkOut = ''
+
+  if (checkIn) {
+    if (finalCategoria === 'Pasadía') {
+      checkOut = checkIn
+    } else {
+      const rawCheckOut = params.get('check_out')
+      if (rawCheckOut) {
+        checkOut = decodeURIComponent(rawCheckOut).trim()
+      } else {
+        const [y, m, d] = checkIn.split('-').map(Number)
+        if (y && m && d) {
+          const dt = new Date(Date.UTC(y, m - 1, d))
+          dt.setUTCDate(dt.getUTCDate() + 1)
+          checkOut = dt.toISOString().split('T')[0]
+        }
+      }
+    }
+  } else {
+    const rawCheckOut = params.get('check_out')
+    if (rawCheckOut) {
+      checkOut = decodeURIComponent(rawCheckOut).trim()
+    }
+  }
+
+  // 4. guests or adults: parse integer. If valid number > 0, set adultos = parsed
+  const rawGuests = params.get('guests') || params.get('adults')
+  let adultos = 1
+  if (rawGuests) {
+    const parsed = parseInt(rawGuests, 10)
+    if (!isNaN(parsed) && parsed > 0) {
+      adultos = parsed
+    }
+  }
+
+  return {
+    categoria: finalCategoria,
+    requestedPlanCode: plan,
+    checkIn,
+    checkOut,
+    adultos,
+  }
+}
+
+function ingestAndStoreAttribution() {
+  if (typeof window === 'undefined') return
+  try {
+    const params = new URLSearchParams(window.location.search)
+    const attrKeys = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'gclid', 'fbclid', 'ref']
+    const attribution: Record<string, string> = {}
+    let hasAttr = false
+
+    attrKeys.forEach(key => {
+      const val = params.get(key)
+      if (val) {
+        attribution[key] = decodeURIComponent(val).trim()
+        hasAttr = true
+      }
+    })
+
+    if (hasAttr) {
+      let existing: Record<string, string> = {}
+      const saved = sessionStorage.getItem('mahana_pms_attribution')
+      if (saved) {
+        try {
+          existing = JSON.parse(saved)
+        } catch {}
+      }
+      sessionStorage.setItem('mahana_pms_attribution', JSON.stringify({ ...existing, ...attribution }))
+    } else if (!sessionStorage.getItem('mahana_pms_attribution')) {
+      sessionStorage.setItem('mahana_pms_attribution', JSON.stringify({}))
+    }
+  } catch (e) {
+    console.error('Error handling attribution storage', e)
+  }
+}
+
+function trackPurchase(bookingId: string | number, totalAmount: number, currentCart: CartItem[], fallbackPlanCode?: string | null) {
+  try {
+    let attribution: Record<string, string> = {}
+    try {
+      const saved = sessionStorage.getItem('mahana_pms_attribution')
+      if (saved) {
+        attribution = JSON.parse(saved)
+      }
+    } catch (e) {
+      console.error('Error reading attribution from sessionStorage', e)
+    }
+
+    const items = currentCart.length > 0
+      ? currentCart.map(item => ({
+          item_id: item.plan.codigo,
+          item_name: item.plan.nombre,
+          price: Number(item.monto_total.toFixed(2)),
+          quantity: 1,
+        }))
+      : [{
+          item_id: fallbackPlanCode || 'reserva',
+          item_name: 'Reserva Casa Mahana',
+          price: Number(totalAmount.toFixed(2)),
+          quantity: 1,
+        }]
+
+    const payload: Record<string, any> = {
+      transaction_id: String(bookingId),
+      value: Number(totalAmount.toFixed(2)),
+      currency: 'USD',
+      items,
+      utm_source: attribution.utm_source,
+      utm_medium: attribution.utm_medium,
+      utm_campaign: attribution.utm_campaign,
+      utm_term: attribution.utm_term,
+      utm_content: attribution.utm_content,
+      gclid: attribution.gclid,
+      fbclid: attribution.fbclid,
+      ref: attribution.ref,
+    }
+
+    Object.keys(payload).forEach(key => {
+      if (payload[key] === undefined) {
+        delete payload[key]
+      }
+    })
+
+    if (typeof window.gtag === 'function') {
+      window.gtag('event', 'purchase', payload)
+    }
+  } catch (err) {
+    console.error('Error dispatching GA4 purchase event', err)
+  }
+}
+
 export default function BookingWidget() {
+  const initialParams = useRef(parseBookingSearchParams()).current
   const [step, setStep] = useState(1)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [checkIn, setCheckIn] = useState('')
-  const [checkOut, setCheckOut] = useState('')
-  const [categoria, setCategoria] = useState<'Estadía' | 'Pasadía'>('Estadía')
-  const [adultos, setAdultos] = useState(1)
+  const [checkIn, setCheckIn] = useState(initialParams.checkIn)
+  const [checkOut, setCheckOut] = useState(initialParams.checkOut)
+  const [categoria, setCategoria] = useState<'Estadía' | 'Pasadía'>(initialParams.categoria)
+  const [adultos, setAdultos] = useState(initialParams.adultos)
   const [menores, setMenores] = useState(0)
   const [mascotas, setMascotas] = useState(0)
-  const [adultosBuscados, setAdultosBuscados] = useState(1)
+  const [adultosBuscados, setAdultosBuscados] = useState(initialParams.adultos)
   const [menoresBuscados, setMenoresBuscados] = useState(0)
   const [mascotasBuscadas, setMascotasBuscadas] = useState(0)
+  const [requestedPlanCode, setRequestedPlanCode] = useState<string | null>(initialParams.requestedPlanCode)
+  const requestedPlanCodeRef = useRef<string | null>(initialParams.requestedPlanCode)
   const [roomTypes, setRoomTypes] = useState<RoomType[]>([])
   const [selectedType, setSelectedType] = useState('')
   const [plans, setPlans] = useState<Plan[]>([])
@@ -170,6 +356,7 @@ export default function BookingWidget() {
   }, [receiptFile])
 
   useEffect(() => {
+    ingestAndStoreAttribution()
     fetch(`${API}/paypal-config`).then(r => r.json()).then(d => { if (d.success) setPaypalConfig(d.data) })
     fetch(`${API}/tipo-fotos`).then(r => r.json()).then(d => { if (d.success) setTipoFotos(d.data) })
   }, [])
@@ -240,12 +427,14 @@ export default function BookingWidget() {
       // Fetch plans for all available room types in parallel
       const plansMap: Record<string, Plan[]> = {}
       const defaultPlansMap: Record<string, Plan> = {}
+      const targetPlanCode = requestedPlanCodeRef.current || requestedPlanCode
       await Promise.all(data.data.tipos_disponibles.map(async (rt: RoomType) => {
         const pResp = await fetch(`${API}/planes?tipo=${rt.tipo}`)
         const pData = await pResp.json()
         if (pData.success && pData.data.length > 0) {
           plansMap[rt.tipo] = pData.data
-          defaultPlansMap[rt.tipo] = pData.data[0]
+          const matchedPlan = targetPlanCode ? pData.data.find((p: Plan) => p.codigo === targetPlanCode) : null
+          defaultPlansMap[rt.tipo] = matchedPlan || pData.data[0]
         }
       }))
       setAllRoomPlans(plansMap)
@@ -494,7 +683,15 @@ export default function BookingWidget() {
       const resp = await fetch(`${API}/planes?tipo=${tipo}`)
       const data = await resp.json()
       if (!data.success) { setError(data.error?.message || 'Error'); return }
-      setPlans(data.data); setStep(3)
+      setPlans(data.data)
+      const targetPlan = requestedPlanCodeRef.current || requestedPlanCode
+      const matched = targetPlan ? data.data.find((p: Plan) => p.codigo === targetPlan) : null
+      if (matched) {
+        setSelectedPlan(matched)
+      } else if (data.data.length > 0) {
+        setSelectedPlan(data.data[0])
+      }
+      setStep(3)
     } catch { setError('Error de conexión') } finally { setLoading(false) }
   }
 
@@ -590,6 +787,12 @@ export default function BookingWidget() {
       })
       const data = await resp.json()
       if (!data.success) { setError(data.error?.message || 'Error creando reserva'); return }
+
+      // Dispatch GA4 purchase event
+      const bookingId = data.data?.reserva_id || data.data?.grupo_codigo || data.data?.id || paypalOrderId
+      const totalAmount = totalMontoTotal > 0 ? totalMontoTotal : totalPagar
+      trackPurchase(bookingId, totalAmount, cart, requestedPlanCodeRef.current)
+
       setResult(data.data); setStep(6)
     } catch { setError('Error de conexión') } finally { setLoading(false) }
   }
@@ -638,6 +841,11 @@ export default function BookingWidget() {
         return
       }
 
+      // Dispatch GA4 purchase event
+      const bookingId = data.data?.reserva_id || data.data?.grupo_codigo || data.data?.id || reference || 'offline'
+      const totalAmount = totalMontoTotal > 0 ? totalMontoTotal : totalPagar
+      trackPurchase(bookingId, totalAmount, cart, requestedPlanCodeRef.current)
+
       setResult(data.data)
       setStep(6)
     } catch (err: any) {
@@ -657,14 +865,22 @@ export default function BookingWidget() {
     <div className="min-h-screen" style={{ background: 'linear-gradient(135deg, #fefbf3 0%, #fdf4e3 30%, #fef9ef 60%, #fffcf5 100%)' }}>
       {/* Header */}
       <header style={{ background: 'linear-gradient(135deg, #78350f 0%, #92400e 40%, #a16207 100%)' }} className="text-white shadow-xl">
-        <div className="max-w-3xl mx-auto px-4 py-6 sm:py-8 flex items-center gap-4">
-          <img src="/logo.png" alt="Casa Mahana" className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl object-cover shadow-lg border-2 border-white/20" />
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight" style={{ fontFamily: "'Georgia', serif" }}>Casa Mahana</h1>
-            <p className="text-amber-200/80 text-sm mt-0.5 flex items-center gap-1.5">
-              <MapPin className="w-3.5 h-3.5" /> Chame, Panamá
-            </p>
-          </div>
+        <div className="max-w-3xl mx-auto px-4 py-6 sm:py-8 flex items-center justify-between gap-4">
+          <a href="https://www.casamahana.com" className="flex items-center gap-4 group hover:opacity-95 transition">
+            <img src="/logo.png" alt="Casa Mahana" className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl object-cover shadow-lg border-2 border-white/20 group-hover:scale-105 transition-transform" />
+            <div>
+              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight group-hover:text-amber-200 transition-colors" style={{ fontFamily: "'Georgia', serif" }}>Casa Mahana</h1>
+              <p className="text-amber-200/80 text-sm mt-0.5 flex items-center gap-1.5">
+                <MapPin className="w-3.5 h-3.5" /> Chame, Panamá
+              </p>
+            </div>
+          </a>
+          <a
+            href="https://www.casamahana.com"
+            className="text-xs sm:text-sm font-medium text-amber-200 hover:text-white bg-white/10 hover:bg-white/20 px-3 py-2 rounded-xl transition flex items-center gap-1.5 border border-white/10 shadow-sm"
+          >
+            <span>&larr; Volver al sitio web</span>
+          </a>
         </div>
       </header>
 
@@ -706,7 +922,17 @@ export default function BookingWidget() {
             <div className="flex flex-col sm:flex-row bg-amber-50/50 p-1.5 rounded-2xl border border-amber-200/50 mb-6 gap-2">
               <button
                 type="button"
-                onClick={() => setCategoria('Estadía')}
+                onClick={() => {
+                  setCategoria('Estadía')
+                  if (checkIn && checkOut === checkIn) {
+                    const [y, m, d] = checkIn.split('-').map(Number)
+                    if (y && m && d) {
+                      const dt = new Date(Date.UTC(y, m - 1, d))
+                      dt.setUTCDate(dt.getUTCDate() + 1)
+                      setCheckOut(dt.toISOString().split('T')[0])
+                    }
+                  }
+                }}
                 className={`flex-1 py-3 text-sm font-semibold rounded-xl transition flex items-center justify-center gap-2 ${
                   categoria === 'Estadía'
                     ? 'bg-amber-700 text-white shadow-md'

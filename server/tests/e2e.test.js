@@ -535,8 +535,8 @@ describe('Casa Mahana PMS — Opaque-box E2E Test Suite', () => {
       const mainRoomId = db.prepare("SELECT id FROM habitaciones WHERE tipo = 'Familiar' LIMIT 1").get().id;
       db.prepare("UPDATE habitaciones SET activa = 1 WHERE id = ?").run(mainRoomId);
 
-      const checkIn = '2026-08-01';
-      const checkOut = '2026-08-05';
+      const checkIn = new Date(Date.now() + 86400000 * 10).toISOString().split('T')[0];
+      const checkOut = new Date(Date.now() + 86400000 * 14).toISOString().split('T')[0];
 
       const payloadA = {
         cliente: 'User A',

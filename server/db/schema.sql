@@ -393,3 +393,78 @@ CREATE TABLE IF NOT EXISTS reservas_eliminadas_log (
   eliminado_por TEXT,
   fecha TEXT DEFAULT (datetime('now'))
 );
+
+-- ═══ SEMILLAS BASE (CANONICAL SEEDS) ═══
+INSERT OR IGNORE INTO planes_tarifa (
+  codigo, nombre, descripcion, categoria,
+  precio_adulto_noche, precio_menor_noche, precio_mascota_noche,
+  incluye, horario, extras_disponibles, tipos_aplicables,
+  visible_web, activo, lleva_impuesto, impuesto_pct
+) VALUES (
+  'escape_mahana',
+  'Escape Mahana',
+  'Escapada frente al mar con desayuno tropical y acceso a Surf Shack',
+  'Estadía',
+  16.50,
+  17.50,
+  0,
+  '["Desayuno tropical", "Acceso a piscinas", "Acceso Surf Shack beach club", "WiFi en áreas comunes"]',
+  'Check-in 3:00 PM / Check-out 11:00 AM',
+  '["Almuerzo $15", "Cena $18", "Spa $25"]',
+  '["DELUXE_OCEAN", "DELUXE_BALCON", "DELUXE_VISTA", "ESTANDAR"]',
+  1,
+  1,
+  0,
+  0
+);
+
+INSERT OR IGNORE INTO planes_tarifa (
+  codigo, nombre, descripcion, categoria,
+  precio_adulto_noche, precio_menor_noche, precio_mascota_noche,
+  incluye, horario, extras_disponibles, tipos_aplicables,
+  visible_web, activo, lleva_impuesto, impuesto_pct
+) VALUES (
+  'todo_incluido',
+  'Todo Incluido',
+  'Habitación + 3 comidas completas',
+  'Estadía',
+  66.00,
+  45,
+  15,
+  '["Habitación", "Desayuno Buffet", "Almuerzo", "Cena", "Piscina", "WiFi", "Estacionamiento", "Snacks"]',
+  'Check-in 3:00 PM / Check-out 11:00 AM / Desayuno 7-10 AM / Almuerzo 12-3 PM / Cena 6-9 PM',
+  '["Spa $25", "Tour $20", "Masaje $30"]',
+  '["Familiar", "Doble", "Estándar"]',
+  1,
+  1,
+  1,
+  10
+);
+
+INSERT OR IGNORE INTO planes_tarifa (
+  codigo, nombre, descripcion, categoria,
+  precio_adulto_noche, precio_menor_noche, precio_mascota_noche,
+  incluye, horario, extras_disponibles, tipos_aplicables,
+  visible_web, activo, lleva_impuesto, impuesto_pct
+) VALUES (
+  'mahana_exp',
+  'Mahana Experience',
+  'Habitación + Desayuno buffet',
+  'Estadía',
+  49.50,
+  35,
+  15,
+  '["Habitación", "Desayuno Buffet", "Piscina", "WiFi", "Estacionamiento"]',
+  'Check-in 3:00 PM / Check-out 11:00 AM / Desayuno 7-10 AM',
+  '["Almuerzo $15", "Cena $18", "Spa $25", "Tour $20"]',
+  '["Familiar", "Doble", "Estándar"]',
+  1,
+  1,
+  1,
+  10
+);
+
+-- Canonical rate alignment for active web plans (R2 / PROJECT.md)
+UPDATE planes_tarifa SET precio_adulto_noche = 66.00 WHERE codigo = 'todo_incluido';
+UPDATE planes_tarifa SET precio_adulto_noche = 49.50 WHERE codigo = 'mahana_exp';
+
