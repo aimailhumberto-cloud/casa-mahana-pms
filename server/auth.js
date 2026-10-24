@@ -59,6 +59,34 @@ function checkRateLimit(keyHash, limit = 100) {
 }
 
 // ── Middleware: Auth (JWT or API Key) ──
+// Policy shared by route auth and optional global header guard; no usage writes here.
+function enforceApiKeyPolicy(req, res, keyRow) {
+  const deny = (code, message) => { res.status(403).json({ success: false, error: { code, message } }); return false; };
+  const path = (req.originalUrl || '').split('?')[0];
+  if (keyRow.scope != null) {
+    const allowed = ['/api/v1/hotel/planes', '/api/v1/hotel/disponibilidad', '/api/v1/hotel/cotizar'];
+    if (keyRow.scope !== 'pilot_quote' || keyRow.permisos !== 'read' || req.method !== 'GET' || !allowed.includes(path)) {
+      return deny('SCOPE_DENIED', 'Fuera del alcance de la clave piloto');
+    }
+  }
+  let decodedPath;
+  try { decodedPath = decodeURIComponent(path).replace(/\/+$/, '').toLowerCase(); }
+  catch { return deny('SCOPE_DENIED', 'Ruta no valida'); }
+  if (keyRow.permisos === 'read' && (decodedPath === '/api/v1/public/integrations/kommo' || !['GET','HEAD','OPTIONS'].includes(req.method))) {
+    return deny('READ_ONLY', 'API key solo tiene permisos de lectura');
+  }
+  return true;
+}
+
+function guardSuppliedApiKey(req, res, next) {
+  const apiKey = req.headers['x-api-key'];
+  if (!apiKey) return next();
+  const db = require('./db/database').getDb();
+  const row = db.prepare('SELECT * FROM api_keys WHERE key_hash = ? AND activo = 1').get(hashApiKey(apiKey));
+  if (!row) return res.status(401).json({ success: false, error: { code: 'INVALID_API_KEY', message: 'API key invalida o desactivada' } });
+  if (enforceApiKeyPolicy(req, res, row)) return next();
+}
+
 function requireAuth(req, res, next) {
   // 1. Try API Key first
   const apiKey = req.headers['x-api-key'];
@@ -70,6 +98,7 @@ function requireAuth(req, res, next) {
       const keyHash = hashApiKey(apiKey);
       const keyRow = db.prepare('SELECT * FROM api_keys WHERE key_hash = ? AND activo = 1').get(keyHash);
       if (keyRow) {
+        if (!enforceApiKeyPolicy(req, res, keyRow)) return;
         // Rate limit check
         const rl = checkRateLimit(keyHash, keyRow.rate_limit || 100);
         res.set('X-RateLimit-Limit', String(rl.limit));
@@ -140,4 +169,5 @@ function requireRole(...roles) {
   };
 }
 
-module.exports = { hashPassword, verifyPassword, generateToken, decodeToken, requireAuth, requireRole, requireWrite, generateApiKey, hashApiKey };
+module.exports = { guardSuppliedApiKey, hashPassword, verifyPassword, generateToken, decodeToken, requireAuth, requireRole, requireWrite, generateApiKey, hashApiKey };
+

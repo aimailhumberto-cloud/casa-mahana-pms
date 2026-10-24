@@ -172,6 +172,15 @@ export default function Configuracion({ user }: { user: User }) {
       .finally(() => setLoadingApiKeys(false));
   };
 
+  const handleGeneratePilotKey = () => {
+    if (!window.confirm('Crear una clave dedicada al piloto: solo planes, disponibilidad y cotizacion; sin reservas ni pagos.')) return;
+    api.post('/api-keys', { nombre: 'Piloto Casa Mahana consulta', permisos: 'read', scope: 'pilot_quote', rate_limit: 30 })
+      .then(r => {
+        setNewApiKeyValue(r.data.api_key);
+        loadApiKeys();
+      })
+      .catch(() => alert('No se creo la clave piloto. Revise el estado antes de reintentar.'));
+  };
   const handleGenerateApiKey = () => {
     api.post('/api-keys', { nombre: 'Agente IA (Vía Panel)', permisos: 'admin', rate_limit: 1000 })
       .then(r => {
@@ -2424,6 +2433,12 @@ export default function Configuracion({ user }: { user: User }) {
 
       {/* Tab 6 Content: API Keys */}
       {activeTab === 'apikeys' && isAdmin && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4">
+          <p className="text-sm text-blue-900">Piloto supervisado: tres consultas GET. No activa bots ni permite reservas, pagos o datos de huespedes.</p>
+          <button onClick={handleGeneratePilotKey} className="mt-2 px-4 py-2 bg-blue-700 text-white rounded-lg">Crear clave piloto (solo consultas)</button>
+        </div>
+      )}
+      {activeTab === 'apikeys' && isAdmin && (
         <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden p-6 space-y-6">
           <div className="flex justify-between items-center pb-4 border-b border-gray-100">
             <div>
@@ -2656,3 +2671,4 @@ export default function Configuracion({ user }: { user: User }) {
     </div>
   );
 }
+

@@ -16,19 +16,21 @@ function err(res, code, message, status = 400) {
 // Create API key (admin only)
 router.post('/', requireAuth, requireRole('admin'), (req, res) => {
   try {
-    const { nombre, permisos = 'read', rate_limit = 100 } = req.body;
+    const { nombre, permisos = 'read', rate_limit = 100, scope = null } = req.body;
     if (!nombre) return err(res, 'VALIDATION_ERROR', 'nombre requerido');
     if (!['read', 'write', 'admin'].includes(permisos)) return err(res, 'VALIDATION_ERROR', 'permisos debe ser: read, write, admin');
     
+    if (scope !== null && scope !== 'pilot_quote') return err(res, 'VALIDATION_ERROR', 'scope no admitido');
+    if (scope === 'pilot_quote' && permisos !== 'read') return err(res, 'VALIDATION_ERROR', 'pilot_quote requiere read');
     const rawKey = generateApiKey();
     const keyHash = hashApiKey(rawKey);
     const keyPreview = '...' + rawKey.slice(-8);
     
     const db = getDb();
-    db.prepare('INSERT INTO api_keys (key_hash, key_preview, nombre, permisos, rate_limit) VALUES (?, ?, ?, ?, ?)')
-      .run(keyHash, keyPreview, nombre, permisos, rate_limit);
+    db.prepare('INSERT INTO api_keys (key_hash, key_preview, nombre, permisos, rate_limit, scope) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(keyHash, keyPreview, nombre, permisos, rate_limit, scope);
     
-    const created = db.prepare('SELECT id, key_preview, nombre, permisos, rate_limit, activo, created_at FROM api_keys WHERE key_hash = ?').get(keyHash);
+    const created = db.prepare('SELECT id, key_preview, nombre, permisos, scope, rate_limit, activo, created_at FROM api_keys WHERE key_hash = ?').get(keyHash);
     
     ok(res, {
       ...created,
@@ -42,7 +44,7 @@ router.post('/', requireAuth, requireRole('admin'), (req, res) => {
 router.get('/', requireAuth, requireRole('admin'), (req, res) => {
   try {
     const db = getDb();
-    const keys = db.prepare('SELECT id, key_preview, nombre, permisos, rate_limit, activo, last_used, request_count, created_at FROM api_keys ORDER BY created_at DESC').all();
+    const keys = db.prepare('SELECT id, key_preview, nombre, permisos, scope, rate_limit, activo, last_used, request_count, created_at FROM api_keys ORDER BY created_at DESC').all();
     ok(res, keys);
   } catch (e) { err(res, 'SERVER_ERROR', 'Error listando API keys', 500); }
 });
@@ -57,3 +59,4 @@ router.delete('/:id', requireAuth, requireRole('admin'), (req, res) => {
 });
 
 module.exports = router;
+

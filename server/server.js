@@ -55,6 +55,16 @@ const integrationsRouter = require('./routes/integrations');
 const crmRouter = require('./routes/crm');
 
 // ── Mount Routes ──
+// When a caller explicitly supplies a PMS API key to a public mutation,
+// apply its read restriction. Anonymous booking and JWT sessions are unchanged.
+const { guardSuppliedApiKey: authenticatePublicApiKey } = require('./auth');
+function guardPublicApiKeyWrites(req, res, next) {
+  if (req.headers['x-api-key']) {
+    return authenticatePublicApiKey(req, res, next);
+  }
+  return next();
+}
+app.use('/api/v1', guardPublicApiKeyWrites);
 app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/habitaciones', habRouter);
 app.use('/api/v1/api-keys', apiRouter);
@@ -354,3 +364,4 @@ const server = app.listen(PORT, () => {
 });
 
 module.exports = { app, server };
+
