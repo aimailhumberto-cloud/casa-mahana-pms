@@ -11,7 +11,11 @@ const mockPrepare = vi.fn((sql) => {
       if (sql.includes('dias_festivos')) {
         const dateStr = args[0];
         if (dateStr === '2026-11-03') {
-          return { id: 1, nombre: 'Separación de Colombia' };
+          return { id: 1, nombre: 'Separación de Colombia', tipo_tarifa: 'festivo' };
+        }
+        if (dateStr === '2026-11-10') {
+          // 2026-11-10 es Martes, configurado para cobrar a precio de Fin de Semana
+          return { id: 2, nombre: 'Primer Grito de Independencia', tipo_tarifa: 'fin_de_semana' };
         }
         return null;
       }
@@ -203,6 +207,11 @@ describe('Determinación de Tipo de Día (getDayType)', () => {
     expect(getDayType('2026-11-03')).toBe('festivo');
   });
 
+  it('debe retornar "fin_de_semana" si el festivo está configurado como fin_de_semana (ej: Martes 10 Nov)', () => {
+    // 2026-11-10 es Martes, pero al estar configurado como 'fin_de_semana' se cobra como tal
+    expect(getDayType('2026-11-10')).toBe('fin_de_semana');
+  });
+
   it('debe retornar "fin_de_semana" los viernes y sábados', () => {
     // 2026-05-22 es Viernes
     expect(getDayType('2026-05-22')).toBe('fin_de_semana');
@@ -217,6 +226,17 @@ describe('Determinación de Tipo de Día (getDayType)', () => {
 describe('Cotización Dinámica por Noche (calcReservationWithRates)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('debe calcular cotización con precio de fin de semana para festivo con tipo_tarifa fin_de_semana', () => {
+    // 2026-11-10 es Martes (festivo configurado como fin_de_semana)
+    const res = calcReservationWithRates(1, '2026-11-10', '2026-11-11', 2, 0, 0);
+
+    // Debe aplicar tarifa de fin de semana (120) en lugar de entre semana (100) o festivo pico (150)
+    expect(res.desglose[0].tipo_dia).toBe('fin_de_semana');
+    expect(res.desglose[0].festivo_nombre).toBe('Primer Grito de Independencia');
+    expect(res.desglose[0].precio_adulto).toBe(120);
+    expect(res.subtotal).toBe(240);
   });
 
   it('debe calcular noches dinámicas consultando reglas y devolviendo desglose', () => {

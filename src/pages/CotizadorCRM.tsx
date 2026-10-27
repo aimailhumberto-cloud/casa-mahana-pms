@@ -1695,7 +1695,7 @@ ${discountStr}• Impuestos (${quote.impuesto_pct}%): $${quote.impuesto_monto.to
             <button
               onClick={() => {
                 setEditingServiceId(null);
-                setServiceForm({ nombre: '', descripcion: '', precio_base: 0, activo: true });
+                setServiceForm({ nombre: '', descripcion: '', precio_base: 0, tipo_precio: 'global', activo: true });
                 setShowServiceModal(true);
               }}
               className="px-3 py-1.5 bg-mahana-600 text-white rounded-lg hover:bg-mahana-700 transition flex items-center gap-1 text-xs font-bold"

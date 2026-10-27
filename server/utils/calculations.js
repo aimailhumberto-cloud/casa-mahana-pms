@@ -32,8 +32,10 @@ function parseDateToUTC(dateInput) {
 function getDayType(dateStr) {
   const db = getDb();
   // Check holidays first
-  const festivo = db.prepare('SELECT id FROM dias_festivos WHERE fecha = ?').get(dateStr);
-  if (festivo) return 'festivo';
+  const festivo = db.prepare('SELECT id, tipo_tarifa FROM dias_festivos WHERE fecha = ?').get(dateStr);
+  if (festivo) {
+    return festivo.tipo_tarifa === 'fin_de_semana' ? 'fin_de_semana' : 'festivo';
+  }
 
   // Parse using the UTC-based helper
   const utcTime = parseDateToUTC(dateStr);
@@ -173,13 +175,14 @@ function calcReservationWithRates(planId, checkIn, checkOut, adultos, menores, m
     subtotal += nightTotal;
 
     // Check if holiday
-    const festivo = db.prepare('SELECT nombre FROM dias_festivos WHERE fecha = ?').get(dateStr);
+    const festivo = db.prepare('SELECT nombre, tipo_tarifa FROM dias_festivos WHERE fecha = ?').get(dateStr);
 
     desglose.push({
       fecha: dateStr,
       dia: ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'][d.getUTCDay()],
       tipo_dia: tipoDia,
       festivo_nombre: festivo?.nombre || null,
+      festivo_tipo_tarifa: festivo?.tipo_tarifa || null,
       precio_adulto: pAdulto,
       precio_menor: pMenor,
       precio_mascota: pMascota,

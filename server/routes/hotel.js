@@ -206,14 +206,41 @@ router.get('/hotel/festivos', requireAuth, (req, res) => {
 
 router.post('/hotel/festivos', requireAuth, requireRole('admin'), (req, res) => {
   try {
-    const { fecha, nombre } = req.body;
+    const { fecha, nombre, tipo_tarifa } = req.body;
     if (!fecha || !nombre) return err(res, 'VALIDATION_ERROR', 'fecha y nombre requeridos');
     const db = getDb();
     const existing = db.prepare('SELECT id FROM dias_festivos WHERE fecha = ?').get(fecha);
     if (existing) return err(res, 'DUPLICATE', 'Ya existe un festivo para esa fecha');
-    db.prepare('INSERT INTO dias_festivos (fecha, nombre) VALUES (?, ?)').run(fecha, sanitize(nombre));
-    ok(res, { fecha, nombre }, null, 201);
+    const tarifa = tipo_tarifa === 'fin_de_semana' ? 'fin_de_semana' : 'festivo';
+    db.prepare('INSERT INTO dias_festivos (fecha, nombre, tipo_tarifa) VALUES (?, ?, ?)').run(fecha, sanitize(nombre), tarifa);
+    ok(res, { fecha, nombre, tipo_tarifa: tarifa }, null, 201);
   } catch (e) { err(res, 'SERVER_ERROR', 'Error creando festivo', 500); }
+});
+
+router.put('/hotel/festivos/:id', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const { nombre, tipo_tarifa } = req.body;
+    const db = getDb();
+    const existing = db.prepare('SELECT id FROM dias_festivos WHERE id = ?').get(req.params.id);
+    if (!existing) return err(res, 'NOT_FOUND', 'Festivo no encontrado', 404);
+
+    const updates = [];
+    const params = [];
+    if (nombre !== undefined) {
+      updates.push('nombre = ?');
+      params.push(sanitize(nombre));
+    }
+    if (tipo_tarifa !== undefined) {
+      updates.push('tipo_tarifa = ?');
+      params.push(tipo_tarifa === 'fin_de_semana' ? 'fin_de_semana' : 'festivo');
+    }
+    if (updates.length > 0) {
+      params.push(req.params.id);
+      db.prepare('UPDATE dias_festivos SET ' + updates.join(', ') + ' WHERE id = ?').run(...params);
+    }
+    const updated = db.prepare('SELECT * FROM dias_festivos WHERE id = ?').get(req.params.id);
+    ok(res, updated);
+  } catch (e) { err(res, 'SERVER_ERROR', 'Error actualizando festivo', 500); }
 });
 
 router.delete('/hotel/festivos/:id', requireAuth, requireRole('admin'), (req, res) => {

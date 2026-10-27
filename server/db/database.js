@@ -403,6 +403,13 @@ function getDb() {
       ];
       for (const [f, n] of festivos) insertFestivo.run(f, n);
       console.log('✅ Seeded días festivos (Panamá 2026)');
+    } else {
+      // Migration: add tipo_tarifa to dias_festivos if missing
+      const festivoCols = db.prepare('PRAGMA table_info(dias_festivos)').all().map(c => c.name);
+      if (!festivoCols.includes('tipo_tarifa')) {
+        db.exec("ALTER TABLE dias_festivos ADD COLUMN tipo_tarifa TEXT DEFAULT 'festivo'");
+        console.log('✅ Migrated dias_festivos: added tipo_tarifa column (default: festivo)');
+      }
     }
 
     // ── Seed admin user ──

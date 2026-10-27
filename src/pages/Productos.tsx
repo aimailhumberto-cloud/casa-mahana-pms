@@ -52,6 +52,7 @@ export default function Productos() {
   const [showFestivos, setShowFestivos] = useState(false);
   const [newFecha, setNewFecha] = useState('');
   const [newNombre, setNewNombre] = useState('');
+  const [newTipoTarifa, setNewTipoTarifa] = useState<'festivo' | 'fin_de_semana'>('festivo');
 
   const load = useCallback(() => {
     setLoading(true);
@@ -185,10 +186,20 @@ export default function Productos() {
   const addFestivo = async () => {
     if (!newFecha || !newNombre) return;
     try {
-      await api.post('/hotel/festivos', { fecha: newFecha, nombre: newNombre });
-      setNewFecha(''); setNewNombre('');
+      await api.post('/hotel/festivos', { fecha: newFecha, nombre: newNombre, tipo_tarifa: newTipoTarifa });
+      setNewFecha(''); setNewNombre(''); setNewTipoTarifa('festivo');
       load();
     } catch {}
+  };
+
+  const toggleFestivoTarifa = async (f: any) => {
+    const nextTarifa = f.tipo_tarifa === 'fin_de_semana' ? 'festivo' : 'fin_de_semana';
+    try {
+      await api.put(`/hotel/festivos/${f.id}`, { tipo_tarifa: nextTarifa });
+      load();
+    } catch (err: any) {
+      console.error('Error actualizando tarifa de festivo:', err);
+    }
   };
 
   const deleteFestivo = async (id: number) => {
@@ -225,19 +236,69 @@ export default function Productos() {
       {/* Festivos Panel */}
       {showFestivos && (
         <div className="bg-white rounded-xl shadow-sm p-4 mb-4 border-t-4 border-red-400">
-          <h3 className="font-semibold text-gray-700 mb-3 flex items-center gap-2">🎊 Días Festivos</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-2 mb-3">
-            {festivos.map(f => (
-              <div key={f.id} className="flex items-center justify-between px-3 py-2 bg-red-50 rounded-lg text-sm">
-                <div><div className="font-medium text-red-700">{f.nombre}</div><div className="text-[10px] text-red-400">{f.fecha}</div></div>
-                <button onClick={() => deleteFestivo(f.id)} className="text-red-300 hover:text-red-500 ml-1"><X size={14} /></button>
-              </div>
-            ))}
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h3 className="font-semibold text-gray-700 flex items-center gap-2">🎊 Días Festivos & Reglas Tarifarias</h3>
+              <p className="text-xs text-gray-400">Puedes asignar si cada festivo se factura a tarifa de Festivo o de Fin de Semana (para no degradarlo a día de semana).</p>
+            </div>
+            <span className="text-xs bg-red-50 text-red-600 font-semibold px-2.5 py-1 rounded-full border border-red-100">
+              {festivos.length} festivos registrados
+            </span>
           </div>
-          <div className="flex gap-2 items-end">
-            <div><label className="text-xs text-gray-400">Fecha</label><input type="date" value={newFecha} onChange={e => setNewFecha(e.target.value)} className="input" /></div>
-            <div className="flex-1"><label className="text-xs text-gray-400">Nombre</label><input value={newNombre} onChange={e => setNewNombre(e.target.value)} className="input" placeholder="Ej: Semana Santa" /></div>
-            <button onClick={addFestivo} className="px-4 py-2 bg-red-500 text-white rounded-lg text-sm hover:bg-red-600 transition">Agregar</button>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2 mb-3">
+            {festivos.map(f => {
+              const esFinSemana = f.tipo_tarifa === 'fin_de_semana';
+              return (
+                <div key={f.id} className="flex items-center justify-between p-2.5 bg-gray-50 hover:bg-gray-100 rounded-lg text-sm border border-gray-100 transition">
+                  <div className="min-w-0 pr-2">
+                    <div className="font-medium text-gray-800 truncate">{f.nombre}</div>
+                    <div className="text-[11px] text-gray-400">{f.fecha}</div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      onClick={() => toggleFestivoTarifa(f)}
+                      title="Haz clic para alternar tarifa entre Festivo y Fin de Semana"
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full transition cursor-pointer flex items-center gap-1 ${
+                        esFinSemana 
+                          ? 'bg-orange-100 text-orange-700 hover:bg-orange-200 border border-orange-200' 
+                          : 'bg-red-100 text-red-700 hover:bg-red-200 border border-red-200'
+                      }`}
+                    >
+                      {esFinSemana ? '🎉 Fin de Semana' : '🎊 Festivo'}
+                    </button>
+                    <button onClick={() => deleteFestivo(f.id)} className="text-gray-300 hover:text-red-500 p-0.5 rounded" title="Eliminar festivo">
+                      <X size={14} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="flex flex-wrap gap-2 items-end bg-gray-50 p-3 rounded-lg border border-gray-100">
+            <div className="w-36">
+              <label className="text-xs text-gray-500 font-medium block mb-1">Fecha</label>
+              <input type="date" value={newFecha} onChange={e => setNewFecha(e.target.value)} className="input text-xs" />
+            </div>
+            <div className="flex-1 min-w-[180px]">
+              <label className="text-xs text-gray-500 font-medium block mb-1">Nombre del Festivo</label>
+              <input value={newNombre} onChange={e => setNewNombre(e.target.value)} className="input text-xs" placeholder="Ej: Primer Grito de Independencia" />
+            </div>
+            <div className="w-52">
+              <label className="text-xs text-gray-500 font-medium block mb-1">Tarifa a Facturar</label>
+              <select
+                value={newTipoTarifa}
+                onChange={e => setNewTipoTarifa(e.target.value as any)}
+                className="input text-xs font-medium"
+              >
+                <option value="festivo">🎊 Tarifa Festivo (Pico / Alta)</option>
+                <option value="fin_de_semana">🎉 Tarifa Fin de Semana (Intermedia)</option>
+              </select>
+            </div>
+            <button onClick={addFestivo} className="px-4 py-2 bg-mahana-600 text-white rounded-lg text-xs font-semibold hover:bg-mahana-700 transition">
+              + Agregar Festivo
+            </button>
           </div>
         </div>
       )}

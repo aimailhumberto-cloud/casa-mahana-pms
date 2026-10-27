@@ -60,7 +60,8 @@ CREATE TABLE IF NOT EXISTS reglas_tarifa (
 CREATE TABLE IF NOT EXISTS dias_festivos (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   fecha TEXT NOT NULL UNIQUE,             -- "2026-01-01"
-  nombre TEXT NOT NULL                    -- "Año Nuevo"
+  nombre TEXT NOT NULL,                   -- "Año Nuevo"
+  tipo_tarifa TEXT DEFAULT 'festivo'      -- "festivo" (default) or "fin_de_semana"
 );
 
 CREATE INDEX IF NOT EXISTS idx_reglas_plan ON reglas_tarifa(plan_id);
